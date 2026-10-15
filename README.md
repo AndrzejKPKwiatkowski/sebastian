@@ -3,6 +3,7 @@
 **Nowość w 2.0:** Sebastian zawiera moduł **Nauka** (dawny Drive Learner). Lokalny model czyta w tle Dysk Google, pocztę z Sebastiana i całe archiwum skrzynek (tylko odczyt). Na tej podstawie buduje **Bieżące sprawy** i **Profil wiedzy**, widoczne w zakładce *Nauka* i w `data/learner/wyniki/`.
 
 - Aktualizacja z 1.4 i przeniesienie Drive Learnera: **[AKTUALIZACJA_2_0.md](AKTUALIZACJA_2_0.md)**
+- 2.1 — nauka czyta też załączniki z maili (PDF, Word, Excel, skany): **[AKTUALIZACJA_2_1.md](AKTUALIZACJA_2_1.md)**
 - Nowa instalacja: rozdziały poniżej (Sebastian), potem punkty 3–8 z AKTUALIZACJA_2_0.md (nauka)
 
 > Folder `data/` zawiera Twoje maile, decyzje i klucze. Jest w `.gitignore` i nigdy nie może trafić do repozytorium.

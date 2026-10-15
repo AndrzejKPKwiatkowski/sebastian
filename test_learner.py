@@ -6,6 +6,7 @@ from unittest.mock import patch
 import sebastian as s
 import learner as L
 import learner_mail as LM
+import learner_attach as LA
 
 
 def iso(days_ago=0, hour=10):
@@ -241,3 +242,156 @@ class LearnerTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# ================================================================ 2.1: załączniki
+
+def make_pdf(text):
+    import fitz
+    doc = fitz.open(); page = doc.new_page(); page.insert_text((72, 72), text); data = doc.tobytes(); doc.close()
+    return data
+
+
+def make_docx(text):
+    import docx, io
+    d = docx.Document(); d.add_paragraph(text); buf = io.BytesIO(); d.save(buf); return buf.getvalue()
+
+
+def raw_with_attachments(mid='<att@x>', subject='Umowa do podpisu'):
+    from email.message import EmailMessage
+    m = EmailMessage()
+    m['From'] = 'Notariusz <notariusz@example.org>'; m['To'] = 'andrzej.kwiatkowski@inpartners.pl'
+    m['Subject'] = subject; m['Message-ID'] = mid; m['Date'] = 'Mon, 13 Oct 2026 10:00:00 +0200'
+    m.set_content('W załączeniu projekt umowy i harmonogram.')
+    m.add_attachment(make_pdf('Projekt umowy sprzedazy dzialki nr 434, termin aktu 30.10.2026'),
+                     maintype='application', subtype='pdf', filename='Projekt_umowy.pdf')
+    m.add_attachment(make_docx('Harmonogram: podpis 30 pazdziernika'),
+                     maintype='application', subtype='vnd.openxmlformats-officedocument.wordprocessingml.document',
+                     filename='Harmonogram.docx')
+    m.add_attachment(b'\x89PNG' + b'0' * 500, maintype='image', subtype='png', filename='image001.png')
+    m.add_attachment(b'PK\x03\x04zip', maintype='application', subtype='zip', filename='archiwum.zip')
+    return m.as_bytes()
+
+
+class FakeAttachIMAP:
+    def __init__(self, raw, validity=b'1'):
+        self.raw, self.validity, self.calls = raw, validity, []
+
+    def select(self, folder, readonly=False):
+        assert readonly is True
+        return 'OK', [b'1']
+
+    def response(self, key):
+        return key, [self.validity]
+
+    def uid(self, cmd, *args):
+        self.calls.append((cmd, args))
+        assert cmd == 'fetch'
+        if 'HEADER.FIELDS' in args[1]:
+            data = []
+            for n, u in enumerate(args[0].split(','), 1):
+                ct = b'Content-Type: multipart/mixed; boundary=x\r\n\r\n' if u == '1' else b'Content-Type: text/plain\r\n\r\n'
+                data += [(f'{n} (UID {u} BODY[HEADER.FIELDS (CONTENT-TYPE)] {{{len(ct)}}}'.encode(), ct), b')']
+            return 'OK', data
+        if args[1] == '(RFC822.SIZE)':
+            return 'OK', [f'1 (UID {args[0]} RFC822.SIZE {len(self.raw)})'.encode()]
+        assert args[1] == '(BODY.PEEK[])'
+        return 'OK', [(f'1 (UID {args[0]} BODY[] {{{len(self.raw)}}}'.encode(), self.raw), b')']
+
+    def logout(self):
+        pass
+
+
+try:
+    import fitz, docx  # noqa: F401
+    HAVE_DOCS = True
+except ImportError:
+    HAVE_DOCS = False
+
+
+@unittest.skipUnless(HAVE_DOCS, 'wymaga pymupdf i python-docx (requirements-learner.txt)')
+class AttachmentTests(unittest.TestCase):
+    setUp = LearnerTests.setUp
+    tearDown = LearnerTests.tearDown
+
+    def add_attached(self):
+        c = s.db()
+        add_msg(c, 101, 'Umowa do podpisu', 'W załączeniu projekt umowy i harmonogram.', 'notariusz@example.org', '<att@x>', date=iso(2))
+        c.execute("UPDATE messages SET attachments=? WHERE mid='<att@x>'",
+                  (json.dumps(['Projekt_umowy.pdf', 'Harmonogram.docx', 'image001.png']),))
+        c.commit(); c.close()
+
+    def test_thread_reads_attachments_once(self):
+        self.add_attached()
+        con = L.db(); LM.scan_mail(con)
+        tid = con.execute("SELECT id FROM files WHERE name='Umowa do podpisu'").fetchone()[0]
+        fake = FakeAttachIMAP(raw_with_attachments())
+        with patch.object(s, 'connect', return_value=fake):
+            text, _ = LM.thread_text(con, tid)
+            fetches = len(fake.calls)
+            text2, _ = LM.thread_text(con, tid)
+        self.assertIn('📎 Załącznik: Projekt_umowy.pdf', text)
+        self.assertIn('dzialki nr 434', text)
+        self.assertIn('Harmonogram: podpis 30 pazdziernika', text)
+        self.assertNotIn('image001.png', text)
+        self.assertNotIn('archiwum.zip', text)
+        self.assertEqual(text, text2)
+        self.assertEqual(len(fake.calls), fetches, 'drugi odczyt korzysta z pamięci, bez serwera')
+        self.assertTrue(all(a[1] in ('(RFC822.SIZE)', '(BODY.PEEK[])') for _, a in fake.calls))
+        self.assertEqual(list((L.LEARN / 'tmp').iterdir()), [], 'pliki tymczasowe usunięte')
+        self.assertEqual(con.execute('SELECT COUNT(*) FROM attachments').fetchone()[0], 2)
+
+    def test_same_file_in_reply_is_not_repeated(self):
+        self.add_attached()
+        c = s.db()
+        add_msg(c, 102, 'Re: Umowa do podpisu', 'Odsyłam z poprawkami', 'notariusz@example.org', '<att2@x>', refs='<att@x>', date=iso(1))
+        c.execute("UPDATE messages SET attachments=? WHERE mid='<att2@x>'", (json.dumps(['Projekt_umowy.pdf']),))
+        c.commit(); c.close()
+        con = L.db(); LM.scan_mail(con)
+        tid = con.execute("SELECT id FROM files WHERE name='Umowa do podpisu'").fetchone()[0]
+        raws = {'101': raw_with_attachments(), '102': raw_with_attachments('<att2@x>', 'Re: Umowa do podpisu')}
+
+        class Multi(FakeAttachIMAP):
+            def uid(self, cmd, *args):
+                self.raw = raws[args[0]]
+                return super().uid(cmd, *args)
+        with patch.object(s, 'connect', return_value=Multi(b'')):
+            text, _ = LM.thread_text(con, tid)
+        self.assertEqual(text.count('dzialki nr 434'), 1)
+        self.assertIn('ten sam plik co wyżej', text)
+
+    def test_moved_message_and_disabled_setting(self):
+        self.add_attached()
+        con = L.db(); LM.scan_mail(con)
+        tid = con.execute("SELECT id FROM files WHERE name='Umowa do podpisu'").fetchone()[0]
+        with patch.object(s, 'connect', return_value=FakeAttachIMAP(raw_with_attachments(), validity=b'999')):
+            text, _ = LM.thread_text(con, tid)
+        self.assertNotIn('📎', text)
+        self.assertEqual(con.execute('SELECT state FROM att_done').fetchone()[0], 'skip')
+        L.save_settings({'ATTACHMENTS_ENABLED': False})
+        con.execute('DELETE FROM att_done'); con.commit()
+        with patch.object(s, 'connect', side_effect=AssertionError('nie powinno łączyć')):
+            text, _ = LM.thread_text(con, tid)
+        self.assertNotIn('📎', text)
+
+    def test_signature_unchanged_without_attachments_and_requeue_with(self):
+        con = L.db(); LM.scan_mail(con)
+        before = {r['id']: r['sig'] for r in con.execute('SELECT id, sig FROM files')}
+        con.execute("UPDATE files SET status='done'"); con.commit()
+        self.add_attached()
+        LM.scan_mail(con)
+        after = {r['id']: (r['sig'], r['status']) for r in con.execute('SELECT id, sig, status FROM files')}
+        for tid, sig in before.items():
+            self.assertEqual(after[tid], (sig, 'done'), 'wątki bez załączników nie są czytane ponownie')
+        self.assertTrue(any(st == 'new' for tid, (sig, st) in after.items() if tid not in before))
+
+    def test_archive_flags_from_headers(self):
+        con = L.db()
+        for uid in (1, 2):
+            con.execute("INSERT INTO history_mails(account,scope,folder,validity,uid,mid,sender,subject,date,body) "
+                        "VALUES('partners','work','INBOX','1',?,?, 'k@example.org','Archiwum',?, 'x')", (uid, f'<h{uid}@x>', iso(30)))
+        con.commit()
+        L.save_settings({'MAIL_ACCOUNTS': ['partners']})
+        with patch.object(s, 'connect', return_value=FakeAttachIMAP(b'')):
+            self.assertEqual(LA.check_flags(con), 2)
+        self.assertEqual([r[0] for r in con.execute('SELECT att FROM history_mails ORDER BY uid')], [1, 0])

@@ -2,7 +2,7 @@
 <h1>Nauka — co Sebastian wie o Tobie</h1>
 <p class="notice">Lokalny model {{model or '(nie ustawiono)'}} czyta w tle Dysk Google, pocztę i notatki, wyciąga fakty i składa z nich <b>Bieżące sprawy</b> oraz <b>Profil wiedzy</b>. Wszystko zostaje na Macu, w <code>data/learner/</code>. Ta strona tylko pokazuje stan — sterujesz poleceniami <code>python sebastian.py learn-…</code>.<br>Praca w tle: <b>{{'włączona' if running else 'wyłączona (python sebastian.py learn-start)'}}</b></p>
 <div class="grid">
-<div class="card"><h2>Poczta</h2><p class="big">{{st.mail_done}}</p><p>wątków przeczytanych · {{st.mail_new}} w kolejce · {{st.mail_error}} błędów<br>Archiwum skrzynek: {{st.history}} pobranych wiadomości</p></div>
+<div class="card"><h2>Poczta</h2><p class="big">{{st.mail_done}}</p><p>wątków przeczytanych · {{st.mail_new}} w kolejce · {{st.mail_error}} błędów<br>Archiwum skrzynek: {{st.history}} pobranych wiadomości<br>Załączniki: {{st.attachments}} odczytanych plików{% if st.att_unknown %} · {{st.att_unknown}} maili z archiwum do sprawdzenia{% endif %}</p></div>
 <div class="card"><h2>Dysk Google</h2><p class="big">{{st.drive_done}}</p><p>dokumentów przeczytanych · {{st.drive_new}} w kolejce · {{st.drive_skip}} pominiętych</p></div>
 </div>
 <div class="card"><h2>Bieżące sprawy</h2><small>Aktualizacja: {{(meta.last_current or 'jeszcze nie')[:16]|replace('T',' ')}}</small>{% if current %}<pre>{{current}}</pre>{% else %}<p>Pojawią się po przeczytaniu pierwszych wątków poczty.</p>{% endif %}</div>

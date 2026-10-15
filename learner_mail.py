@@ -95,7 +95,8 @@ def sebastian_messages():
         cols = {r[1] for r in sc.execute("PRAGMA table_info(messages)")}
         want = ["id", "source", "scope", "account", "folder", "validity", "uid", "mid", "refs", "sender",
                 "subject", "date", "status", "category_override",
-                "sender_name", "decided_at", "topic", "topic_sub", "comment", "task_title", "is_task", "skip_reason"]
+                "sender_name", "decided_at", "topic", "topic_sub", "comment", "task_title", "is_task", "skip_reason",
+                "attachments"]
         select = ", ".join(c if c in cols else f"'' AS {c}" for c in want)
         rows = sc.execute(f"SELECT {select}, json_extract(analysis,'$.category') AS ai_category, "
                           f"{BULK_SQL} AS bulk FROM messages WHERE source<>'demo'").fetchall()
@@ -192,6 +193,7 @@ def parse_partial(parts):
     fields["recipients"] = ", ".join(rcpt[:20])
     body = fields.get("body", "").lower()
     fields["bulk"] = int(bool(msg.get("List-Unsubscribe")) or "unsubscribe" in body or "wypisz" in body)
+    fields["att"] = int(msg.get_content_type() == "multipart/mixed")
     return fields
 
 
@@ -271,10 +273,10 @@ def fetch_folder(con, m, a, folder, flags, own, budget):
                 continue
             sent = int(is_sent_folder or fld["sender"] in own)
             con.execute("""INSERT OR IGNORE INTO history_mails(account,scope,folder,validity,uid,mid,refs,sender,sender_name,
-                           recipients,subject,date,body,truncated,is_sent,bulk,fetched) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                           recipients,subject,date,body,truncated,is_sent,bulk,fetched,att) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (a["id"], a.get("scope", "private"), folder, validity, uid, fld["mid"], fld["refs"], fld["sender"],
                          fld.get("sender_name", ""), fld["recipients"], fld["subject"], fld["date"], fld["body"],
-                         fld["truncated"], sent, fld["bulk"], datetime.now().isoformat()))
+                         fld["truncated"], sent, fld["bulk"], datetime.now().isoformat(), fld["att"]))
             added += 1
         con.commit()
     fetched = con.execute("SELECT COUNT(*) FROM history_mails WHERE account=? AND folder=? AND validity=?",
@@ -289,7 +291,7 @@ def fetch_folder(con, m, a, folder, flags, own, budget):
 
 def history_messages(con):
     rows = con.execute("SELECT id, account, scope, folder, validity, uid, mid, refs, sender, sender_name, recipients, "
-                       "subject, date, is_sent, bulk FROM history_mails").fetchall()
+                       "subject, date, is_sent, bulk, att FROM history_mails").fetchall()
     out = []
     for r in rows:
         d = dict(r)
@@ -364,6 +366,10 @@ def thread_entry(tid, msgs):
     sig = hashlib.sha1(json.dumps(sorted(
         [m["origin"], m["id"], m.get("status", ""), m.get("decided_at", ""), m.get("comment", ""), m.get("task_title", "")]
         for m in msgs), default=str).encode()).hexdigest()
+    import learner_attach as LA
+    with_att = [m["id"] for m in msgs if LA.applies(m) and LA.has_attachments(m)]
+    if with_att:   # 2.1: wątki z załącznikami dostają nowy podpis → zostaną przeczytane ponownie, z plikami
+        sig = hashlib.sha1(f"{sig}|zalaczniki-v1|{sorted(with_att)}".encode()).hexdigest()
     return dict(id=tid, name=name[:200], path=path, mime=mime, modified=last, priority=priority, scope=scope,
                 sig=sig, members=[(m["origin"], m["id"]) for m in msgs], count=len(msgs))
 
@@ -406,7 +412,8 @@ def load_members(con, tid):
         if sc is not None:
             with contextlib.closing(sc):
                 cols = {r[1] for r in sc.execute("PRAGMA table_info(messages)")}
-                extra = [c for c in ("sender_name", "decided_at", "topic", "topic_sub", "comment", "task_title", "is_task") if c in cols]
+                extra = [c for c in ("sender_name", "decided_at", "topic", "topic_sub", "comment", "task_title", "is_task",
+                                     "attachments", "validity", "uid") if c in cols]
                 q = ",".join("?" * len(seb_ids))
                 for r in sc.execute(f"SELECT id, source, scope, account, folder, sender, subject, date, body, status"
                                     f"{''.join(', ' + c for c in extra)} FROM messages WHERE id IN ({q})", seb_ids):
@@ -436,7 +443,8 @@ def thread_text(con, tid):
         unique.append(m)
     if not unique:
         return "", ""
-    blocks = []
+    import learner_attach as LA
+    blocks, pool, seen_files, n_files = [], LA.ImapPool(), set(), 0
     for m in unique:
         is_sent = bool(m.get("is_sent")) or (m["sender"] or "").lower() in own or \
             (sent_folders.get(m["account"]) and m["folder"] == sent_folders.get(m["account"]))
@@ -462,7 +470,17 @@ def thread_text(con, tid):
                 info.append(f"mój komentarz: {m['comment']}")
             lines.append("Moja decyzja w panelu Sebastiana — " + "; ".join(info))
         lines.append(strip_quoted(m["body"]) if m.get("source") not in L.IMPORT_SOURCES else (m["body"] or ""))
+        try:
+            files = LA.for_message(con, pool, m)
+        except Exception as e:
+            L.log.warning(f"  Załączniki: {type(e).__name__}: {str(e)[:120]}")
+            files = []
+        n_files += len(files)
+        lines += LA.render(files, seen_files)
         blocks.append("\n".join(lines))
+    pool.close()
+    if n_files:
+        L.log.info(f"  📎 załączników w wątku: {n_files}")
     kept, size = [], 0
     for b in reversed(blocks):          # najnowsze najpierw, aż do limitu
         if size + len(b) > L.C.MAIL_THREAD_MAX_CHARS and kept:
@@ -506,7 +524,11 @@ def history_worker():
                     continue
                 L.meta_set(con, "last_history_fetch", datetime.now().isoformat())
                 fetched = fetch_history(con, per_account=L.C.MAIL_HISTORY_BATCH)
-                if fetched:
+                import learner_attach as LA
+                flagged = LA.check_flags(con)
+                if flagged:
+                    L.meta_set(con, "history_dirty", "1")
+                if fetched or flagged:
                     L.meta_set(con, "history_dirty", "1")
                     L.sleep(5)
                 else:   # archiwum przeczytane — nowe foldery/wiadomości sprawdzaj co kilka godzin

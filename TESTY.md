@@ -53,3 +53,17 @@ Nie sprawdzono w tym środowisku: prawdziwych serwerów IMAP (Gmail, Murena, Par
 python -m pip install -r requirements-test.txt
 python -m unittest test_sebastian.py test_learner.py -v
 ```
+
+
+# Weryfikacja 2.1 — załączniki
+
+Data: 2026-10-15. Wynik: 22 testy zaliczone (8 Sebastiana + 9 nauki + 5 nowych dla załączników).
+
+- Wątek z mailem zawierającym PDF i DOCX: tekst obu plików trafia do wątku, logo ze stopki (image001.png) i ZIP są pomijane, pliki tymczasowe są usuwane.
+- Ponowne czytanie wątku korzysta z pamięci, bez łączenia z serwerem; ten sam plik w odpowiedzi nie jest powtarzany.
+- Do serwera trafiają wyłącznie polecenia FETCH z RFC822.SIZE, BODY.PEEK[] i BODY.PEEK[HEADER.FIELDS (CONTENT-TYPE)], folder otwierany tylko do odczytu.
+- Wiadomość przeniesiona na serwerze (inne UIDVALIDITY) jest pomijana bez błędu; wyłączone ustawienie nie łączy się z serwerem.
+- Wątki bez załączników zachowują podpis z 2.0 (nie są czytane ponownie); wątek z załącznikiem wraca do kolejki.
+- Archiwum z 2.0: rozpoznanie maili z załącznikami po nagłówku Content-Type.
+
+Nie sprawdzono tu: prawdziwych serwerów IMAP i jakości OCR na Twoich skanach.

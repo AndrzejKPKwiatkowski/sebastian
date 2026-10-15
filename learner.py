@@ -1,4 +1,4 @@
-"""Sebastian 2.0 — moduł nauki (dawny Drive Learner).
+"""Sebastian 2.1 — moduł nauki (dawny Drive Learner) z czytaniem załączników.
 
 Lokalny model (Ollama) czyta w tle Dysk Google, pocztę z Sebastiana i pełne archiwum
 skrzynek, wyciąga fakty o właścicielu i składa z nich:
@@ -65,7 +65,14 @@ DEFAULTS = {
     "MAIL_SKIP_SENDERS": [],            # dodatkowe wzorce nadawców do pominięcia
     "MAIL_RECENT_DAYS": 60,             # wątki z tego okresu idą na początek kolejki
     "MAIL_MAX_CHARS": 15000,            # maks. treści jednego maila
-    "MAIL_THREAD_MAX_CHARS": 40000,     # maks. tekstu wątku dla modelu (zostają najnowsze)
+    "MAIL_THREAD_MAX_CHARS": 90000,     # maks. tekstu wątku dla modelu (zostają najnowsze)
+    # Załączniki (2.1)
+    "ATTACHMENTS_ENABLED": True,        # czytaj PDF, Word, Excel, PowerPoint, skany i zdjęcia z maili
+    "ATTACHMENTS_SCOPES": ["private", "work"],
+    "ATTACHMENTS_SINCE": "",            # np. "2023-01-01"; puste = wszystkie lata
+    "ATTACH_MAX_MB": 25,                # większe maile (z załącznikami) są pomijane
+    "ATTACH_MAX_CHARS": 20000,          # ile tekstu jednego załącznika trafia do wątku
+    "ATTACH_MIN_IMAGE_KB": 60,          # mniejsze obrazki to zwykle logo ze stopki
     "MAIL_SCAN_MINUTES": 15,
     # Wyniki
     "CATEGORY_SUMMARY_WORDS": 700,
@@ -204,7 +211,15 @@ def db():
         fetched INTEGER DEFAULT 0, checked TEXT, error TEXT, PRIMARY KEY(account, folder));
     CREATE TABLE IF NOT EXISTS mail_members(
         thread_id TEXT, origin TEXT, ref_id INTEGER, PRIMARY KEY(thread_id, origin, ref_id));
+    CREATE TABLE IF NOT EXISTS attachments(
+        sha1 TEXT PRIMARY KEY, filename TEXT, mime TEXT, size INTEGER, text TEXT, created TEXT);
+    CREATE TABLE IF NOT EXISTS message_attachments(
+        msg_key TEXT, sha1 TEXT, filename TEXT, PRIMARY KEY(msg_key, sha1));
+    CREATE TABLE IF NOT EXISTS att_done(msg_key TEXT PRIMARY KEY, state TEXT, note TEXT, checked TEXT);
     """)
+    hcols = {r[1] for r in con.execute("PRAGMA table_info(history_mails)")}
+    if "att" not in hcols:
+        con.execute("ALTER TABLE history_mails ADD COLUMN att INTEGER")
     cols = {r[1] for r in con.execute("PRAGMA table_info(files)")}
     for name, definition in {"text_path": "TEXT", "scope": "TEXT DEFAULT 'drive'", "sig": "TEXT DEFAULT ''"}.items():
         if name not in cols:
@@ -950,6 +965,9 @@ def stats(con):
         "history": g("SELECT COUNT(*) FROM history_mails"),
         "facts": g("SELECT COUNT(*) FROM facts"),
         "texts": g("SELECT COUNT(*) FROM files WHERE text_path IS NOT NULL"),
+        "attachments": g("SELECT COUNT(*) FROM attachments WHERE text<>''"),
+        "att_messages": g("SELECT COUNT(*) FROM att_done WHERE state='ok'"),
+        "att_unknown": g("SELECT COUNT(*) FROM history_mails WHERE att IS NULL"),
     }
 
 
@@ -1241,6 +1259,8 @@ def cmd_status():
     for r in con.execute("SELECT * FROM history_folders ORDER BY account, folder"):
         state = f"{r['fetched']}/{r['total']}" + (f" · błąd: {r['error']}" if r["error"] else "")
         print(f"   {r['account']:<10} {r['folder'][:40]:<40} {state}")
+    print(f"Załączniki:         {st['attachments']} odczytanych plików z {st['att_messages']} maili"
+          + (f" · do sprawdzenia w archiwum: {st['att_unknown']} maili" if st['att_unknown'] else ""))
     print(f"Fakty:              {st['facts']}")
     print(f"Zapisane teksty:    {st['texts']}")
     print(f"Ostatni profil:     {meta_get(con, 'last_consolidation', '—')}")
