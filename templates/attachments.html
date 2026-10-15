@@ -1,0 +1,3 @@
+{% extends 'base.html' %}{% block body %}<a href="/message/{{m.id}}">← Wiadomość</a><h1>Załączniki</h1><p>{{m.subject}}</p>
+{% for file in parts %}<div class="card"><b>{{file.name}}</b> • {{(file.size/1024)|round(1)}} KiB <a href="/mail/{{m.id}}/attachment/{{file.index}}">Pobierz plik</a></div>{% else %}<p>W tej wiadomości nie ma załączników MIME. Link do pliku w chmurze pozostaje linkiem w treści maila.</p>{% endfor %}
+<p class="muted">Pliki są pobierane na żądanie z serwera poczty. Ta czynność nie oznacza maila jako przeczytanego. Maksymalny rozmiar całej wiadomości: 25 MiB. Pliki nie są automatycznie otwierane ani analizowane przez AI.</p>{% endblock %}

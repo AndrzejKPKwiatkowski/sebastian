@@ -1,0 +1,34 @@
+{% extends 'base.html' %}{% block body %}<a href="/message/{{m.id}}">← Wiadomość</a><h1>Wydarzenie z maila</h1><p>Propozycję możesz poprawić przed pobraniem ICS. Wszystkie godziny w formularzu: <b>Europe/Warsaw</b>.</p>
+{% if d.evidence %}<p class="notice">Fragment, na którym oparto propozycję: {{d.evidence}}<br>Sprawdź datę, godzinę i miejsce z treścią maila — to propozycja AI.</p>{% endif %}
+{% if not saved %}<form method="post" action="/calendar/{{m.id}}/suggest"><input type="hidden" name="csrf" value="{{csrf}}"><button>Wyszukaj termin w tym mailu przez AI</button></form>{% endif %}
+<form method="post" id="event-form" class="card"><input type="hidden" name="csrf" value="{{csrf}}">
+<label>Tytuł <input name="title" type="text" maxlength="300" value="{{d.title}}" required></label>
+<label><input id="all-day" type="checkbox" name="all_day" value="yes" {% if d.all_day %}checked{% endif %}> Cały dzień / termin bez godziny</label>
+<div class="grid"><label>Data początku <input id="start-date" name="date" type="date" value="{{d.date}}" required></label><label>Data końca (ostatni dzień włącznie dla całodniowych) <input id="end-date" name="end_date" type="date" value="{{d.end_date}}" required></label></div>
+<div class="grid" id="time-fields"><label>Godzina początku <input name="time" type="time" value="{{d.time}}"></label><label>Godzina końca <input name="end_time" type="time" value="{{d.end_time}}"></label></div>
+<label><input name="busy" type="checkbox" value="yes" {% if d.busy %}checked{% endif %}> Zajęty (busy) — zablokuj ten czas. Odznaczone: dostępny (available).</label>
+<label>Miejsce / adres / link do spotkania <input name="location" type="text" maxlength="500" value="{{d.location}}"></label>
+<label>Opis i kontekst <textarea name="description" rows="9" maxlength="10000">{{d.description}}</textarea></label>
+<label>Kontakt w sprawie terminu <input name="contact" type="text" maxlength="500" value="{{d.contact}}"></label>
+<details open><summary>Dojazd i czas na podróż</summary><label>Skąd jedziesz? <input name="origin" type="text" maxlength="500" value="{{d.origin}}"></label>
+<p class="muted">Czasów nie pobieramy automatycznie z map. Wpisz sprawdzone czasy całej podróży, z dojściem, parkingiem i przesiadkami. Link do transportu publicznego może zawierać inne środki niż pociąg.</p>
+<div class="grid"><label>Samochód — sprawdzony czas w minutach <input name="car_minutes" type="number" min="0" max="2880" value="{{d.car_minutes}}"></label><label>Pociąg / transport publiczny — czas w minutach <input name="train_minutes" type="number" min="0" max="2880" value="{{d.train_minutes}}"></label></div>
+<label>Wybrany dojazd <select name="travel_mode">{% for key,label in [('unknown','Jeszcze nie wybrano'),('car','Samochód'),('train','Pociąg / transport publiczny'),('other','Inny')] %}<option value="{{key}}" {% if d.travel_mode==key %}selected{% endif %}>{{label}}</option>{% endfor %}</select></label>
+<div class="grid"><label>Zarezerwuj minuty przed spotkaniem <input name="travel_minutes" type="number" min="0" max="2880" value="{{d.travel_minutes}}"></label><label>Zarezerwuj minuty po spotkaniu <input name="return_minutes" type="number" min="0" max="2880" value="{{d.return_minutes}}"></label></div>
+<label>Notatki o dojeździe <textarea name="travel_notes" rows="3" maxlength="2000">{{d.travel_notes}}</textarea></label><p>Dla spotkań z godziną wpisane bufory są uwzględniane w konfliktach i eksportowane jako osobne wydarzenia. Dla całodniowych nie dodajemy buforów.</p></details>
+<button>Zapisz zmiany i sprawdź konflikty</button></form>
+<div class="card"><h2>Dojazd — według zapisanych danych</h2><p>{{route.advice}}</p>{% if route.leave %}<p>Planowane wyjście: {{route.leave}}</p>{% endif %}
+{% for mode,url in route.links.items() %}<p><a href="{{url}}" target="_blank" rel="noopener noreferrer">Sprawdź trasę: {{'samochód' if mode=='car' else 'pociąg / transport publiczny'}}</a></p>{% endfor %}<small>Link otwiera Google Maps i przekazuje wpisane miejsca. Sprawdź datę i godzinę podróży w mapach. Zapisz formularz, aby zaktualizować linki.</small></div>
+<div class="card"><h2>Konflikty terminu</h2><a href="/calendars">Wczytaj lub odśwież kalendarze ICS</a>
+{% if incomplete %}<p>{{incomplete}}</p>{% endif %}
+{% if checks %}
+{% if not checks.sources %}<p class="notice">Brak wczytanego kalendarza — nie można ocenić Twojej dostępności. Sprawdzono wyłącznie inne lokalne eksporty Sebastiana, jeśli istnieją.</p>{% else %}<p class="notice">Wynik dotyczy kopii ICS, nie aktualnego kalendarza na żywo.</p>{% for source in checks.sources %}<p><small>{{source.name}} • import {{source.imported}}</small></p>{% endfor %}{% endif %}
+{% for error in checks.errors %}<p class="notice">{{error}}</p>{% endfor %}
+<p><b>Kolizje blokujące czas w sprawdzonych danych: {{checks.blocking}}</b></p>
+{% for item in checks['items'] %}<article><b>{{item.title}}</b><p>{{item.start}} – {{item.end}}</p><p>{{'KONFLIKT' if item.conflict else 'Nakładanie bez blokady czasu'}} • {{'busy / zajęty' if item.busy else 'available / dostępny'}} • {{item.status}} • {{item.source}}</p>
+{% if item.contacts %}<p>W sprawie przesunięcia możesz skontaktować się z osobami wskazanymi w wydarzeniu:</p><ul>{% for person in item.contacts %}<li>{{person}}</li>{% endfor %}</ul>{% else %}<p>Brak kontaktu w tym wydarzeniu. Sprawdź organizatora w swoim kalendarzu.</p>{% endif %}</article>{% endfor %}
+{% if checks.blocking %}<p>Drugą możliwością jest uzgodnienie innego terminu tej nowej sprawy z: <b>{{d.contact or 'nadawcą wiadomości'}}</b>. Nie wysyłamy wiadomości ani nie przenosimy spotkań automatycznie.</p>{% endif %}{% endif %}</div>
+{% if saved %}<form method="post" action="/calendar/{{m.id}}/ics" id="ics-form"><input type="hidden" name="csrf" value="{{csrf}}"><button>Pobierz zapisany plik ICS</button><p id="unsaved-note" hidden>Zmieniono formularz. Najpierw zapisz zmiany powyżej.</p></form>
+<p class="muted">Pobranie nie dodaje wydarzenia do kalendarza. Otwórz ICS w swojej aplikacji kalendarza. Eksport zostaje też uwzględniony jako lokalna rezerwacja przy kolejnych konfliktach. Ponowny import tego samego UID może być różnie obsługiwany przez aplikacje — sprawdź, czy nie powstał duplikat.</p>
+{% if d.reserved %}<form method="post" action="/calendar/{{m.id}}/unreserve"><input type="hidden" name="csrf" value="{{csrf}}"><button>Nie uwzględniaj tego eksportu jako lokalnej rezerwacji</button></form>{% endif %}{% endif %}
+<script src="{{url_for('static',filename='calendar.js')}}" defer></script>{% endblock %}

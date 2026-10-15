@@ -1,0 +1,42 @@
+{% extends 'base.html' %}{% block body %}
+<a href="/?scope={{m.scope}}&view=decisions">← Wróć do decyzji</a>
+<h1>{{m.subject}}</h1>
+<p>{{m.sender}} • {{m.account}} / {{m.folder}} • {{m.date}} • ID #{{m.id}}</p>
+<p class="{{'notice' if not m.decided_at else 'muted'}}">{{'Czeka na Twoją decyzję' if not m.decided_at else 'Decyzja zapisana • '+m.decided_at[:16]}}</p>
+<div class="card"><h2>Propozycja Sebastiana</h2>
+<p>{{m.ai.get('summary','Brak analizy AI')}}</p>
+<p><b>Następny krok:</b> {{m.ai.get('action','Sprawdź wiadomość.')}}</p>
+<p><b>Termin AI, do weryfikacji:</b> {{m.ai.get('due','') or 'nie ustalono'}}</p>
+<p><b>Fragment źródła:</b> {{m.ai.get('evidence','')}}</p>
+{% if m.ai.get('suggest_skip') %}<p class="notice"><b>Sugestia AI: można pominąć.</b> {{m.ai.get('skip_reason','')}}<br>Sprawdź treść i sam wybierz status „Pomiń”.</p>{% endif %}
+{% if m.ai.get('feedback_ids') %}<p><small>Przykłady wcześniejszych decyzji wykorzystane w tej analizie: {% for id in m.ai.feedback_ids %}<a href="/message/{{id}}">#{{id}}</a> {% endfor %}</small></p>{% endif %}
+<small>Model: {{m.ai.get('model','brak')}} / {{m.ai.get('analyzed_at','')}} / błąd: {{m.error or 'brak'}}</small></div>
+{% if m.truncated %}<p class="notice">Zapisana treść jest skrócona. Pełną wiadomość sprawdź w skrzynce.</p>{% endif %}
+<div class="card"><h2>Praca z wiadomością</h2>{% if m.source=="email" %}<nav><a href="/mail/{{m.id}}/attachments">Pobierz załączniki</a><a href="/mail/{{m.id}}/reply">Odpowiedz na maila</a></nav>{% endif %}<p><a href="/calendar/{{m.id}}">{{"Sugerowany termin — sprawdź i utwórz ICS" if m.ai.get("calendar_date") or m.ai.get("due") else "Utwórz wydarzenie / wyszukaj termin"}}</a></p></div>
+{% if m.reply_ids %}<p>Powiązane wysłane: {% for id in m.reply_ids %}<a href="/message/{{id}}">#{{id}}</a> {% endfor %}. To nie dowodzi zamknięcia sprawy.</p>{% endif %}
+<form method="post" action="/decision/{{m.id}}" class="card" id="decision-form">
+<h2>Twoja decyzja</h2><input type="hidden" name="csrf" value="{{csrf}}">
+<label>Status <select name="status" id="decision-status">{% for key,label in [('open','Otwarte'),('done','Zrobione'),('ignored','Pomiń')] %}<option value="{{key}}" {% if m.status==key %}selected{% endif %}>{{label}}</option>{% endfor %}</select></label>
+<div id="skip-fields" {% if m.status!='ignored' %}hidden{% endif %}>
+<label>Dlaczego pomijasz tę wiadomość?<textarea name="skip_reason" id="skip-reason" maxlength="1500" rows="3" {% if m.status=='ignored' %}required{% endif %} placeholder="Np. To powtarzająca się reklama szkolenia, które już ukończyłem.">{{m.skip_reason}}</textarea></label>
+</div>
+<div id="normal-fields" {% if m.status=='ignored' %}hidden{% endif %}>
+<label>Kategoria sprawy <select name="topic" id="topic"><option value="">Nie przypisano</option>{% for topic in topics %}<option value="{{topic}}" {% if m.effective_topic==topic %}selected{% endif %}>{{topic}}</option>{% endfor %}</select></label>
+<label>Podkategoria <select name="topic_sub" id="topic-sub"><option value="">Bez podkategorii</option>{% for topic,children in topics.items() %}{% for child in children %}<option data-parent="{{topic}}" value="{{child}}" {% if m.effective_topic==topic and m.effective_sub==child %}selected{% endif %}>{{child}}</option>{% endfor %}{% endfor %}</select></label>
+<details><summary>Dodaj kategorię lub podkategorię</summary><p>Wpisz nową kategorię albo wybierz istniejącą wyżej i dodaj jej podkategorię. Zapiszą się razem z decyzją.</p>
+<label>Nowa kategoria <input type="text" name="new_topic" maxlength="100"></label>
+<label>Nowa podkategoria <input type="text" name="new_sub" maxlength="100"></label></details>
+<label>Priorytet <select name="priority_override"><option value="0">Automatycznie — propozycja</option>{% for rank,label in priority_labels.items() %}<option value="{{rank}}" {% if m.priority_override==rank %}selected{% endif %}>{{rank}}. {{label}}</option>{% endfor %}</select></label><p class="muted">Teraz: {{m.priority_label}}. {{m.priority_reason}}</p><label>Komentarz <textarea name="comment" rows="3" maxlength="1500" placeholder="Twoje wyjaśnienie, kontekst lub wskazówka dla przyszłych analiz.">{{m.comment}}</textarea></label>
+<details><summary>Rodzaj działania</summary><p>To określa rodzaj zadania, niezależnie od kategorii sprawy.</p><select name="category">{% for cat,label in [('odpowiedz','Odpowiedź'),('termin','Termin'),('informacja','Informacja'),('newsletter','Newsletter'),('podejrzane','Podejrzane'),('sprawdz','Do sprawdzenia')] %}<option value="{{cat}}" {% if m.category==cat %}selected{% endif %}>{{label}}</option>{% endfor %}</select></details>
+{% if m.project %}<p class="muted">Dawne przypisanie do projektu (zachowane): {{m.project}}</p>{% endif %}
+</div>
+<details><summary>Wykorzystanie decyzji w przyszłych analizach</summary>
+<label><input type="checkbox" name="learn" value="yes" {% if m.learn %}checked{% endif %}> Używaj tej decyzji i moich wpisów jako wskazówek przy analizie podobnych wiadomości.</label><p class="muted">Domyślnie włączone. Możesz wyłączyć i zapisać ponownie. Dotyczy przyszłych analiz tego samego konta. AI może zaproponować pominięcie, ale sam nie zamknie wiadomości.</p></details>
+<button>Zapisz decyzję i wróć do kolejki</button>
+<p class="muted">Zapis dotyczy panelu Sebastiana. Nie wysyła odpowiedzi, nie usuwa i nie przenosi maili.</p>
+<noscript><p>Włącz JavaScript, aby pola zmieniały się po wyborze statusu.</p></noscript>
+</form>
+{% if m.decided_at %}<form method="post" action="/review/{{m.id}}"><input type="hidden" name="csrf" value="{{csrf}}"><button>Przywróć do decyzji</button></form>{% endif %}
+<h2>Zapisana treść źródłowa</h2><pre>{{m.body}}</pre>
+<script src="{{url_for('static',filename='decision.js')}}" defer></script>
+{% endblock %}

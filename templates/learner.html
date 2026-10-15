@@ -1,0 +1,13 @@
+{% extends 'base.html' %}{% block body %}
+<h1>Nauka — co Sebastian wie o Tobie</h1>
+<p class="notice">Lokalny model {{model or '(nie ustawiono)'}} czyta w tle Dysk Google, pocztę i notatki, wyciąga fakty i składa z nich <b>Bieżące sprawy</b> oraz <b>Profil wiedzy</b>. Wszystko zostaje na Macu, w <code>data/learner/</code>. Ta strona tylko pokazuje stan — sterujesz poleceniami <code>python sebastian.py learn-…</code>.<br>Praca w tle: <b>{{'włączona' if running else 'wyłączona (python sebastian.py learn-start)'}}</b></p>
+<div class="grid">
+<div class="card"><h2>Poczta</h2><p class="big">{{st.mail_done}}</p><p>wątków przeczytanych · {{st.mail_new}} w kolejce · {{st.mail_error}} błędów<br>Archiwum skrzynek: {{st.history}} pobranych wiadomości</p></div>
+<div class="card"><h2>Dysk Google</h2><p class="big">{{st.drive_done}}</p><p>dokumentów przeczytanych · {{st.drive_new}} w kolejce · {{st.drive_skip}} pominiętych</p></div>
+</div>
+<div class="card"><h2>Bieżące sprawy</h2><small>Aktualizacja: {{(meta.last_current or 'jeszcze nie')[:16]|replace('T',' ')}}</small>{% if current %}<pre>{{current}}</pre>{% else %}<p>Pojawią się po przeczytaniu pierwszych wątków poczty.</p>{% endif %}</div>
+<details class="card"><summary><b>Profil wiedzy</b> — aktualizacja: {{(meta.last_consolidation or 'jeszcze nie')[:16]|replace('T',' ')}} · faktów: {{st.facts}}</summary>{% if profile %}<pre>{{profile}}</pre>{% else %}<p>Brak profilu.</p>{% endif %}</details>
+<details class="card"><summary><b>Archiwum skrzynek</b> — postęp pobierania</summary><table><tr><th>Konto</th><th>Folder</th><th>Pobrane / wszystkie</th><th>Sprawdzono</th><th>Błąd</th></tr>{% for f in folders %}<tr><td>{{f.account}}</td><td>{{f.folder}}</td><td>{{f.fetched}} / {{f.total}}</td><td>{{(f.checked or '')[:16]}}</td><td>{{f.error or ''}}</td></tr>{% endfor %}</table></details>
+<div class="card"><h2>Ostatnie wątki</h2><form method="get" action="/learner"><input type="text" name="q" value="{{q}}" placeholder="Szukaj w tematach"></form><table><tr><th>Ostatnia wiadomość</th><th>Wątek</th><th>Stan</th></tr>{% for r in recent %}<tr><td>{{(r.modified or '')[:10]}}</td><td>{{r.path}}<br><small>{{r.id}}</small></td><td>{{ {'done':'przeczytany','new':'w kolejce','error':'błąd','skip':'pominięty'}.get(r.status, r.status) }}<br><small>{{r.note or ''}}</small></td></tr>{% endfor %}</table></div>
+<details class="card"><summary>Dziennik nauki (ostatnie wpisy)</summary><pre>{{tail|join('\n')}}</pre></details>
+{% endblock %}

@@ -1,0 +1,8 @@
+{% extends 'base.html' %}{% block body %}<h1>Nazwa nadawcy i stopka</h1><p>Osobna identyfikacja dla każdej skrzynki. Stopkę wpisz tutaj — panel nie kopiuje jej automatycznie z webmaila. Odpowiedzi zawierają wersję tekstową i HTML.</p>
+{% for item in profiles %}<form method="post" class="card"><h2>{{item.a.id}} • {{item.a.user}}</h2><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="account" value="{{item.a.id}}">
+<label>Wyświetlana nazwa nadawcy <input name="name" type="text" maxlength="150" value="{{item.p.name}}" placeholder="Np. Andrzej Kwiatkowski"></label>
+<label>Stopka <textarea name="signature" maxlength="5000" rows="6" placeholder="Imię, rola, telefon, nazwa firmy…">{{item.p.signature}}</textarea></label>
+<label>Krój pisma <select name="font">{% for font in ['Arial','Verdana','Georgia'] %}<option {% if item.p.font==font %}selected{% endif %}>{{font}}</option>{% endfor %}</select></label>
+<label>Kolor tekstu <input type="color" name="color" value="{{item.p.color}}"></label>
+<details><summary>Kopia w folderze wysłanych</summary><p>Folder: {{item.a.sent_folder or 'nie skonfigurowano'}}. Serwer może już zapisywać wysłane wiadomości (np. Gmail). Włączenie dodatkowej kopii może wtedy tworzyć duplikaty.</p>
+<label><input type="checkbox" name="sent_copy" value="yes" {% if item.p.sent_copy %}checked{% endif %}> Po wysłaniu dopisuj kopię do skonfigurowanego folderu wysłanych.</label><p>Lokalna kopia EML jest dostępna niezależnie od tej opcji.</p></details><button>Zapisz ustawienia tej skrzynki</button></form>{% endfor %}{% endblock %}

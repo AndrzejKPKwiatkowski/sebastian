@@ -1,0 +1,8 @@
+{% extends 'base.html' %}{% block body %}<a href="/message/{{d.message_id}}">← Wiadomość i decyzja</a><h1>{{'Sprawdź odpowiedź przed wysłaniem' if d.state=='draft' else 'Status odpowiedzi'}}</h1>
+<p><b>Od:</b> {{sender}}<br><b>Do:</b> {{d.recipient}}<br><b>Temat:</b> {{d.subject}}</p>
+<p class="notice"><b>{{ {'draft':'Szkic — jeszcze niewysłany','sending':'Wysyłanie lub wynik niepotwierdzony','sent':'Serwer przyjął wiadomość','partial':'Wysyłka częściowa','failed':'Nie wysłano','unknown':'Wynik nieznany — sprawdź przed ponowieniem','cancelled':'Anulowany szkic'}.get(d.state,d.state) }}</b><br>{{d.result}}</p>
+{% if d.state=='sending' %}<p>Jeżeli status pozostaje taki po odświeżeniu, wysyłka mogła zostać przerwana po stronie panelu. Sprawdź webmail przed tworzeniem kolejnej odpowiedzi.</p>{% endif %}
+<div class="card">{{preview_html|safe}}</div>
+{% if d.state=='draft' %}<form method="post" action="/outgoing/{{d.id}}/send"><input type="hidden" name="csrf" value="{{csrf}}"><label><input type="checkbox" name="confirm" value="yes" required> Sprawdziłem odbiorcę i treść. Wyślij tę odpowiedź.</label><button>Wyślij odpowiedź</button></form>
+<form method="post" action="/outgoing/{{d.id}}/cancel"><input type="hidden" name="csrf" value="{{csrf}}"><button>Anuluj ten podgląd</button></form><p><a href="/outgoing/{{d.id}}/edit">Wróć do edycji</a></p>{% endif %}
+{% if d.state in ("failed","cancelled") %}<p><a href="/outgoing/{{d.id}}/edit">Popraw odpowiedź i przygotuj nowy podgląd</a></p>{% endif %}<p><a href="/outgoing/{{d.id}}/eml">Pobierz lokalną kopię EML</a></p><p class="muted">Wysłanie odpowiedzi nie zamyka automatycznie sprawy. Wróć do karty i zapisz decyzję. Przyjęcie przez SMTP nie jest potwierdzeniem doręczenia lub przeczytania.</p>{% endblock %}

@@ -1,0 +1,8 @@
+{% extends 'base.html' %}{% block body %}<a href="/message/{{m.id}}">← Wiadomość</a><h1>Odpowiedz</h1><p>Z konta: <b>{{a.user}}</b> • {{p.name or 'bez dodatkowej nazwy'}}</p><a href="/identities">Ustaw nazwę i stopkę</a>
+<form method="post" action="/mail/{{m.id}}/reply" class="card"><input type="hidden" name="editing" value="{{editing|default('')}}"><input type="hidden" name="csrf" value="{{csrf}}">
+<label>Do <input name="recipient" type="text" required value="{{to}}" maxlength="2000"></label><p class="muted">Domyślnie Reply-To, a jeśli go brak — nadawca. To nie jest „Odpowiedz wszystkim”. Sprawdź adres przed wysłaniem.</p>
+<label>Temat <input name="subject" type="text" required value="{{subject}}" maxlength="300"></label>
+<label>Twoja odpowiedź <textarea name="body" rows="12" required maxlength="20000">{{input_body|default('')}}</textarea></label>
+<p>Stopka zostanie dodana automatycznie:</p><pre>{{p.signature or '(brak stopki)'}}</pre><p class="muted">Do odpowiedzi zostanie dołączony cytat z zapisanej treści źródłowej. Załączniki oryginału nie są odsyłane. Ta wersja nie dodaje nowych załączników do odpowiedzi.</p>
+<button>Przejdź do podglądu</button></form>
+{% if history %}<h2>Historia odpowiedzi z panelu</h2>{% for item in history %}<p><a href="/outgoing/{{item.id}}">{{item.created[:16]}} — {{item.state}}</a> {{item.result}}</p>{% endfor %}{% endif %}{% endblock %}

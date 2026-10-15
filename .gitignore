@@ -1,0 +1,21 @@
+# Dane, klucze i kopie — NIGDY do repozytorium
+data/
+demo-data/
+backups/
+imports/
+*.sqlite3*
+*.sqlite
+*.db
+panel.token
+session.key
+credentials.json
+token.json
+learner.json
+*.log
+
+# Środowisko i śmieci
+.venv/
+__pycache__/
+*.pyc
+*.bak-*
+.DS_Store
