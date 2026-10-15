@@ -1,7 +1,9 @@
-SEBASTIAN - CENTRUM SPRAW / 2.0
+SEBASTIAN — CENTRUM SPRAW / 2.1
 
-1. Masz już Sebastiana 1.4 i Drive Learnera? Otwórz AKTUALIZACJA_2_0.md i idź krok po kroku.
-2. Nowa instalacja: README.md (Sebastian), potem AKTUALIZACJA_2_0.md od punktu 3 (nauka).
+1. Pełny opis systemu, instalacja od zera, polecenia, ustawienia i naprawa problemów:
+   DOKUMENTACJA.md
+2. Przejście ze starszej wersji: docs/aktualizacje/
 3. Wszystko działa lokalnie na Macu: Ollama, panel http://127.0.0.1:8765, dane w folderze data/.
 
-W repozytorium nie ma haseł, kluczy ani kopii maili - i nigdy nie powinno ich być (patrz .gitignore).
+W repozytorium nie ma haseł, kluczy ani kopii maili — i nigdy nie powinno ich być (patrz .gitignore
+oraz DOKUMENTACJA.md, rozdział 13).
