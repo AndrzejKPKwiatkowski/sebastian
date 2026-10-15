@@ -395,3 +395,30 @@ class AttachmentTests(unittest.TestCase):
         with patch.object(s, 'connect', return_value=FakeAttachIMAP(b'')):
             self.assertEqual(LA.check_flags(con), 2)
         self.assertEqual([r[0] for r in con.execute('SELECT att FROM history_mails ORDER BY uid')], [1, 0])
+
+
+class RepeatLimitTests(unittest.TestCase):
+    setUp = LearnerTests.setUp
+    tearDown = LearnerTests.tearDown
+
+    def test_one_stuck_chunk_does_not_fail_document(self):
+        from unittest.mock import MagicMock
+        L.save_settings({'CHUNK_CHARS': 200, 'CHUNK_OVERLAP': 0})
+        calls = {'n': 0}
+
+        def post(url, json=None, timeout=None):
+            calls['n'] += 1
+            r = MagicMock()
+            if 'FRAGMENT-ZACIETY' in json['messages'][0]['content']:
+                r.ok, r.status_code, r.text = False, 500, '{"error":"prediction aborted, token repeat limit reached"}'
+            else:
+                r.ok, r.status_code = True, 200
+                r.json.return_value = {'message': {'content': '{"fakty":[{"kategoria":"Cele, plany i decyzje","fakt":"Planuje zakup działki (2026)."}]}'}}
+            return r
+        f = {'id': 'x1', 'path': 'Dok/x', 'modified': '2026-10-01', 'name': 'x', 'mime': 'text/plain'}
+        text = ('Zwykly tekst o planach. ' * 12) + '\n\n' + ('FRAGMENT-ZACIETY ' * 14)
+        with patch.object(L.requests, 'post', side_effect=post), patch.object(L, 'ollama_ready', return_value=True), \
+                patch.object(L, 'sleep'):
+            facts = L.extract_facts(f, text)
+        self.assertTrue(facts, 'fakty z pozostałych fragmentów zostają')
+        self.assertLessEqual(calls['n'], 2 + len(L.chunks_of(text)), 'zacięty fragment ponawiany najwyżej 2 razy')

@@ -1,6 +1,6 @@
 # Sebastian — pełna dokumentacja projektu
 
-**Wersja opisana w dokumencie: 2.1** (październik 2026)
+**Wersja opisana w dokumencie: 2.1.1** (październik 2026)
 Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników.
 
 > **Dla kogo jest ten dokument.** Dla osoby, która przejmuje projekt albo musi coś w nim zrobić ręcznie: zainstalować od zera, przenieść na inny komputer, naprawić, zaktualizować albo rozwinąć kod. Nie trzeba być programistą, żeby korzystać z rozdziałów 1–14. Rozdział 15 jest dla osoby, która zmienia kod.
@@ -895,6 +895,7 @@ Aktualizacje przychodzą jako plik `Sebastian_aktualizacja_X_Y.py` albo paczka Z
 | Nauka stoi rano | Czeka na koniec poranka Sebastiana. To normalne |
 | Dużo błędów w `learn-status` | `tail -n 100 data/logs/learner.log`, poprawa przyczyny, `learn-retry` |
 | Profil miesza dwie osoby | `OWNER_NAME` / `OWNER_CONTEXT` (5.7), potem `learn-consolidate` |
+| W logu `token repeat limit reached` / „Model zapętlił się na fragmencie” | Model utknął na powtarzalnym tekście (np. tabela z PDF). Od 2.1.1 program ponawia z inną temperaturą, a w razie potrzeby pomija ten jeden fragment. Pojedyncze wpisy są normalne. Gdy jest ich dużo, rozważ inny model (`learn-set MODEL …`) |
 | Mac zwalnia | `learn-set PAUSE_BETWEEN_CALLS_S 3` albo mniejszy `MODEL`, potem `learn-start` |
 | Kończy się miejsce | `du -sh data/learner/*`. Ogranicz `MAIL_HISTORY_SINCE` / `ATTACHMENTS_SINCE` albo wyłącz `SAVE_TEXT` |
 | Komunikat aktualizatora „STOP” | Nic nie zmieniono albo przywrócono kopię. Skopiuj komunikat i skonsultuj |
@@ -984,6 +985,7 @@ Wzorzec aktualizatora (zob. 1.4, 2.1):
 | 1.4 | 11.10.2026 | Szybkie przyciski (kategoria, zadanie, wykonane, priorytet), lista zadań, Pamięć bota (notatki) i narzędzie Open WebUI „pamięć” |
 | 2.0 | 15.10.2026 | Połączenie z Drive Learnerem: moduł Nauka (Dysk, poczta Sebastiana, archiwum skrzynek), Bieżące sprawy, Profil wiedzy, RAG, zakładka Nauka, czyste repozytorium |
 | 2.1 | 15.10.2026 | Nauka czyta załączniki (PDF, Office, skany, zdjęcia) |
+| 2.1.1 | 15.10.2026 | Odporność na „zapętlenie” modelu (`token repeat limit reached`): kara za powtórzenia, ponowienie z inną temperaturą, pominięcie jednego trudnego fragmentu zamiast całego dokumentu |
 
 Szczegóły każdej wersji: `docs/aktualizacje/AKTUALIZACJA_X_Y.md`.
 

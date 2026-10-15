@@ -1,4 +1,4 @@
-"""Sebastian 2.1 — moduł nauki (dawny Drive Learner) z czytaniem załączników.
+"""Sebastian 2.1.1 — moduł nauki (dawny Drive Learner) z czytaniem załączników.
 
 Lokalny model (Ollama) czyta w tle Dysk Google, pocztę z Sebastiana i pełne archiwum
 skrzynek, wyciąga fakty o właścicielu i składa z nich:
@@ -575,7 +575,8 @@ def ask(prompt, as_json=False, max_tokens=1500):
     payload = {
         "model": C.MODEL, "stream": False, "keep_alive": C.KEEP_ALIVE,
         "messages": [{"role": "user", "content": prompt}],
-        "options": {"temperature": 0.2, "num_ctx": C.NUM_CTX, "num_predict": max_tokens},
+        # repeat_penalty zniechęca model do „zacinania się” na powtarzanym fragmencie
+        "options": {"temperature": 0.2, "num_ctx": C.NUM_CTX, "num_predict": max_tokens, "repeat_penalty": 1.15},
     }
     if re.search(r"qwen3|deepseek-r1|magistral|gpt-oss", C.MODEL, re.I):
         payload["think"] = False
@@ -587,6 +588,14 @@ def ask(prompt, as_json=False, max_tokens=1500):
             if r.status_code == 404:
                 check_model()
             if not r.ok:
+                if "repeat" in r.text.lower():
+                    # Model zapętlił się na tym fragmencie — ponów z inną „temperaturą”, a po 2 próbach odpuść fragment
+                    log.warning(f"  Model zapętlił się na fragmencie (próba {attempt + 1}/2) — ponawiam z inną temperaturą.")
+                    if attempt >= 1:
+                        return None
+                    payload["options"]["temperature"] = 0.7
+                    payload["options"]["repeat_penalty"] = 1.3
+                    continue
                 raise RuntimeError(f"{r.status_code}: {r.text[:200]}")
             text = r.json()["message"]["content"]
             return re.sub(r"(?s)<think>.*?</think>", "", text).strip()
@@ -690,7 +699,7 @@ def build_prompt(f, chunk, n, parts):
 
 def extract_facts(f, text):
     parts = chunks_of(text)
-    facts = []
+    facts, skipped = [], 0
     for n, chunk in enumerate(parts, 1):
         if STOP:
             return None
@@ -698,7 +707,13 @@ def extract_facts(f, text):
         if raw is None:
             if STOP:
                 return None
-            raise RuntimeError("model nie odpowiedział")
+            if not ollama_ready():
+                raise RuntimeError("model nie odpowiedział")
+            skipped += 1      # jeden trudny fragment nie przekreśla całego dokumentu
+            log.warning(f"  Pomijam fragment {n}/{len(parts)} — model nie dał rady go przetworzyć.")
+            if skipped == len(parts):
+                raise RuntimeError("model nie przetworzył żadnego fragmentu")
+            continue
         try:
             for item in json.loads(raw).get("fakty", []):
                 fact = str(item.get("fakt", "")).strip()

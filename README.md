@@ -2,7 +2,7 @@
 
 Sebastian działa na Macu właściciela. Codziennie pobiera pocztę z trzech skrzynek (tylko odczyt), lokalny model AI (Ollama) ją streszcza i porządkuje, a Ty w panelu decydujesz, co pominąć, co zrobić i na co odpowiedzieć. Moduł **Nauka** czyta w tle Dysk Google, całą pocztę i załączniki, a potem buduje **Bieżące sprawy** i **Profil wiedzy**. Wiedza trafia też do Open WebUI, żeby czat z lokalnym modelem znał kontekst.
 
-**Wersja: 2.1**
+**Wersja: 2.1.1**
 
 ## Od czego zacząć
 
