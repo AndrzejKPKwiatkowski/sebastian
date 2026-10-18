@@ -67,3 +67,30 @@ Data: 2026-10-15. Wynik: 22 testy zaliczone (8 Sebastiana + 9 nauki + 5 nowych d
 - Archiwum z 2.0: rozpoznanie maili z załącznikami po nagłówku Content-Type.
 
 Nie sprawdzono tu: prawdziwych serwerów IMAP i jakości OCR na Twoich skanach.
+
+
+# Weryfikacja 2.1.1 — „zapętlenie” modelu
+
+Data: 2026-10-15. Wynik: 23 testy zaliczone.
+
+- Symulowana Ollama zwraca `token repeat limit reached` dla jednego fragmentu: fragment jest ponawiany najwyżej 2 razy, potem pomijany. Fakty z pozostałych fragmentów zostają, a dokument nie jest oznaczany jako błąd.
+
+# Weryfikacja 2.1.2 — check, scalenie Drive Learnera, start nauki
+
+Data: 2026-10-15. Wynik: 26 testów zaliczonych.
+
+- `learn-import --merge`: fakty z Dysku dostają niższe numery niż fakty z poczty, profil startuje od podsumowań z Dysku (`last_fact_id` = liczba faktów z Dysku), archiwum poczty, wątki i wybrany model zostają, ustawienia Dysku przechodzą, powstaje kopia przed scaleniem, drugie scalenie jest odrzucane.
+- Zwykłe `learn-import` przy działającej nauce odmawia i wskazuje `--merge`.
+- `check` działa bez Ollamy, launchd i gita (zgłasza problemy z podpowiedziami, kod wyjścia 1).
+- Aktualizator na kopii instalacji 2.1.1: podmiana, test, ponowne uruchomienie rozpoznaje zainstalowaną wersję.
+
+# Weryfikacja 2.1.3 — wygaśnięcie logowania do Dysku
+
+Data: 2026-10-19. Wynik: 30 testów zaliczonych.
+
+- Wygasłe logowanie: przy 20 kolejnych wątkach jedna próba połączenia, jeden wpis w dzienniku i jedno powiadomienie. Stan `expired` zapisany w bazie.
+- Nowe logowanie (zmiana `token.json`) od razu uruchamia ponowną próbę. Udane połączenie przywraca stan `ok`.
+- `learn-drive off` / `on` / wybór „2” z menu zmieniają ustawienie. `check` przy wyłączonym Dysku pokazuje stan jako świadomy wybór, nie problem.
+- Zakładka Nauka pokazuje baner przy wygasłym logowaniu.
+
+Nie sprawdzono tu: prawdziwego wygaśnięcia tokenu Google i powiadomień macOS. Sprawdzisz je na Macu poleceniem `python sebastian.py learn-drive`.
