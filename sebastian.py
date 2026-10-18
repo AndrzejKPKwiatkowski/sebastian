@@ -470,7 +470,9 @@ def learn_command(args):
     elif cmd=='learn-login': L.cmd_login()
     elif cmd=='learn-settings': L.cmd_settings()
     elif cmd=='learn-set': L.cmd_set(args.key,args.value)
-    elif cmd=='learn-import': L.cmd_import(args.path,args.force)
+    elif cmd=='learn-import': (L.cmd_import_merge if args.merge else L.cmd_import)(args.path,args.force)
+    elif cmd=='check': sys.exit(L.cmd_check())
+    elif cmd=='learn-drive': L.cmd_drive(args.action)
     elif cmd=='learn-test': L.cmd_test(args.id)
     elif cmd=='learn-mail-test': L.setup_logging(); learner_mail.cmd_mail_test(args.account)
     elif cmd=='learn-scan':
@@ -501,7 +503,9 @@ def main():
     p=argparse.ArgumentParser(); sp=p.add_subparsers(dest='cmd',required=True)
     for name in ('learn-run','learn-status','learn-start','learn-stop','learn-login','learn-settings','learn-scan','learn-consolidate','learn-retry'): sp.add_parser(name)
     a=sp.add_parser('learn-set'); a.add_argument('key'); a.add_argument('value')
-    a=sp.add_parser('learn-import'); a.add_argument('path'); a.add_argument('--force',action='store_true')
+    a=sp.add_parser('learn-import'); a.add_argument('path'); a.add_argument('--force',action='store_true'); a.add_argument('--merge',action='store_true')
+    sp.add_parser('check')
+    a=sp.add_parser('learn-drive'); a.add_argument('action',nargs='?',default='',choices=['','login','off','on','status'])
     a=sp.add_parser('learn-test'); a.add_argument('id')
     a=sp.add_parser('learn-mail-test'); a.add_argument('--account',default='')
     a=sp.add_parser('learn-history'); a.add_argument('--limit',type=int,default=50)
@@ -520,7 +524,7 @@ def main():
     a=sp.add_parser('schedule'); a.add_argument('action',choices=['install','remove'])
     a=sp.add_parser('morning-run'); a.add_argument('--force',action='store_true')
     args=p.parse_args()
-    if args.cmd.startswith('learn'):
+    if args.cmd.startswith('learn') or args.cmd=='check':
         if not (DATA/'config.json').exists(): raise RuntimeError('Najpierw python sebastian.py init')
         learn_command(args); return
     if hasattr(args,'limit') and not 1<=args.limit<=1000: p.error('limit 1..1000')

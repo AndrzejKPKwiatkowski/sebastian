@@ -2,7 +2,7 @@
 
 Sebastian działa na Macu właściciela. Codziennie pobiera pocztę z trzech skrzynek (tylko odczyt), lokalny model AI (Ollama) ją streszcza i porządkuje, a Ty w panelu decydujesz, co pominąć, co zrobić i na co odpowiedzieć. Moduł **Nauka** czyta w tle Dysk Google, całą pocztę i załączniki, a potem buduje **Bieżące sprawy** i **Profil wiedzy**. Wiedza trafia też do Open WebUI, żeby czat z lokalnym modelem znał kontekst.
 
-**Wersja: 2.1.1**
+**Wersja: 2.1.3**
 
 ## Od czego zacząć
 
@@ -16,9 +16,10 @@ Sebastian działa na Macu właściciela. Codziennie pobiera pocztę z trzech skr
 
 ```bash
 cd ~/SebastianSystem/sebastian-start && source .venv/bin/activate
+python sebastian.py check           # pełne sprawdzenie: Ollama, panel, poranek, nauka, Dysk, bezpieczeństwo
 python sebastian.py doctor          # czy Ollama i model działają
 python sebastian.py learn-status    # postęp nauki
-python sebastian.py learn-login     # co 7 dni: logowanie do Dysku Google
+python sebastian.py learn-drive     # Dysk Google: zaloguj ponownie albo wyłącz
 python sebastian.py backup          # kopia bazy panelu
 ```
 

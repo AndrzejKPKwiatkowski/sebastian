@@ -422,3 +422,132 @@ class RepeatLimitTests(unittest.TestCase):
             facts = L.extract_facts(f, text)
         self.assertTrue(facts, 'fakty z pozostałych fragmentów zostają')
         self.assertLessEqual(calls['n'], 2 + len(L.chunks_of(text)), 'zacięty fragment ponawiany najwyżej 2 razy')
+
+
+class MergeAndCheckTests(unittest.TestCase):
+    setUp = LearnerTests.setUp
+    tearDown = LearnerTests.tearDown
+
+    def make_old(self):
+        old = pathlib.Path(self.temp.name) / 'drive-learner'
+        if old.exists():
+            return old
+        (old / 'teksty' / 'Moje').mkdir(parents=True)
+        (old / 'teksty' / 'Moje' / 'plan [abc].md').write_text('# Plan')
+        (old / 'config.py').write_text('OWNER_NAME = "Inna Osoba"\nEXCLUDE_PATHS = ["Klienci"]\nMODEL = "stary:1b"\n')
+        with sqlite3.connect(old / 'stan.sqlite') as c:
+            c.executescript("""CREATE TABLE files(id TEXT PRIMARY KEY, name TEXT, path TEXT, mime TEXT, size INTEGER,
+                modified TEXT, priority INTEGER, status TEXT, note TEXT, done_at TEXT, text_path TEXT);
+                CREATE TABLE facts(id INTEGER PRIMARY KEY AUTOINCREMENT, file_id TEXT, source TEXT, category TEXT, fact TEXT, created TEXT);
+                CREATE TABLE summaries(category TEXT PRIMARY KEY, text TEXT, last_fact_id INTEGER, updated TEXT);
+                CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
+                INSERT INTO files VALUES('abc','plan','Moje/plan','text/plain',1,'2026-01-01',1,'done','','', 'teksty/Moje/plan [abc].md');
+                INSERT INTO facts(file_id,source,category,fact,created) VALUES('abc','Moje/plan','Cele, plany i decyzje','Planuje X.','n');
+                INSERT INTO facts(file_id,source,category,fact,created) VALUES('abc','Moje/plan','Tożsamość i rola','Jest planerem.','n');
+                INSERT INTO summaries VALUES('Tożsamość i rola','- Planer finansowy w inPartners',2,'n');
+                INSERT INTO meta VALUES('last_scan','2026-10-10T10:00:00');""")
+        return old
+
+    def test_merge_keeps_mail_and_adds_drive(self):
+        con = L.db(); LM.scan_mail(con)
+        con.execute("INSERT INTO facts(file_id,source,category,fact,created) VALUES('mail:x','Poczta/x','Ludzie i relacje','Jan jest klientem (2026-10-13).','n')")
+        con.execute("INSERT INTO history_mails(account,scope,folder,validity,uid,mid,sender,subject,date,body) "
+                    "VALUES('partners','work','INBOX','1',5,'<m@x>','k@x.org','A','2026-10-01T10:00:00+00:00','x')")
+        con.commit(); con.close()
+        L.save_settings({'MODEL': 'qwen2.5:14b'})
+        with patch('sys.platform', 'linux'):
+            L.cmd_import_merge(str(self.make_old()))
+        con = L.db()
+        facts = [r[0] for r in con.execute('SELECT fact FROM facts ORDER BY id')]
+        self.assertEqual(facts[:2], ['Planuje X.', 'Jest planerem.'], 'fakty z Dysku na początku')
+        self.assertIn('Jan jest klientem (2026-10-13).', facts, 'fakty z poczty zachowane')
+        self.assertEqual(con.execute('SELECT COUNT(*) FROM history_mails').fetchone()[0], 1, 'archiwum poczty zachowane')
+        self.assertEqual(con.execute("SELECT COUNT(*) FROM files WHERE scope='drive'").fetchone()[0], 1)
+        self.assertGreater(con.execute("SELECT COUNT(*) FROM files WHERE id LIKE 'mail:%'").fetchone()[0], 0)
+        row = con.execute("SELECT text, last_fact_id FROM summaries WHERE category='Tożsamość i rola'").fetchone()
+        self.assertEqual((row[0], row[1]), ('- Planer finansowy w inPartners', 2))
+        self.assertIsNone(L.meta_get(con, 'last_consolidation'))
+        self.assertEqual(L.C.MODEL, 'qwen2.5:14b', 'bieżący model nie jest nadpisany')
+        self.assertEqual(L.C.EXCLUDE_PATHS, ['Klienci'])
+        self.assertTrue((L.LEARN / 'teksty' / 'Moje' / 'plan [abc].md').exists())
+        self.assertTrue(list(L.LEARN.glob('stan-przed-scaleniem-*.sqlite3')), 'kopia przed scaleniem')
+        with self.assertRaises(RuntimeError):
+            L.cmd_import_merge(str(self.make_old()))
+
+    def test_plain_import_points_to_merge(self):
+        L.db().close()
+        with self.assertRaises(RuntimeError) as e:
+            L.cmd_import(str(self.make_old()))
+        self.assertIn('--merge', str(e.exception))
+
+    def test_check_runs_and_reports(self):
+        import io, contextlib as cl
+        out = io.StringIO()
+        with patch.object(L.requests, 'get', side_effect=OSError('offline')), cl.redirect_stdout(out):
+            code = L.cmd_check()
+        text = out.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn('Ollama nie odpowiada', text)
+        self.assertIn('nauka nie działa w tle', text)
+        self.assertIn('Do poprawy', text)
+
+
+class DriveExpiryTests(unittest.TestCase):
+    setUp = LearnerTests.setUp
+    tearDown = LearnerTests.tearDown
+
+    def test_expired_login_logs_once_and_waits_for_new_login(self):
+        import os as _os, time as _time
+        (L.LEARN / 'token.json').write_text('{}')
+        con = L.db()
+        calls = {'n': 0}
+
+        def broken(*a, **k):
+            calls['n'] += 1
+            raise L.LoginExpired('x')
+        with patch.object(L, 'drive_service', side_effect=broken), patch.object(L, 'notify') as notify, \
+                self.assertLogs('sebastian.learner', level='WARNING') as logs:
+            d = L.Drive(con)
+            self.assertIsNone(d.service)
+            for _ in range(20):            # pętla nauki: 20 wątków
+                if d.due():
+                    d.connect()
+            self.assertEqual(calls['n'], 1, 'bez ponawiania przy każdym wątku')
+            self.assertEqual(notify.call_count, 1)
+            self.assertEqual(L.meta_get(con, 'drive_state'), 'expired')
+            # nowe logowanie (zmiana token.json) → od razu nowa próba
+            _os.utime(L.LEARN / 'token.json', (_time.time() + 5, _time.time() + 5))
+            self.assertTrue(d.due())
+        self.assertEqual(len([m for m in logs.output if 'logowanie wygasło' in m]), 1)
+        with patch.object(L, 'drive_service', return_value='SERVICE'):
+            d.connect()
+        self.assertEqual(d.service, 'SERVICE')
+        self.assertEqual(L.meta_get(con, 'drive_state'), 'ok')
+
+    def test_learn_drive_off_on(self):
+        with patch.object(L, 'agent_loaded', return_value=False):
+            L.cmd_drive('off')
+            self.assertFalse(L.C.DRIVE_ENABLED)
+            con = L.db()
+            self.assertIn('wyłączony', L.drive_status_text(con))
+            con.close()
+            import io, contextlib as cl
+            out = io.StringIO()
+            with patch.object(L.requests, 'get', side_effect=OSError('offline')), cl.redirect_stdout(out):
+                L.cmd_check()
+            self.assertIn('czytanie Dysku wyłączone świadomie', out.getvalue())
+            L.cmd_drive('on')
+            self.assertTrue(L.C.DRIVE_ENABLED)
+
+    def test_menu_choice_off(self):
+        with patch.object(L, 'agent_loaded', return_value=False), patch('builtins.input', return_value='2'):
+            L.cmd_drive('')
+        self.assertFalse(L.C.DRIVE_ENABLED)
+
+    def test_panel_banner(self):
+        (L.LEARN / 'token.json').write_text('{}')
+        con = L.db(); L.meta_set(con, 'drive_state', 'expired'); con.close()
+        app = s.make_app(); app.testing = True
+        client = app.test_client(); base = 'http://127.0.0.1:8765'
+        client.post('/login', data={'token': (s.DATA / 'panel.token').read_text()}, base_url=base)
+        self.assertIn('logowanie wygasło', client.get('/learner', base_url=base).get_data(as_text=True))

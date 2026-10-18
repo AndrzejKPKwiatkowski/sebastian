@@ -14,6 +14,8 @@ def register(app, s):
             st = L.stats(con)
             folders = [dict(r) for r in con.execute('SELECT * FROM history_folders ORDER BY account, folder')]
             meta = {k: L.meta_get(con, k, '') for k in ('last_consolidation', 'last_current', 'last_rag_sync', 'last_mail_scan', 'last_scan')}
+            drive_text = L.drive_status_text(con)
+            drive_problem = L.C.DRIVE_ENABLED and L.meta_get(con, 'drive_state') == 'expired'
             q = request.args.get('q', '').strip()[:200]
             recent = [dict(r) for r in con.execute(
                 "SELECT id, name, path, modified, status, note FROM files WHERE (id LIKE 'mail:%' OR id LIKE 'import:%') "
@@ -25,5 +27,5 @@ def register(app, s):
         running = (Path.home() / 'Library/LaunchAgents/pl.sebastian.learner.plist').exists()
         return render_template('learner.html', st=st, folders=folders, meta=meta, recent=recent, q=q,
                                current=read('Biezace_sprawy.md'), profile=read('Profil_wiedzy.md'),
-                               tail=tail, running=running, model=L.C.MODEL, csrf=session['csrf'],
+                               tail=tail, running=running, drive_text=drive_text, drive_problem=drive_problem, model=L.C.MODEL, csrf=session['csrf'],
                                scope=request.args.get('scope', 'private'))

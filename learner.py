@@ -1,4 +1,4 @@
-"""Sebastian 2.1.1 — moduł nauki (dawny Drive Learner) z czytaniem załączników.
+"""Sebastian 2.1.3 — moduł nauki (dawny Drive Learner) z czytaniem załączników.
 
 Lokalny model (Ollama) czyta w tle Dysk Google, pocztę z Sebastiana i pełne archiwum
 skrzynek, wyciąga fakty o właścicielu i składa z nich:
@@ -291,8 +291,7 @@ def drive_service(interactive=False):
         try:
             creds.refresh(Request())
         except Exception as e:
-            log.error(f"Nie udało się odświeżyć logowania Google: {type(e).__name__}")
-            creds = None
+            creds = None    # komunikat dla użytkownika daje klasa Drive — raz, nie przy każdej próbie
     if not creds or not creds.valid:
         if not interactive:
             raise LoginExpired("Brak ważnego logowania Google. Uruchom: python sebastian.py learn-login")
@@ -1151,37 +1150,63 @@ def sebastian_busy():
     return False
 
 
+DRIVE_HELP = "python sebastian.py learn-drive  (zaloguj ponownie albo wyłącz Dysk)"
+
+
 class Drive:
-    """Połączenie z Dyskiem, które nie blokuje nauki z poczty, gdy logowanie wygaśnie."""
+    """Połączenie z Dyskiem, które nie blokuje nauki z poczty, gdy logowanie wygaśnie.
+
+    Gdy logowanie wygaśnie: jeden komunikat w dzienniku i powiadomienie (najwyżej raz na dobę),
+    stan „expired” widoczny w panelu i w `check`. Ponowna próba dopiero po nowym logowaniu
+    (zmiana token.json) albo co 12 godzin — bez zaśmiecania dziennika przy każdym wątku."""
+    RETRY_HOURS = 12
+
     def __init__(self, con):
-        self.con, self.service, self.reminded = con, None, 0.0
+        self.con, self.service, self.last_try, self.token_mtime = con, None, 0.0, None
         self.connect()
 
+    @staticmethod
+    def token_mtime_now():
+        t = LEARN / "token.json"
+        return t.stat().st_mtime if t.exists() else None
+
+    def due(self):
+        if not C.DRIVE_ENABLED or self.token_mtime_now() is None:
+            return False
+        return self.token_mtime_now() != self.token_mtime or time.time() - self.last_try > self.RETRY_HOURS * 3600
+
     def connect(self):
-        if not C.DRIVE_ENABLED or not (LEARN / "token.json").exists():
-            self.service = None
+        self.service = None
+        if not C.DRIVE_ENABLED or self.token_mtime_now() is None:
             return
+        self.last_try, self.token_mtime = time.time(), self.token_mtime_now()
         try:
             self.service = drive_service()
+            if meta_get(self.con, "drive_state") == "expired":
+                log.info("Dysk Google: logowanie odnowione — wracam do czytania Dysku.")
+            meta_set(self.con, "drive_state", "ok")
         except Exception as e:
-            self.service = None
             if is_login_error(e) or isinstance(e, LoginExpired):
-                self.remind()
+                self.expired()
             else:
-                log.warning(f"Dysk Google niedostępny: {type(e).__name__}")
+                log.warning(f"Dysk Google chwilowo niedostępny: {type(e).__name__}")
 
-    def remind(self):
-        if time.time() - self.reminded > 3 * 3600:
-            log.warning("Logowanie Google wygasło — Dysk czeka, poczta pracuje dalej. "
-                        "W Terminalu: python sebastian.py learn-login")
-            notify("Sebastian — nauka", "Logowanie Google wygasło. Zaloguj się ponownie: python sebastian.py learn-login")
-            self.reminded = time.time()
+    def expired(self):
+        self.service = None
+        first = meta_get(self.con, "drive_state") != "expired"
+        meta_set(self.con, "drive_state", "expired")
+        if first or hours_since(self.con, "drive_notified") >= 24:
+            log.warning("Dysk Google: logowanie wygasło. Nauka pracuje dalej na poczcie i wiedzy już zebranej "
+                        f"(fakty z Dysku zostają). Co dalej: {DRIVE_HELP}")
+            notify("Sebastian — Dysk Google", "Logowanie do Dysku wygasło. Poczta uczy się dalej. "
+                                              "Wybierz: python sebastian.py learn-drive")
+            meta_set(self.con, "drive_notified", datetime.now().isoformat())
 
     def warn_before_expiry(self):
         login_at = meta_get(self.con, "login_at")
         if login_at and not meta_get(self.con, "login_warned") and \
                 datetime.now() - datetime.fromisoformat(login_at) > timedelta(days=6):
-            notify("Sebastian — nauka", "Jutro wygasa logowanie Google do Dysku. Zaloguj się ponownie (1 minuta).")
+            notify("Sebastian — nauka", "Jutro wygasa logowanie Google do Dysku. Zaloguj się ponownie: python sebastian.py learn-drive")
             meta_set(self.con, "login_warned", "1")
 
 
@@ -1218,9 +1243,8 @@ def run():
                 sleep(60)
                 continue
             busy_logged = False
-            if drive.service is None and (LEARN / "token.json").exists() and C.DRIVE_ENABLED:
-                if time.time() - drive.reminded > 1800:
-                    drive.connect()
+            if drive.service is None and drive.due():
+                drive.connect()
             if drive.service:
                 drive.warn_before_expiry()
             if C.RAG_SYNC_EVERY_HOURS and hours_since(con, "last_rag_sync") >= C.RAG_SYNC_EVERY_HOURS \
@@ -1253,8 +1277,7 @@ def run():
             wait_for_ollama()
             process_file(con, drive.service, f)
         except LoginExpired:
-            drive.service = None
-            drive.remind()
+            drive.expired()
         except Exception as e:   # nieoczekiwany błąd — zapisz i pracuj dalej
             log.warning(f"Błąd w pętli nauki: {type(e).__name__}: {str(e)[:200]}")
             sleep(120)
@@ -1282,6 +1305,7 @@ def cmd_status():
     print(f"Bieżące sprawy:     {meta_get(con, 'last_current', '—')}")
     print(f"Ostatni RAG:        {meta_get(con, 'last_rag_sync', '—')}")
     print(f"Wyniki:             {LEARN / 'wyniki'}")
+    print(f"Dostęp do Dysku:    {drive_status_text(con)}")
 
 
 def coerce(key, value):
@@ -1369,20 +1393,128 @@ def cmd_start():
            "StandardErrorPath": str(Path(S.DATA) / "logs" / "learner.err")}
     path = launch_agent_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    uid = str(os.getuid())
-    subprocess.run(["launchctl", "bootout", f"gui/{uid}/pl.sebastian.learner"], capture_output=True)
+    stop_agent()
     path.write_bytes(plistlib.dumps(job))
-    subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(path)], check=True, capture_output=True)
+    uid = str(os.getuid())
+    for attempt in range(6):   # macOS potrzebuje chwili, zanim przyjmie zadanie po zatrzymaniu poprzedniego
+        r = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(path)], capture_output=True, text=True)
+        if r.returncode == 0 or agent_loaded():
+            break
+        time.sleep(3)
+    else:
+        raise RuntimeError(f"macOS nie przyjął zadania nauki (kod {r.returncode}). Odczekaj minutę i powtórz: python sebastian.py learn-start")
     print("✓ Nauka działa w tle (startuje sama po zalogowaniu na Maca).")
     print("  Podgląd: python sebastian.py learn-status  ·  log: tail -f data/logs/learner.log")
 
 
-def cmd_stop():
+def agent_loaded(label="pl.sebastian.learner"):
     import subprocess
-    uid = str(os.getuid())
-    r = subprocess.run(["launchctl", "bootout", f"gui/{uid}/pl.sebastian.learner"], capture_output=True)
+    try:
+        return subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"], capture_output=True).returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def stop_agent(label="pl.sebastian.learner", wait=60):
+    """Zatrzymuje zadanie launchd i czeka, aż macOS je naprawdę zwolni. Zwraca True, jeśli działało."""
+    import subprocess
+    if not agent_loaded(label):
+        return False
+    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"], capture_output=True)
+    for _ in range(wait):
+        if not agent_loaded(label):
+            break
+        time.sleep(1)
+    return True
+
+
+def cmd_stop():
+    was = stop_agent()
     launch_agent_path().unlink(missing_ok=True)
-    print("✓ Nauka zatrzymana." if r.returncode == 0 else "Nauka nie była uruchomiona w tle.")
+    print("✓ Nauka zatrzymana." if was else "Nauka nie była uruchomiona w tle.")
+
+
+DRIVE_SETTING_KEYS = ("ONLY_MY_FILES", "EXCLUDE_PATHS", "INCLUDE_ONLY_PATHS", "MAX_FILE_MB", "OCR_IMAGES", "OCR_LANG",
+                      "OCR_MIN_IMAGE_KB", "OCR_PDF_MAX_PAGES", "TRANSCRIBE_AUDIO", "TRANSCRIBE_VIDEO",
+                      "TRANSCRIBE_MAX_MB", "WHISPER_MODEL", "SKIP_MUSIC", "RESCAN_EVERY_HOURS")
+
+
+def cmd_import_merge(path, force=False):
+    """Dołącza wiedzę z dawnego Drive Learnera do DZIAŁAJĄCEJ już nauki — nic z poczty nie ginie."""
+    import runpy, shutil
+    src = Path(path).expanduser()
+    old_db = src / "stan.sqlite"
+    if not old_db.exists():
+        raise RuntimeError(f"Nie znaleziono {old_db}. Podaj folder dawnego Drive Learnera.")
+    was_running = stop_agent()
+    stop_agent("pl.aga.drivelearner")
+    (Path.home() / "Library/LaunchAgents/pl.aga.drivelearner.plist").unlink(missing_ok=True)
+    con = db()
+    try:
+        if con.execute("SELECT COUNT(*) FROM files WHERE COALESCE(scope,'drive')='drive'").fetchone()[0] and not force:
+            raise RuntimeError("W nauce są już dokumenty z Dysku — scalenie zostało wykonane wcześniej.")
+        backup = LEARN / f"stan-przed-scaleniem-{datetime.now():%Y%m%d-%H%M%S}.sqlite3"
+        with contextlib.closing(sqlite3.connect(backup)) as b:
+            con.backup(b)
+        print(f"• Kopia obecnego stanu nauki: {backup.name}")
+        with contextlib.closing(sqlite3.connect(old_db)) as old:
+            old.row_factory = sqlite3.Row
+            ocols = {r[1] for r in old.execute("PRAGMA table_info(files)")}
+            files = [dict(r) for r in old.execute("SELECT * FROM files")]
+            drive_facts = [tuple(r) for r in old.execute("SELECT file_id, source, category, fact, created FROM facts ORDER BY id")]
+            old_sum = {r["category"]: r["text"] for r in old.execute("SELECT category, text FROM summaries")}
+            old_meta = {r["key"]: r["value"] for r in old.execute("SELECT key, value FROM meta")}
+            old_rag = [tuple(r) for r in old.execute("SELECT * FROM rag_sync")] if \
+                old.execute("SELECT 1 FROM sqlite_master WHERE name='rag_sync'").fetchone() else []
+        mail_facts = [tuple(r) for r in con.execute("SELECT file_id, source, category, fact, created FROM facts ORDER BY id")]
+        with con:
+            for f in files:
+                con.execute("INSERT OR IGNORE INTO files(id,name,path,mime,size,modified,priority,status,note,done_at,text_path,scope,sig) "
+                            "VALUES(?,?,?,?,?,?,?,?,?,?,?,'drive','')",
+                            (f["id"], f["name"], f["path"], f["mime"], f["size"], f["modified"], f["priority"], f["status"],
+                             f["note"], f["done_at"], f.get("text_path") if "text_path" in ocols else None))
+            # Fakty z Dysku dostają niższe numery niż fakty z poczty: profil startuje od wiedzy z Dysku,
+            # a fakty z poczty zostaną do niego dołączone przy najbliższym scaleniu.
+            con.execute("DELETE FROM facts")
+            con.execute("DELETE FROM sqlite_sequence WHERE name='facts'")
+            con.executemany("INSERT INTO facts(file_id,source,category,fact,created) VALUES(?,?,?,?,?)", drive_facts + mail_facts)
+            n_drive = len(drive_facts)
+            con.execute("DELETE FROM summaries")
+            con.executemany("INSERT INTO summaries(category,text,last_fact_id,updated) VALUES(?,?,?,?)",
+                            [(c, old_sum.get(c, ""), n_drive, datetime.now().isoformat()) for c in PROFILE_CATEGORIES])
+            for key in ("last_scan", "login_at", "login_warned", "text_backfill_done"):
+                if key in old_meta:
+                    con.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (key, old_meta[key]))
+            con.execute("DELETE FROM meta WHERE key IN ('current_fact_id','last_current','last_consolidation')")
+            con.executemany("INSERT OR IGNORE INTO rag_sync VALUES(?,?,?,?,?)", old_rag)
+        print(f"• Dołączono z Dysku: {len(files)} dokumentów i {n_drive} faktów; fakty z poczty ({len(mail_facts)}) zachowane.")
+    finally:
+        con.close()
+    for name in ("teksty", "rag"):
+        if (src / name).is_dir():
+            shutil.copytree(src / name, LEARN / name, dirs_exist_ok=True)
+            print(f"• Skopiowano folder {name}/")
+    for name in ("token.json", "credentials.json"):
+        if (src / name).exists() and not (LEARN / name).exists():
+            shutil.copy2(src / name, LEARN / name)
+            os.chmod(LEARN / name, 0o600)
+            print(f"• Skopiowano {name}")
+    if (src / "config.py").exists():
+        with contextlib.suppress(Exception):
+            old_cfg = runpy.run_path(str(src / "config.py"))
+            current = json.loads((LEARN / SETTINGS_FILE).read_text()) if (LEARN / SETTINGS_FILE).exists() else {}
+            keep = {k: old_cfg[k] for k in DRIVE_SETTING_KEYS if k in old_cfg and k not in current}
+            if keep:
+                save_settings(keep)
+                print(f"• Przeniesiono ustawienia Dysku: {', '.join(keep)}")
+            if old_cfg.get("OWNER_NAME") and old_cfg["OWNER_NAME"] != C.OWNER_NAME:
+                print(f"• Uwaga: Drive Learner zbierał wiedzę o „{old_cfg['OWNER_NAME']}”, a nauka teraz o „{C.OWNER_NAME}”. "
+                      "Sprawdź, czy to ta sama osoba (learn-set OWNER_NAME …).")
+    print("✓ Scalono. Profil wiedzy i Bieżące sprawy przebudują się w ciągu kilku godzin pracy nauki.")
+    if (LEARN / "token.json").exists():
+        print("  Dysk: jeśli logowanie Google wygasło, zaloguj się: python sebastian.py learn-login")
+    if was_running:
+        cmd_start()
 
 
 def cmd_import(path, force=False):
@@ -1394,7 +1526,9 @@ def cmd_import(path, force=False):
         raise RuntimeError(f"Nie znaleziono {old_db}. Podaj folder dawnego Drive Learnera.")
     target = LEARN / "stan.sqlite3"
     if target.exists() and not force:
-        raise RuntimeError("W Sebastianie jest już stan nauki. Aby go nadpisać, dodaj --force.")
+        raise RuntimeError("Nauka już działa i ma własny stan. Aby DOŁĄCZYĆ wiedzę z Drive Learnera bez utraty poczty, "
+                           "użyj: python sebastian.py learn-import ~/drive-learner --merge   "
+                           "(--force zastąpiłby obecny stan — nie zalecane).")
     if sys.platform == "darwin":   # zatrzymaj starą usługę, żeby nie pisała w trakcie kopiowania
         subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/pl.aga.drivelearner"], capture_output=True)
         (Path.home() / "Library/LaunchAgents/pl.aga.drivelearner.plist").unlink(missing_ok=True)
@@ -1426,3 +1560,239 @@ def cmd_import(path, force=False):
         except Exception as e:
             print(f"• Ustawień z config.py nie udało się odczytać ({type(e).__name__}) — zostają domyślne.")
     print("✓ Gotowe. Dawny folder został bez zmian — możesz go usunąć, gdy sprawdzisz, że wszystko działa.")
+
+
+
+# ================================================================ diagnostyka: python sebastian.py check
+
+def cmd_check():
+    """Sprawdza cały system i podpowiada, co zrobić. Niczego nie zmienia."""
+    import shutil, subprocess
+    problems, warnings = [], []
+
+    def ok(text):
+        print(f"  ✓ {text}")
+
+    def warn(text, fix=""):
+        warnings.append(text)
+        print(f"  ⚠ {text}" + (f"\n      → {fix}" if fix else ""))
+
+    def bad(text, fix=""):
+        problems.append(text)
+        print(f"  ✗ {text}" + (f"\n      → {fix}" if fix else ""))
+
+    def run(cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+
+    def age_h(iso):
+        try:
+            d = datetime.fromisoformat(iso)
+            now = datetime.now(d.tzinfo) if d.tzinfo else datetime.now()
+            return (now - d) / timedelta(hours=1)
+        except Exception:
+            return None
+
+    cfg = S.config()
+    print(f"Sebastian — sprawdzenie systemu ({datetime.now():%Y-%m-%d %H:%M})")
+    print("\n1. Ollama i modele")
+    try:
+        names = [m["name"] for m in requests.get(f"{C.OLLAMA_URL}/api/tags", timeout=5).json().get("models", [])]
+        ok("Ollama odpowiada")
+        for label, model in (("analiza poczty", cfg.get("model", "")), ("nauka", C.MODEL)):
+            want = model if ":" in model else model + ":latest"
+            if model and want in names:
+                ok(f"model {label}: {model}")
+            else:
+                bad(f"brak modelu dla: {label} ({model or 'nie ustawiono'})",
+                    "ollama list — i python sebastian.py model … / learn-set MODEL …")
+    except Exception:
+        bad("Ollama nie odpowiada", "uruchom aplikację Ollama (i dodaj ją do rzeczy otwieranych przy logowaniu)")
+
+    print("\n2. Panel i poranek")
+    if agent_loaded("pl.sebastian.panel"):
+        ok("panel działa w tle")
+    else:
+        bad("panel nie działa w tle", "python sebastian.py morning-setup")
+    try:
+        code = requests.get("http://127.0.0.1:8765/login", timeout=5).status_code
+        ok("panel odpowiada pod http://127.0.0.1:8765") if code == 200 else bad(f"panel odpowiada kodem {code}")
+    except Exception:
+        bad("panel nie odpowiada pod http://127.0.0.1:8765", "launchctl kickstart -k gui/$(id -u)/pl.sebastian.panel")
+    if agent_loaded("pl.sebastian.jobs"):
+        ok("poranek 06:30 zaplanowany")
+    else:
+        warn("poranek nie jest zaplanowany", "python sebastian.py morning-setup")
+    sc = sebastian_db()
+    if sc is not None:
+        with contextlib.closing(sc):
+            with contextlib.suppress(sqlite3.Error):
+                last = sc.execute("SELECT started, state FROM morning_runs ORDER BY id DESC LIMIT 1").fetchone()
+                if last:
+                    h = age_h(last["started"])
+                    text = f"ostatni poranek: {last['started'][:16].replace('T', ' ')} — {last['state']}"
+                    if last["state"] == "ok" and h is not None and h < 30:
+                        ok(text)
+                    else:
+                        warn(text, "szczegóły: panel → Podsumowanie i postęp; logi: data/logs/jobs.log")
+                pending = sc.execute("SELECT COUNT(*) FROM messages WHERE arrival='new' AND analysis IS NULL").fetchone()[0]
+                if pending:
+                    warn(f"nowe maile bez analizy: {pending}", "python sebastian.py morning-run --force")
+
+    print("\n3. Nauka")
+    if agent_loaded():
+        ok("nauka działa w tle")
+    else:
+        bad("nauka nie działa w tle", "python sebastian.py learn-start")
+    log_file = Path(S.DATA) / "logs" / "learner.log"
+    if log_file.exists():
+        lines = [ln for ln in log_file.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+        last_line = lines[-1] if lines else ""
+        h = age_h(last_line[:19].replace(" ", "T")) if last_line else None
+        if h is not None and h < 0.5:
+            ok(f"ostatni wpis w dzienniku {int(h * 60)} min temu")
+        else:
+            warn("nauka od dawna nic nie zapisała w dzienniku" if h else "brak wpisów w dzienniku",
+                 "tail -n 30 data/logs/learner.log  (oraz data/logs/learner.err)")
+    err = Path(S.DATA) / "logs" / "learner.err"
+    if err.exists() and err.stat().st_size and (time.time() - err.stat().st_mtime) < 3600:
+        tail = err.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-1:]
+        warn("w ciągu ostatniej godziny pojawił się błąd programu: " + (tail[0][:150] if tail else ""),
+             "tail -n 30 data/logs/learner.err")
+    con = db()
+    with contextlib.closing(con):
+        st = stats(con)
+        ok(f"wątki poczty: {st['mail_done']} przeczytanych, {st['mail_new']} w kolejce")
+        if st["mail_error"] or st["drive_error"]:
+            warn(f"pozycje z błędem: poczta {st['mail_error']}, Dysk {st['drive_error']}", "python sebastian.py learn-retry")
+        for r in con.execute("SELECT account, folder, error FROM history_folders WHERE error<>'' AND error IS NOT NULL"):
+            warn(f"archiwum {r['account']} / {r['folder']}: {r['error'][:120]}", "python sebastian.py learn-mail-test")
+        for a in cfg.get("accounts", []):
+            if L_meta := meta_get(con, "mail_fail_" + a["id"]):
+                bad(f"skrzynka {a['id']}: nie udało się zalogować ({L_meta[:16]})",
+                    f"python sebastian.py learn-mail-test --account {a['id']}  (i „Zawsze pozwalaj” przy Pęku kluczy)")
+        ok(f"fakty: {st['facts']} · załączniki: {st['attachments']} · teksty: {st['texts']}")
+        cur = meta_get(con, "last_current")
+        if cur and (age_h(cur) or 99) < 30:
+            ok(f"Bieżące sprawy z {cur[:16].replace('T', ' ')}")
+        elif st["facts"]:
+            warn("Bieżące sprawy dawno nieodświeżane", "python sebastian.py learn-consolidate")
+
+        print("\n4. Dysk Google")
+        old = Path.home() / "drive-learner" / "stan.sqlite"
+        if st["drive_all"]:
+            ok(f"dokumenty z Dysku w nauce: {st['drive_done']}")
+        elif old.exists():
+            bad("wiedza z dawnego Drive Learnera nie jest dołączona",
+                "python sebastian.py learn-import ~/drive-learner --merge")
+        if not C.DRIVE_ENABLED:
+            ok("czytanie Dysku wyłączone świadomie — wiedza z Dysku zostaje (włączysz: python sebastian.py learn-drive on)")
+        elif meta_get(con, "drive_state") == "expired":
+            warn("logowanie do Dysku wygasło — poczta uczy się dalej", DRIVE_HELP)
+        elif not (LEARN / "credentials.json").exists():
+            warn("brak data/learner/credentials.json — nowe pliki z Dysku nie będą czytane", "DOKUMENTACJA.md, rozdział 5.6")
+        elif not (LEARN / "token.json").exists():
+            bad("brak logowania do Dysku", "python sebastian.py learn-login")
+        else:
+            login = meta_get(con, "login_at")
+            days = (age_h(login) or 0) / 24 if login else None
+            if days is not None and days >= 7:
+                warn(f"logowanie Google sprzed {days:.0f} dni — wygasło (poczta uczy się dalej)", DRIVE_HELP)
+            elif days is not None and days >= 6:
+                warn("logowanie Google wygasa w ciągu doby", "python sebastian.py learn-drive login")
+            else:
+                ok("logowanie do Dysku aktywne" + (f" (od {days:.0f} dni)" if days is not None else ""))
+    if not (shutil.which("tesseract") or Path("/opt/homebrew/bin/tesseract").exists()):
+        warn("brak Tesseracta — skany i zdjęcia nie będą odczytywane", "brew install tesseract tesseract-lang")
+
+    print("\n5. Bezpieczeństwo i miejsce")
+    r = run(["git", "-C", str(S.ROOT), "ls-files", "data", "backups", "demo-data", ".venv"])
+    if r is None or r.returncode != 0:
+        warn("folder nie jest repozytorium git — nie sprawdzono, co trafia na GitHub")
+    elif r.stdout.strip():
+        bad("w repozytorium git są pliki z data/ lub backups/ (maile, klucze)!",
+            "NIE rób git push. DOKUMENTACJA.md, rozdział 13.2")
+    else:
+        ok("dane (data/, backups/) nie są śledzone przez git")
+    r = run(["fdesetup", "status"])
+    if r is not None and r.returncode == 0:
+        ok("FileVault włączony") if "On" in r.stdout else warn("FileVault wyłączony — dane na dysku nie są szyfrowane",
+                                                            "Ustawienia systemowe → Prywatność i ochrona → FileVault")
+    free_gb = shutil.disk_usage(S.DATA).free / 1e9
+    (ok if free_gb > 30 else warn)(f"wolne miejsce na dysku: {free_gb:.0f} GB")
+
+    print("\n" + ("✓ Wszystko działa." if not problems and not warnings else
+                  f"Do poprawy: {len(problems)} · Do sprawdzenia: {len(warnings)}"))
+    return 1 if problems else 0
+
+
+
+# ================================================================ Dysk: python sebastian.py learn-drive
+
+def drive_status_text(con):
+    docs = con.execute("SELECT COUNT(*) FROM files WHERE COALESCE(scope,'drive')='drive' AND status='done'").fetchone()[0]
+    if not C.DRIVE_ENABLED:
+        return f"wyłączony — wiedza z {docs} dokumentów zostaje (włączysz: python sebastian.py learn-drive on)"
+    if not (LEARN / "token.json").exists():
+        return "brak logowania — python sebastian.py learn-drive login"
+    if meta_get(con, "drive_state") == "expired":
+        return f"logowanie wygasło — poczta uczy się dalej; {DRIVE_HELP}"
+    login = meta_get(con, "login_at")
+    days = (datetime.now() - datetime.fromisoformat(login)) / timedelta(days=1) if login else None
+    return "aktywny" + (f" (logowanie sprzed {days:.0f} dni, ważne 7 dni)" if days is not None else "")
+
+
+def restart_if_running():
+    if agent_loaded():
+        cmd_start()
+
+
+def cmd_drive(action=""):
+    con = db()
+    try:
+        status = drive_status_text(con)
+    finally:
+        con.close()
+    if not action:
+        print(f"Dysk Google: {status}\n")
+        print("Co zrobić?")
+        print("  1 — Zaloguj się ponownie (ok. 1 minuta, otworzy się przeglądarka). Logowanie działa 7 dni.")
+        print("  2 — Wyłącz Dysk. Nauka czyta tylko pocztę; wiedza już zebrana z Dysku zostaje.")
+        print("      Włączysz go kiedyś poleceniem: python sebastian.py learn-drive on")
+        print("  3 — Nic nie zmieniaj")
+        try:
+            choice = input("\nWybierz 1, 2 lub 3: ").strip()
+        except EOFError:
+            choice = "3"
+        action = {"1": "login", "2": "off"}.get(choice, "")
+        if not action:
+            print("Bez zmian.")
+            return
+    if action == "status":
+        print(f"Dysk Google: {status}")
+    elif action == "login":
+        if not C.DRIVE_ENABLED:
+            save_settings({"DRIVE_ENABLED": True})
+        cmd_login()
+        restart_if_running()
+    elif action == "off":
+        save_settings({"DRIVE_ENABLED": False})
+        con = db()
+        meta_set(con, "drive_state", "off")
+        con.close()
+        print("✓ Dysk wyłączony. Nauka czyta tylko pocztę; wiedza z Dysku zostaje w profilu i bazie.")
+        restart_if_running()
+    elif action == "on":
+        save_settings({"DRIVE_ENABLED": True})
+        con = db()
+        meta_set(con, "drive_state", "")
+        con.close()
+        if (LEARN / "token.json").exists():
+            print("✓ Dysk włączony.")
+        else:
+            print("✓ Dysk włączony. Teraz zaloguj się: python sebastian.py learn-drive login")
+        restart_if_running()
+    else:
+        raise RuntimeError("Użycie: python sebastian.py learn-drive [login|off|on|status]")

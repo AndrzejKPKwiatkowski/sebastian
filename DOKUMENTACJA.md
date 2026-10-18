@@ -1,6 +1,6 @@
 # Sebastian — pełna dokumentacja projektu
 
-**Wersja opisana w dokumencie: 2.1.1** (październik 2026)
+**Wersja opisana w dokumencie: 2.1.3** (październik 2026)
 Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników.
 
 > **Dla kogo jest ten dokument.** Dla osoby, która przejmuje projekt albo musi coś w nim zrobić ręcznie: zainstalować od zera, przenieść na inny komputer, naprawić, zaktualizować albo rozwinąć kod. Nie trzeba być programistą, żeby korzystać z rozdziałów 1–14. Rozdział 15 jest dla osoby, która zmienia kod.
@@ -260,7 +260,7 @@ Nauka czyta Dysk przez oficjalne API Google, tylko do odczytu. Potrzebny jest w�
 
    W przeglądarce: konto Google → „Zaawansowane” → „Przejdź do aplikacji” → Zezwól.
 
-> **Tryb „Testowanie” = logowanie ważne 7 dni.** Publikacja wymagałaby strony WWW i polityki prywatności, co przy prywatnym narzędziu nie ma sensu. Dzień przed wygaśnięciem Mac pokaże powiadomienie. Wtedy wystarczy `python sebastian.py learn-login`. Gdy logowanie wygaśnie, poczta uczy się dalej, czeka tylko Dysk.
+> **Tryb „Testowanie” = logowanie ważne 7 dni.** Publikacja wymagałaby strony WWW i polityki prywatności, co przy prywatnym narzędziu nie ma sensu. Dzień przed wygaśnięciem Mac pokaże powiadomienie. Gdy logowanie wygaśnie, **poczta uczy się dalej**, a nauka wpisze do dziennika jeden komunikat i pokaże powiadomienie (najwyżej raz na dobę) oraz baner w zakładce Nauka. Wtedy `python sebastian.py learn-drive` i wybór: zaloguj ponownie albo wyłącz Dysk, jeśli jego wiedza jest już kompletna. Wiedza z Dysku zostaje w obu przypadkach.
 
 Dysk jest opcjonalny. Bez `credentials.json` nauka pracuje tylko na poczcie.
 
@@ -295,6 +295,7 @@ Rozdział 9.
 - [ ] `learn-status` po godzinie pokazuje przeczytane wątki.
 - [ ] Zakładka Nauka: po kilku godzinach pojawiają się „Bieżące sprawy”.
 - [ ] FileVault włączony (Ustawienia systemowe → Prywatność i ochrona).
+- [ ] `python sebastian.py check` kończy się „✓ Wszystko działa” albo tylko ostrzeżeniami, które rozumiesz.
 
 ---
 
@@ -381,7 +382,7 @@ python sebastian.py import-text imports/notatka.txt --scope private --source not
 ### 6.8. Rytm pracy właściciela
 
 - **Codziennie (5 min):** panel → Do decyzji → maks. 3 rzeczy do działania. Zakładka Nauka → Bieżące sprawy.
-- **Raz w tygodniu:** `python sebastian.py learn-login`, gdy Mac pokaże powiadomienie.
+- **Raz w tygodniu (jeśli Dysk jest włączony):** `python sebastian.py learn-drive` → 1, gdy Mac pokaże powiadomienie. Jeśli Dysk jest już w pełni przeczytany, możesz go wyłączyć (`learn-drive off`) i ten krok odpada.
 - **Raz w miesiącu:** kopia zapasowa (rozdział 14.1) i rzut oka na `learn-status` (błędy, archiwum).
 
 ---
@@ -650,6 +651,7 @@ Każde polecenie uruchamiaj w folderze `sebastian-start` z aktywnym `.venv`: `py
 | Polecenie | Co robi |
 | --- | --- |
 | `init` | Tworzy `data/`, `config.json`, brakujące klucze panelu i bazę. Bezpieczne do ponownego użycia, niczego nie nadpisuje |
+| `check` | **Pełne sprawdzenie systemu** (tylko odczyt): Ollama i modele, panel i poranek, nauka (praca w tle, dziennik, błędy, skrzynki), Dysk Google (scalenie, logowanie), Tesseract, git (czy dane nie są śledzone), FileVault, miejsce na dysku. Każdy problem ma podpowiedź, co zrobić |
 | `doctor` | Wersja Pythona, modele w Ollamie, wybrany model, ścieżka danych |
 | `model NAZWA` | Model do analizy poczty |
 | `password KONTO` | Zapis hasła do Pęku kluczy (`gmail` / `murena` / `partners`) |
@@ -685,7 +687,8 @@ Każde polecenie uruchamiaj w folderze `sebastian-start` z aktywnym `.venv`: `py
 | `learn-status` | Postęp: Dysk, wątki, archiwum per folder, załączniki, fakty, daty wyników |
 | `learn-settings` | Wszystkie ustawienia (klucz API ukryty) |
 | `learn-set KLUCZ WARTOŚĆ` | Zmiana ustawienia (`tak`/`nie`, liczby, listy po przecinku, JSON dla słowników) |
-| `learn-login` | Logowanie do Dysku Google (co 7 dni) |
+| `learn-drive` | **Dostęp do Dysku Google**: pokazuje stan i pozwala wybrać — 1) zaloguj ponownie, 2) wyłącz Dysk (wiedza z Dysku zostaje), 3) bez zmian. Bez menu: `learn-drive login` / `off` / `on` / `status` |
+| `learn-login` | Samo logowanie do Dysku Google (to samo co `learn-drive login`) |
 | `learn-mail-test [--account K]` | Test logowania i lista folderów do przeczytania |
 | `learn-scan` | Odświeżenie listy dokumentów i wątków od razu |
 | `learn-history --limit N` | Ręczne pobranie porcji archiwum |
@@ -693,7 +696,8 @@ Każde polecenie uruchamiaj w folderze `sebastian-start` z aktywnym `.venv`: `py
 | `learn-consolidate` | Odśwież Bieżące sprawy i Profil teraz |
 | `learn-rag export` / `learn-rag sync [--limit N]` | Pliki faktów dla RAG / wysyłka do Open WebUI |
 | `learn-retry` | Pozycje z błędem wracają do kolejki |
-| `learn-import ŚCIEŻKA [--force]` | Przeniesienie stanu dawnego Drive Learnera (`~/drive-learner`) |
+| `learn-import ŚCIEŻKA --merge` | **Dołącza** wiedzę dawnego Drive Learnera do działającej nauki (dokumenty, fakty, profil, teksty, logowanie). Nic z poczty nie ginie. Przed scaleniem robi kopię `data/learner/stan-przed-scaleniem-….sqlite3` |
+| `learn-import ŚCIEŻKA [--force]` | Przeniesienie stanu Drive Learnera do **pustej** nauki. `--force` **zastępuje** obecny stan (utrata poczty z nauki). Nie używaj, gdy nauka już działa — użyj `--merge` |
 | `learn-run` | Pętla nauki na pierwszym planie (normalnie uruchamia ją launchd) |
 
 ---
@@ -876,6 +880,8 @@ Aktualizacje przychodzą jako plik `Sebastian_aktualizacja_X_Y.py` albo paczka Z
 
 | Objaw | Przyczyna / działanie |
 | --- | --- |
+| `learn-start`: `launchctl bootstrap … status 5` | macOS jeszcze zamykał poprzednią naukę. Od 2.1.2 program sam czeka. W starszej wersji: `learn-stop`, potem `learn-start` |
+| Dysk w `learn-status`: 0 przeczytanych, choć Drive Learner przeczytał Dysk | `python sebastian.py learn-import ~/drive-learner --merge` (nie `--force`!) |
 | `No module named …` | Brak `source .venv/bin/activate` albo bibliotek: `bash install.command` |
 | `Connection refused` / Ollama nie odpowiada | Uruchom Ollamę. `python sebastian.py doctor` |
 | `Model not found` / 404 z Ollamy | Nazwa modelu musi być dokładnie jak w `ollama list` (`model …` albo `learn-set MODEL …`) |
@@ -887,7 +893,7 @@ Aktualizacje przychodzą jako plik `Sebastian_aktualizacja_X_Y.py` albo paczka Z
 | Rano brak nowych maili | Podsumowanie → historia poranków. `data/logs/jobs.log`. Czy Mac był włączony o 06:30? |
 | WebUI: brak danych lub stare dane | Docker uruchomiony? `python sebastian.py bridge`. Pamięć bota → stan kopiowania |
 | WebUI: „Brak dostępu” | `ALLOWED_EMAIL` w Valves musi być e-mailem konta Open WebUI |
-| Nauka: „Logowanie Google wygasło” | `python sebastian.py learn-login` (poczta działa dalej) |
+| Nauka: „Logowanie Google wygasło” / „RefreshError” | `python sebastian.py learn-drive`: zaloguj ponownie albo wyłącz Dysk. Poczta działa dalej w obu przypadkach |
 | Nauka: brak `credentials.json` | Rozdział 5.6, plik do `data/learner/` |
 | Nauka nie startuje w tle / „Operation not permitted” | Folder w chronionym miejscu (Pobrane/Biurko/Dokumenty/iCloud): przenieś do `~/SebastianSystem` |
 | Nauka nie loguje się do skrzynek w tle | Uruchom raz `learn-mail-test` przy Macu i kliknij **Zawsze pozwalaj** przy Pęku kluczy |
@@ -900,7 +906,9 @@ Aktualizacje przychodzą jako plik `Sebastian_aktualizacja_X_Y.py` albo paczka Z
 | Kończy się miejsce | `du -sh data/learner/*`. Ogranicz `MAIL_HISTORY_SINCE` / `ATTACHMENTS_SINCE` albo wyłącz `SAVE_TEXT` |
 | Komunikat aktualizatora „STOP” | Nic nie zmieniono albo przywrócono kopię. Skopiuj komunikat i skonsultuj |
 
-Przy prośbie o pomoc podaj: dokładne polecenie, komunikat błędu i ostatnie ~30 linii odpowiedniego logu. **Bez** haseł, tokenów i treści maili.
+**Pierwszy krok przy każdym problemie:** `python sebastian.py check`. Pokazuje, co nie działa, i podpowiada polecenie naprawcze.
+
+Przy prośbie o pomoc podaj: wynik `check`, dokładne polecenie, komunikat błędu i ostatnie ~30 linii odpowiedniego logu. **Bez** haseł, tokenów i treści maili.
 
 ---
 
@@ -985,6 +993,8 @@ Wzorzec aktualizatora (zob. 1.4, 2.1):
 | 1.4 | 11.10.2026 | Szybkie przyciski (kategoria, zadanie, wykonane, priorytet), lista zadań, Pamięć bota (notatki) i narzędzie Open WebUI „pamięć” |
 | 2.0 | 15.10.2026 | Połączenie z Drive Learnerem: moduł Nauka (Dysk, poczta Sebastiana, archiwum skrzynek), Bieżące sprawy, Profil wiedzy, RAG, zakładka Nauka, czyste repozytorium |
 | 2.1 | 15.10.2026 | Nauka czyta załączniki (PDF, Office, skany, zdjęcia) |
+| 2.1.3 | 19.10.2026 | Wygaśnięcie logowania do Dysku: jeden komunikat zamiast wpisu przy każdym wątku, baner w panelu, polecenie `learn-drive` z wyborem (zaloguj ponownie / wyłącz Dysk) |
+| 2.1.2 | 15.10.2026 | Polecenie `check` (pełna diagnostyka), `learn-import --merge` (scalenie Drive Learnera z działającą nauką), niezawodne `learn-start`/`learn-stop` (czekanie na macOS) |
 | 2.1.1 | 15.10.2026 | Odporność na „zapętlenie” modelu (`token repeat limit reached`): kara za powtórzenia, ponowienie z inną temperaturą, pominięcie jednego trudnego fragmentu zamiast całego dokumentu |
 
 Szczegóły każdej wersji: `docs/aktualizacje/AKTUALIZACJA_X_Y.md`.
