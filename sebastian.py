@@ -329,6 +329,7 @@ def make_app():
         if request.host not in ('127.0.0.1:8765','localhost:8765'): abort(403)
         if request.endpoint=='login': return
         if not session.get('ok'): return redirect('/login')
+        if request.endpoint=='docs_upload': request.max_content_length=4*1024**3   # duże skany (Dokumenty)
         if request.method=='POST' and not secrets.compare_digest(request.form.get('csrf',''),session.get('csrf','!')): abort(403)
     @app.after_request
     def headers(resp):
@@ -436,8 +437,9 @@ def make_app():
     progress.register(app,sys.modules[__name__])
     quick_actions.register(app,sys.modules[__name__])
     knowledge.register(app,sys.modules[__name__])
-    import learner_web
+    import learner_web, learner_docs_web
     learner_web.register(app,sys.modules[__name__])
+    learner_docs_web.register(app,sys.modules[__name__])
     return app
 
 def schedule(install):
@@ -494,6 +496,18 @@ def learn_command(args):
         with contextlib.closing(L.db()) as con:
             if args.action=='export': L.export_rag(con)
             else: L.sync_rag(con,limit=args.limit)
+    elif cmd.startswith('doc-'):
+        import learner_docs as D
+        if cmd=='doc-add': D.cmd_add(args.file,args.nazwa,args.typ)
+        elif cmd=='doc-list': D.cmd_list()
+        elif cmd=='doc-status': D.cmd_status(args.id)
+        elif cmd=='doc-run': D.cmd_run(args.id)
+        elif cmd=='doc-test': D.cmd_test(args.file,args.strona)
+        elif cmd=='doc-rebuild': D.cmd_rebuild(args.id,args.what)
+        elif cmd=='doc-pause': D.cmd_pause(args.id)
+        elif cmd=='doc-resume': D.cmd_resume(args.id)
+        elif cmd=='doc-remove': D.cmd_remove(args.id,args.tak)
+        elif cmd=='doc-export': D.cmd_export(args.id)
     elif cmd=='learn-retry':
         with contextlib.closing(L.db()) as con:
             n=con.execute("UPDATE files SET status='new',note=NULL WHERE status='error'").rowcount; con.commit()
@@ -505,6 +519,15 @@ def main():
     a=sp.add_parser('learn-set'); a.add_argument('key'); a.add_argument('value')
     a=sp.add_parser('learn-import'); a.add_argument('path'); a.add_argument('--force',action='store_true'); a.add_argument('--merge',action='store_true')
     sp.add_parser('check')
+    a=sp.add_parser('doc-add'); a.add_argument('file'); a.add_argument('--nazwa',default=''); a.add_argument('--typ',choices=['auto','kw','ogolny'],default='auto')
+    sp.add_parser('doc-list')
+    a=sp.add_parser('doc-status'); a.add_argument('id',type=int)
+    a=sp.add_parser('doc-run'); a.add_argument('id',type=int,nargs='?')
+    a=sp.add_parser('doc-test'); a.add_argument('file'); a.add_argument('--strona',type=int,default=1)
+    a=sp.add_parser('doc-rebuild'); a.add_argument('id',type=int); a.add_argument('what',nargs='?',default='pdf',choices=['pdf','struktura','strony'])
+    for name in ('doc-pause','doc-resume'): a=sp.add_parser(name); a.add_argument('id',type=int)
+    a=sp.add_parser('doc-remove'); a.add_argument('id',type=int); a.add_argument('--tak',action='store_true')
+    a=sp.add_parser('doc-export'); a.add_argument('id',type=int)
     a=sp.add_parser('learn-drive'); a.add_argument('action',nargs='?',default='',choices=['','login','off','on','status'])
     a=sp.add_parser('learn-test'); a.add_argument('id')
     a=sp.add_parser('learn-mail-test'); a.add_argument('--account',default='')
@@ -524,7 +547,7 @@ def main():
     a=sp.add_parser('schedule'); a.add_argument('action',choices=['install','remove'])
     a=sp.add_parser('morning-run'); a.add_argument('--force',action='store_true')
     args=p.parse_args()
-    if args.cmd.startswith('learn') or args.cmd=='check':
+    if args.cmd.startswith('learn') or args.cmd.startswith('doc-') or args.cmd=='check':
         if not (DATA/'config.json').exists(): raise RuntimeError('Najpierw python sebastian.py init')
         learn_command(args); return
     if hasattr(args,'limit') and not 1<=args.limit<=1000: p.error('limit 1..1000')

@@ -1,0 +1,16 @@
+{% extends 'base.html' %}{% block body %}
+<p><a href="/docs/{{job.id}}">← {{job.name}}</a> · strona {{n}} z {{total}}{% if n>1 %} · <a href="/docs/{{job.id}}/strona/{{n-1}}">poprzednia</a>{% endif %}{% if n<total %} · <a href="/docs/{{job.id}}/strona/{{n+1}}">następna</a>{% endif %}{% if next_check %} · <a href="/docs/{{job.id}}/strona/{{next_check}}">następna do sprawdzenia</a>{% endif %}</p>
+<h1>Strona {{n}} <small class="muted">· {{kind_pl}}{% if row.status=='done' and row.kind not in ['tekst','pusta'] %} · pewność {{((row.conf or 0)*100)|round|int}}%{% endif %}{% if row.verified %} · sprawdzona ✓{% elif check %} · do sprawdzenia{% endif %}</small></h1>
+{% if opis or obs %}<p class="muted">{{opis}}{% if obs %}<br>{{obs}}{% endif %}</p>{% endif %}
+{% if row.note %}<p><small>{{row.note}}</small></p>{% endif %}
+<div class="grid">
+<div><a href="/docs/{{job.id}}/img/{{n}}?w=1600" target="_blank"><img src="/docs/{{job.id}}/img/{{n}}?w=1000" alt="skan strony {{n}}" style="width:100%;border:1px solid #d9e2e5;border-radius:6px;background:#fff"></a><br><small>Kliknij obraz, żeby otworzyć powiększenie w nowej karcie.</small></div>
+<div>{% if row.status=='done' %}<form method="post"><input type="hidden" name="csrf" value="{{csrf}}">
+<textarea name="text" rows="28" style="font:14px/1.5 ui-monospace,monospace">{{row.text or ''}}</textarea>
+<label><input type="checkbox" name="verified" value="1" {{'checked' if row.verified or check else ''}}> Strona sprawdzona (zniknie z listy „do sprawdzenia”)</label>
+<button name="go" value="stay">Zapisz</button> {% if next_check %}<button name="go" value="next" class="secondary">Zapisz i przejdź do następnej do sprawdzenia</button>{% endif %}</form>
+<p><small><b>Znaczniki:</b> ⟦…⟧ — niepewny odczyt (po sprawdzeniu usuń nawiasy albo popraw słowo) · ~~…~~ — tekst przekreślony/wykreślony · [nieczytelne] · [pieczęć: …] · [podpis] · [margines: …]</small></p>
+{% if alts %}<details open><summary><b>Drugi odczyt różnił się</b> ({{alts|length}})</summary><table><tr><th>Pierwszy odczyt</th><th>Drugi odczyt</th></tr>{% for a in alts %}<tr><td>{{a.odczyt}}</td><td>{{a.inny}}</td></tr>{% endfor %}</table></details>{% endif %}
+{% else %}<p>Ta strona nie jest jeszcze odczytana.</p>{% endif %}</div>
+</div>
+{% endblock %}

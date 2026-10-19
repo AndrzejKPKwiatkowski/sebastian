@@ -1,7 +1,7 @@
 # Sebastian — pełna dokumentacja projektu
 
-**Wersja opisana w dokumencie: 2.1.3** (październik 2026)
-Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników.
+**Wersja opisana w dokumencie: 2.2** (październik 2026)
+Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników, oraz modułem Dokumenty, który zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w uporządkowany PDF ze spisem treści.
 
 > **Dla kogo jest ten dokument.** Dla osoby, która przejmuje projekt albo musi coś w nim zrobić ręcznie: zainstalować od zera, przenieść na inny komputer, naprawić, zaktualizować albo rozwinąć kod. Nie trzeba być programistą, żeby korzystać z rozdziałów 1–14. Rozdział 15 jest dla osoby, która zmienia kod.
 
@@ -13,10 +13,11 @@ Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę
 2. [Zasady, których projekt pilnuje](#2-zasady-których-projekt-pilnuje)
 3. [Jak to działa — architektura](#3-jak-to-działa--architektura)
 4. [Wymagania](#4-wymagania)
-5. [Instalacja od zera (wersja 2.1.3)](#5-instalacja-od-zera-wersja-213)
+5. [Instalacja od zera (wersja 2.2)](#5-instalacja-od-zera-wersja-22)
 6. [Codzienna praca w panelu](#6-codzienna-praca-w-panelu)
 7. [Praca w tle — harmonogramy macOS](#7-praca-w-tle--harmonogramy-macos)
 8. [Moduł Nauka — szczegóły](#8-moduł-nauka--szczegóły)
+8a. [Dokumenty — skany i księgi wieczyste (od 2.2)](#8a-dokumenty--skany-i-księgi-wieczyste-od-22)
 9. [Połączenie z Open WebUI](#9-połączenie-z-open-webui)
 10. [Mapa plików i danych](#10-mapa-plików-i-danych)
 11. [Wszystkie polecenia](#11-wszystkie-polecenia)
@@ -31,7 +32,7 @@ Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę
 
 ## 1. Czym jest Sebastian
 
-Sebastian to program działający **wyłącznie na Macu właściciela** (Mac Studio M1 Max). Składa się z dwóch współpracujących części.
+Sebastian to program działający **wyłącznie na Macu właściciela** (Mac Studio M1 Max). Składa się z trzech współpracujących części.
 
 **Centrum spraw (panel).** Strona w przeglądarce pod adresem http://127.0.0.1:8765. Sebastian:
 
@@ -47,6 +48,13 @@ Sebastian to program działający **wyłącznie na Macu właściciela** (Mac Stu
 - wyciąga z nich fakty o właścicielu,
 - składa z nich dwa dokumenty: **Bieżące sprawy** (co się teraz dzieje) i **Profil wiedzy** (trwała wiedza: praca, ludzie, cele, styl pracy i komunikacji),
 - opcjonalnie wysyła wszystko do baz wiedzy (RAG) w Open WebUI, żeby czat z lokalnym modelem „znał” właściciela.
+
+**Dokumenty (od wersji 2.2).** Działają w tej samej usłudze w tle co nauka:
+
+- przyjmują duże skany (np. księgę wieczystą, także starą, pisaną ręcznie, albo niemiecki Grundbuch),
+- prostują i zmniejszają skan, czytają każdą stronę lokalnym **modelem wizyjnym**; pismo ręczne czytają dwa razy i zaznaczają miejsca niepewne,
+- porządkują wpisy (działy księgi, właściciele, hipoteki, służebności…) i składają **mały PDF ze spisem treści i klikalnymi odnośnikami** do wpisów i stron skanu,
+- pozwalają w panelu porównać odczyt ze skanem i go poprawić (rozdział 8a).
 
 **Open WebUI** to osobna aplikacja (w Dockerze), w której rozmawia się z lokalnym modelem. Sebastian przekazuje do niej raporty, pamięć i wiedzę z nauki (rozdział 9).
 
@@ -82,6 +90,8 @@ Pilnuj ich przy każdej zmianie kodu i konfiguracji.
      │          │        │  odczyt                                                       │
      │          │        ▼                                                               │
      └─IMAP archiwum + załączniki ─► NAUKA (learner*.py, w tle) ── fakty ──► Ollama      │
+  skany (panel / wrzuc-tutaj) ─► DOKUMENTY (learner_docs.py) ─ model wizyjny ─┘          │
+                │                       data/dokumenty/  …_opracowanie.pdf  ──► nauka    │
   Dysk Google ─────── API (odczyt) ─►   data/learner/stan.sqlite3                        │
                 │                       data/learner/wyniki/  Bieżące sprawy, Profil     │
                 │                       data/learner/teksty/  pełne teksty               │
@@ -109,14 +119,17 @@ Pilnuj ich przy każdej zmianie kodu i konfiguracji.
 | Nauka — poczta | `learner_mail.py` | Wątki z bazy Sebastiana, archiwum IMAP, filtry, tekst wątku dla modelu |
 | Nauka — załączniki | `learner_attach.py` | Pobieranie i odczyt załączników, pamięć podręczna plików |
 | Nauka — panel | `learner_web.py`, `templates/learner.html` | Zakładka „Nauka” (tylko podgląd) |
+| Dokumenty | `learner_docs.py` | Przygotowanie skanu (ocrmypdf), czytanie stron modelem wizyjnym, wpisy KW, składanie PDF, polecenia `doc-*` |
+| Dokumenty — panel | `learner_docs_web.py`, `templates/docs.html`, `doc.html`, `doc_page.html` | Zakładka „Dokumenty”: wgrywanie, postęp, sprawdzanie i poprawki stron |
 | Narzędzia Open WebUI | `openwebui_tool.py`, `openwebui_memory_tool.py` | Kod do wklejenia w Open WebUI → Tools: „moje sprawy” i „pamięć” |
 | Wygląd panelu | `templates/*.html`, `static/*.js` | Szablony HTML (Jinja2) i drobne skrypty |
-| Testy | `test_sebastian.py`, `test_learner.py` | Testy automatyczne (bez prawdziwych skrzynek i bez Ollamy) |
+| Testy | `test_sebastian.py`, `test_learner.py`, `test_docs.py` | Testy automatyczne (bez prawdziwych skrzynek i bez Ollamy) |
 
-### Dwie bazy danych
+### Bazy danych
 
 - `data/sebastian.sqlite3`: maile pobrane przez Sebastiana, analizy, decyzje, zadania, odpowiedzi, kalendarz, notatki. **To serce panelu.**
 - `data/learner/stan.sqlite3`: stan nauki: lista dokumentów i wątków, fakty, podsumowania, archiwum maili, załączniki, synchronizacja z Open WebUI.
+- `data/dokumenty/dokumenty.sqlite3` (od 2.2): dokumenty ze skanów i odczyt każdej strony.
 
 Nauka **czyta** bazę Sebastiana, ale do niej nie pisze. Archiwum skrzynek, które dociąga nauka, trafia wyłącznie do bazy nauki, więc nie zaśmieca kolejki decyzji w panelu.
 
@@ -131,18 +144,20 @@ Nauka **czyta** bazę Sebastiana, ale do niej nie pisze. Archiwum skrzynek, któ
 | Python | 3.11 lub nowszy | Na Macu właściciela: 3.12 (pyenv) |
 | Ollama | Aplikacja Ollama, lokalny model | Analiza poczty: np. `qwen3.5:9b`. Nauka: np. `qwen2.5:14b`. Oba muszą być na liście `ollama list` |
 | Homebrew | https://brew.sh | Do Tesseracta (OCR) |
-| Tesseract | `brew install tesseract tesseract-lang` | Tekst ze skanów i zdjęć (Dysk, załączniki) |
+| Tesseract | `brew install tesseract tesseract-lang` | Tekst ze skanów i zdjęć (Dysk, załączniki, Dokumenty) |
+| ocrmypdf | `brew install ocrmypdf` | Dokumenty: prostowanie, kompresja i warstwa OCR skanów (zalecane, rozdział 8a.3) |
+| Model wizyjny | `ollama pull qwen2.5vl:7b` (ok. 6 GB) | Dokumenty: czytanie stron, także pisma ręcznego. Wymaga Ollamy 0.7+ |
 | Docker Desktop + Open WebUI | opcjonalnie | Rozmowa z modelem z wiedzą Sebastiana |
 | Hasła do skrzynek | IMAP/SMTP | Gmail: **hasło aplikacji** (wymaga 2FA). Murena: hasło konta. Partners: hasło według instrukcji firmy |
 | Google Cloud | projekt z włączonym Google Drive API i kluczem OAuth „Aplikacja komputerowa” | Tylko do czytania Dysku przez naukę (rozdział 5.6) |
 | Miejsce na dysku | kilka–kilkanaście GB | Archiwum maili, pełne teksty, kopie zapasowe |
-| Pamięć RAM | 32 GB wystarcza dla modeli do 14B | Dwa modele (poranek + nauka) mogą być w pamięci jednocześnie |
+| Pamięć RAM | 32 GB wystarcza dla modeli do 14B | Dwa modele (poranek + nauka) mogą być w pamięci jednocześnie. Model wizyjny 7–8B mieści się obok; większe (ok. 30B) — nie |
 
-**Biblioteki Pythona** instaluje `install.command`: `requirements.txt` (panel, poczta, kalendarz) i `requirements-learner.txt` (Dysk Google, PDF, Word, Excel, PowerPoint, OCR). Do testów służy dodatkowo `requirements-test.txt`.
+**Biblioteki Pythona** instaluje `install.command`: `requirements.txt` (panel, poczta, kalendarz) i `requirements-learner.txt` (Dysk Google, PDF, Word, Excel, PowerPoint, OCR, składanie PDF w Dokumentach). Do testów służy dodatkowo `requirements-test.txt`.
 
 ---
 
-## 5. Instalacja od zera (wersja 2.1.3)
+## 5. Instalacja od zera (wersja 2.2)
 
 > Każde polecenie wklejaj do **Terminala** (Cmd + Spacja → „Terminal”) i zatwierdzaj Enterem. Nie przepisuj znaku `%` z końca linii poleceń. Hasła wpisywane w Terminalu są niewidoczne. To normalne.
 
@@ -295,6 +310,7 @@ Rozdział 9.
 - [ ] `learn-status` po godzinie pokazuje przeczytane wątki.
 - [ ] Zakładka Nauka: po kilku godzinach pojawiają się „Bieżące sprawy”.
 - [ ] FileVault włączony (Ustawienia systemowe → Prywatność i ochrona).
+- [ ] Dokumenty: `brew install ocrmypdf`, `ollama pull qwen2.5vl:7b`; w `check` sekcja „6. Dokumenty” bez ✗ (rozdział 8a.3).
 - [ ] `python sebastian.py check` kończy się „✓ Wszystko działa” albo tylko ostrzeżeniami, które rozumiesz.
 
 ---
@@ -382,6 +398,7 @@ python sebastian.py import-text imports/notatka.txt --scope private --source not
 ### 6.8. Rytm pracy właściciela
 
 - **Codziennie (5 min):** panel → Do decyzji → maks. 3 rzeczy do działania. Zakładka Nauka → Bieżące sprawy.
+- **Gdy przychodzi duży skan (np. księga wieczysta):** panel → Dokumenty → wgraj. Po opracowaniu przejrzyj strony „do sprawdzenia” i kliknij „Złóż PDF z poprawkami” (rozdział 8a).
 - **Raz w tygodniu (jeśli Dysk jest włączony):** `python sebastian.py learn-drive` → 1, gdy Mac pokaże powiadomienie. Jeśli Dysk jest już w pełni przeczytany, możesz go wyłączyć (`learn-drive off`) i ten krok odpada.
 - **Raz w tygodniu lub po każdej zmianie:** `python sebastian.py check`, czyli pełne sprawdzenie systemu z podpowiedziami.
 - **Raz w miesiącu:** kopia zapasowa (rozdział 14.1) i rzut oka na `learn-status` (błędy, archiwum).
@@ -410,6 +427,7 @@ Sebastian używa **LaunchAgents** (`~/Library/LaunchAgents/`). Działają po zal
 - Pracuje bez przerwy.
 - Gdy trwa poranek, czeka, żeby nie zajmować Ollamy.
 - Nie usypia Maca (`caffeinate`).
+- Od 2.2 w tej samej usłudze działa wątek **Dokumenty**. Pilnuje `data/dokumenty/wrzuc-tutaj/` i po kolei opracowuje dokumenty z kolejki. Na czas analizy dokumentu nauka z poczty czeka (rozdział 8a.4).
 
 ### Warunki
 
@@ -510,6 +528,131 @@ Po ponownym zalogowaniu nauka sama to zauważy (zmiana pliku `data/learner/token
 
 ---
 
+## 8a. Dokumenty — skany i księgi wieczyste (od 2.2)
+
+Moduł **Dokumenty** zamienia opasły skan (np. księgę wieczystą, Grundbuch, akta sprawy) w **mały, uporządkowany PDF**. Pierwsza strona to spis treści z klikalnymi odnośnikami. Moduł czyta druk, maszynopis i **pismo ręczne**. Wszystko dzieje się lokalnie na Macu, w `data/dokumenty/`.
+
+### 8a.1. Co powstaje
+
+Plik `…_opracowanie.pdf` w folderze dokumentu, otwierany z panelu (Dokumenty → dokument → **Otwórz PDF**):
+
+| Część | Zawartość |
+| --- | --- |
+| Strona 1 | Nazwa, numer księgi i sąd (rozpoznane z tekstu), liczba stron wg rodzaju, **strony do sprawdzenia** (linki), legenda znaczników, **spis treści**: podsumowanie, stan aktualny z najważniejszymi wpisami (linki do wpisów i do skanu), wszystkie wpisy wg działów, do wyjaśnienia, odczyt, skany |
+| 1. Podsumowanie | Krótkie streszczenie przygotowane przez model wyłącznie z wpisów |
+| 2. Stan aktualny | Wpisy nieoznaczone jako wykreślone, pogrupowane wg działów KW: I-O, I-Sp, II, III, IV, wzmianki, inne. Przy każdym link „skan s. N” |
+| 3. Wszystkie wpisy | Także wykreślone (przekreślone), z dokładnym cytatem z odczytu. Gdy cytatu nie da się znaleźć w odczycie, wpis ma ostrzeżenie |
+| 4. Do wyjaśnienia | Rzeczy do sprawdzenia: np. stare hipoteki bez wykreślenia, rozbieżności, niepewne nazwiska i kwoty, wpisy niepotwierdzone cytatem |
+| 5. Odczyt strona po stronie | Pełny tekst każdej strony: żółte tło = niepewne, czerwone = nieczytelne, przekreślenie = tekst wykreślony. Pod stroną: różnice między dwoma odczytami pisma |
+| 6. Skany | Oczyszczone, wyprostowane i zmniejszone skany. Na dole każdej strony link „« spis treści”. Pod skanem jest niewidoczna warstwa tekstu, także z pisma ręcznego, więc Cmd+F znajduje słowa na skanach |
+
+W bocznym panelu PDF (zakładki) jest pełny spis, w tym każda strona skanu z rodzajem, działem i oznaczeniem „do sprawdzenia”.
+
+Dla dokumentów, które nie są księgą wieczystą (rodzaj „inny dokument”), części 2–3 grupują pozycje wg rozdziałów dokumentu: strony umowy, nieruchomości, kwoty, terminy, zobowiązania.
+
+### 8a.2. Jak to działa — cztery etapy
+
+1. **Przygotowanie skanu** (minuty). Strony są renderowane w 200 dpi jako JPEG. Kolor zostaje tylko na stronach, które go mają, np. z czerwonymi wykreśleniami albo kolorowymi pieczęciami. `ocrmypdf` prostuje i obraca strony oraz dodaje warstwę tekstu z Tesseracta (polski, niemiecki, angielski). Strony, które mają prawdziwy tekst (np. wydruk z elektronicznej księgi), zostają bez zmian i nie są czytane przez model. Typowo plik maleje kilka–kilkanaście razy.
+2. **Czytanie stron** (najdłuższy etap). Model wizyjny (`DOC_VISION_MODEL`, domyślnie `qwen2.5vl:7b`) ogląda każdą stronę:
+   - najpierw ją rozpoznaje: druk, maszynopis, rękopis, mieszana, pusta albo rysunek; wykreślenia, pieczęcie, podpisy, dopiski, język,
+   - **druk i maszynopis**: poprawia odczyt Tesseracta, patrząc na obraz, zwłaszcza cyfry, polskie znaki i tabele,
+   - **pismo ręczne i strony mieszane**: tnie stronę na poziome pasy w odstępach między wierszami (rozkładówki najpierw na lewą i prawą połowę), powiększa je i czyta **dwa razy** (drugi raz innym poleceniem albo drugim modelem `DOC_VISION_MODEL_2`). Słowa, w których odczyty się różnią, są oznaczane jako niepewne `⟦…⟧`, a zgodność obu odczytów daje „pewność” strony,
+   - model ma zakaz zgadywania: niepewne słowo oznacza `[?]`, nieczytelne `[nieczytelne]`, przekreślone `~~…~~`, pieczęć `[pieczęć: …]`, podpis `[podpis]`, dopisek `[margines: …]`. Tekst niemiecki (np. kurrenta) przepisuje w oryginale, bez tłumaczenia.
+3. **Porządkowanie** (model tekstowy nauki, `MODEL`). Strona po stronie powstaje lista wpisów (dział, rodzaj, tytuł, treść, numer, data, kwota, osoby, wykreślony). **Każdy wpis musi mieć dokładny cytat z odczytu.** Program sprawdza, czy cytat naprawdę jest na stronie. Jeśli nie, wpis trafia do „Do wyjaśnienia”. Numer księgi (np. `KR1P/00012345/6`) i sąd są wyszukiwane w tekście wprost, bez modelu. Na końcu model pisze podsumowanie i listę rzeczy do wyjaśnienia, wyłącznie na podstawie wpisów (odwołania do nieistniejących wpisów są odrzucane).
+4. **Składanie PDF** (sekundy–minuty). Raport w `reportlab`, skany dołączone przez PyMuPDF, linki, zakładki i warstwa tekstu. Czcionka: Arial z macOS (polskie znaki), tylko użyte litery.
+
+Każda strona i każdy etap zapisuje postęp w `data/dokumenty/dokumenty.sqlite3`. Po restarcie Maca, `learn-stop` albo Ctrl+C praca wraca dokładnie do strony, na której przerwano. Przerwana strona jest czytana od nowa, a gotowe strony nie są czytane ponownie.
+
+Opracowany dokument trafia też do **nauki** (`DOC_TO_LEARNING`): podsumowanie, wpisy i odczyt jako pozycja `doc:<nr>`. Z niego powstają fakty do Profilu wiedzy, Bieżących spraw i RAG.
+
+### 8a.3. Przygotowanie (jednorazowo)
+
+Aktualizator 2.2 proponuje te kroki sam. Ręcznie:
+
+```bash
+brew install ocrmypdf            # prostowanie, kompresja, warstwa OCR (zalecane)
+brew install tesseract-lang      # polski i niemiecki dla Tesseracta (jeśli jeszcze nie ma)
+ollama pull qwen2.5vl:7b         # model, który „widzi” stronę (ok. 6 GB)
+python sebastian.py check        # sekcja „6. Dokumenty” powinna być zielona
+```
+
+Bez `ocrmypdf` moduł też działa: skan jest zmniejszany, a OCR robi Tesseract przy czytaniu strony. Nie ma wtedy prostowania i obracania stron. Model wizyjny wymaga Ollamy w wersji 0.7 lub nowszej. Przy błędzie pobierania zaktualizuj aplikację Ollama.
+
+**Wybór modelu na 32 GB RAM.** `qwen2.5vl:7b` (ok. 6 GB) to bezpieczny wybór: zostaje miejsce na model nauki. Do porównania na własnym skanie można pobrać np. `qwen3-vl:8b` albo `gemma3:12b` i sprawdzić je poleceniem `doc-test` (8a.5). Większe modele wizyjne (ok. 30B) na 32 GB będą działać bardzo wolno albo wcale. Drugi model do podwójnego czytania (`DOC_VISION_MODEL_2`) daje bardziej niezależne odczyty, ale wydłuża pracę i zajmuje pamięć. Domyślnie drugi odczyt robi ten sam model z innym poleceniem.
+
+### 8a.4. Dodanie dokumentu
+
+Trzy sposoby, wynik jest ten sam:
+
+- **Panel:** zakładka **Dokumenty** → wybierz plik (PDF albo zdjęcia JPG/PNG/TIFF, do `DOC_MAX_UPLOAD_MB`), nazwa, rodzaj → **Wgraj i dodaj do kolejki**.
+- **Finder:** skopiuj plik do `data/dokumenty/wrzuc-tutaj/`. Po minucie od końca kopiowania Sebastian przeniesie go do kolejki. Pliki, których nie da się otworzyć, trafiają do `wrzuc-tutaj/nieudane/`.
+- **Terminal:** `python sebastian.py doc-add ~/Downloads/KW.pdf --nazwa "KW Kraków, ul. Przykładowa 1" --typ kw`. Plik jest **kopiowany**, oryginał zostaje na miejscu.
+
+Rodzaj: `auto` (rozpoznaj po treści), `kw` (księga wieczysta lub Grundbuch), `ogolny` (umowa, akt, akta sprawy).
+
+Analizę prowadzi **usługa nauki w tle** (`learn-start`). Dokumenty są opracowywane po kolei, jeden naraz. Na czas analizy dokumentu nauka z poczty czeka (`DOC_PAUSE_LEARNING`), żeby modele nie walczyły o Ollamę. Rano, w trakcie poranka Sebastiana, czeka też dokument. Gdy usługa nauki nie działa, dokument można przetworzyć w oknie Terminala: `python sebastian.py doc-run` (Mac nie uśnie do końca, Ctrl+C przerywa, a postęp zostaje).
+
+**Ile to trwa** (Mac Studio M1 Max, `qwen2.5vl:7b`, orientacyjnie): strona z tekstem cyfrowym — sekundy; druk lub maszynopis — ok. 0,5–1,5 min; rękopis — ok. 2–4 min (kilka pasów × 2 odczyty); porządkowanie — ok. 15–40 s na stronę. Księga na 300 stron z pismem ręcznym to typowo 12–30 godzin, czyli praca na noc albo dwie. Panel i `doc-list` pokazują szacunek pozostałego czasu, liczony z dotychczasowego tempa.
+
+### 8a.5. Sprawdzanie i poprawki
+
+1. Panel → Dokumenty → dokument → **Strony**. Strony z żółtą ramką są **do sprawdzenia**: mają niepewne słowa, nieczytelne fragmenty albo pewność poniżej `DOC_CHECK_BELOW`. Filtry: wszystkie, do sprawdzenia, z pismem ręcznym.
+2. Kliknięcie strony otwiera porównanie: skan po lewej (kliknij obraz, by go powiększyć), odczyt po prawej. Pod spodem jest tabela „Drugi odczyt różnił się”.
+3. Popraw tekst. Po sprawdzeniu usuń nawiasy `⟦ ⟧`. Zaznacz **Strona sprawdzona** i **Zapisz** (albo **Zapisz i przejdź do następnej do sprawdzenia**).
+4. Po poprawkach kliknij na stronie dokumentu **Złóż PDF z poprawkami**. Ponownie porządkowane są **tylko poprawione strony**, potem powstaje nowy PDF.
+
+**Trudne pismo.** Przycisk „pobrać je jako ZIP” (albo `doc-export NR`) pakuje obrazy stron do sprawdzenia i ich odczyt. Możesz pokazać je komuś, kto czyta dawne pismo, albo innemu narzędziu (np. Transkribus dla kurrenty). Poprawiony tekst wpisujesz potem w panelu. ZIP powstaje tylko na Twoje żądanie, a Sebastian niczego nigdzie nie wysyła.
+
+**Test modelu na własnym skanie** (nic nie zapisuje):
+
+```bash
+python sebastian.py doc-test ~/Downloads/KW.pdf --strona 12
+```
+
+Pokazuje rodzaj strony, obserwacje, odczyt z oznaczeniami, różnice dwóch odczytów i czas. Do porównania modeli: `learn-set DOC_VISION_MODEL qwen3-vl:8b`, ponownie `doc-test`, a następnie ustawienie lepszego modelu na stałe (i `learn-start`).
+
+### 8a.6. Pliki dokumentu
+
+`data/dokumenty/<nr>-<nazwa>/`:
+
+| Plik | Zawartość |
+| --- | --- |
+| `oryginal.pdf` | Kopia wgranego pliku (zdjęcia zamienione na PDF) |
+| `skan.pdf` | Skan po przygotowaniu (wyprostowany, zmniejszony, z warstwą OCR) |
+| `ocr.txt` | Tekst z Tesseracta, strony rozdzielone znakiem nowej strony |
+| `…_opracowanie.pdf` | **Wynik** |
+| `odczyt.md` | Pełny odczyt strona po stronie (Markdown) — „Pobierz odczyt” w panelu |
+| `wpisy.json` | Wpisy, podsumowanie i lista do wyjaśnienia (dane maszynowe) |
+| `do_nauki.md` | Tekst przekazany do nauki |
+| `podglad/` | Miniatury dla panelu (można usunąć, odtworzą się) |
+| `…_do_sprawdzenia.zip` | Tylko po kliknięciu „pobierz jako ZIP” / `doc-export` |
+
+Baza: `data/dokumenty/dokumenty.sqlite3` (`jobs` — dokumenty i etapy; `pages` — odczyt każdej strony: rodzaj, obserwacje, tekst, inne odczytania, pewność, czas, sprawdzenie ręczne, wpisy). Blokada `data/dokumenty/.praca.lock` pilnuje, żeby jeden dokument analizował tylko jeden proces.
+
+### 8a.7. Jakość i granice — co warto wiedzieć
+
+- **To opracowanie robocze, nie odpis.** W sprawach prawnych rozstrzyga aktualny odpis z sądu albo oryginał. PDF ma przy każdym wpisie link do skanu właśnie po to, żeby łatwo to sprawdzić.
+- **Cyfry.** Numery działek, kwoty i PESEL-e model przepisuje „znak po znaku”, ale przy słabym skanie może się pomylić. Takie miejsca są zwykle oznaczone na żółto, a mimo to warto sprawdzić je na skanie.
+- **Pismo ręczne.** Współczesne, wyraźne pismo urzędnicze model czyta w większości dobrze. Stare pismo, zwłaszcza niemiecka kurrenta, wymaga sprawdzenia w panelu. Dwa odczyty pokazują, gdzie model się waha.
+- **Wykreślenia.** O „stanie aktualnym” decyduje rozpoznanie przekreślenia (`~~…~~`) albo informacji o wykreśleniu. Jeśli wykreślenie jest osobnym wpisem na innej stronie, model może go nie połączyć z pierwotnym wpisem. Lista „Do wyjaśnienia” zwykle to wyłapuje, a ostatecznie warto to sprawdzić ręcznie.
+- **Model nie dopisuje wpisów.** Wpis bez potwierdzającego cytatu jest wyraźnie oznaczony. Podsumowanie opiera się wyłącznie na wpisach.
+
+### 8a.8. Najczęstsze problemy
+
+| Objaw | Działanie |
+| --- | --- |
+| Dokument stoi w „czytaniu stron”, w panelu „Brak modelu wizyjnego” | `ollama pull qwen2.5vl:7b` (albo model z `DOC_VISION_MODEL`). Analiza ruszy sama |
+| „Usługa nauki nie działa w tle — dokumenty czekają” | `python sebastian.py learn-start` albo `doc-run` |
+| Stan „błąd” | Panel → dokument → komunikat; `tail -n 50 data/logs/learner.log`; po usunięciu przyczyny **Wznów** (`doc-resume NR`) |
+| `ocrmypdf` kończy się błędem | Program sam ponawia bez prostowania, a potem pracuje bez ocrmypdf. Sprawdź `brew upgrade ocrmypdf` |
+| Bardzo wolno | `learn-set DOC_DOUBLE_READ nie` (jeden odczyt pisma: ok. 2× szybciej, mniej pewności), mniejszy `DOC_MAX_STRIPS`. Potem `learn-start` |
+| Drobne pismo czytane słabo | `learn-set DOC_SCAN_DPI 300` i `learn-set DOC_READ_DPI 300` (większy plik, wolniej), potem `doc-rebuild NR strony` |
+| Wynikowy PDF za duży | `learn-set DOC_SCAN_DPI 150`, `DOC_JPEG_QUALITY 60`, `DOC_KEEP_COLOR nie`; zmiana obowiązuje dla nowych dokumentów |
+| Źle rozpoznane działy / zły rodzaj dokumentu | `doc-rebuild NR struktura` (bez ponownego czytania stron). Rodzaj ustaw przy dodaniu (`--typ kw`) |
+| Mac się nagrzewa / jest wolny przy pracy | To normalne przy długiej analizie. Można wstrzymać dokument (`doc-pause NR`) i wznowić w nocy |
+
+---
+
 ## 9. Połączenie z Open WebUI
 
 Są trzy niezależne mechanizmy. Można używać dowolnych.
@@ -584,16 +727,18 @@ sebastian-start/
 ├── learner_mail.py           nauka: poczta, archiwum, wątki
 ├── learner_attach.py         nauka: załączniki
 ├── learner_web.py            zakładka Nauka
+├── learner_docs.py           Dokumenty: skany → uporządkowany PDF (od 2.2)
+├── learner_docs_web.py       zakładka Dokumenty
 ├── openwebui_tool.py         narzędzie Open WebUI „moje sprawy”
 ├── openwebui_memory_tool.py  narzędzie Open WebUI „pamięć”
 ├── rollback.py               PRZESTARZAŁE (1.3) — nie używać, patrz 15.6
 ├── templates/  static/       panel (HTML, JS)
-├── test_sebastian.py  test_learner.py
+├── test_sebastian.py  test_learner.py  test_docs.py
 ├── requirements*.txt  install.command  start.command
 ├── README.md  DOKUMENTACJA.md  ZACZNIJ_TUTAJ.txt
 └── docs/
     ├── TESTY.md              co i jak przetestowano
-    ├── aktualizacje/         instrukcje przejścia między wersjami (1.1 … 2.1.3)
+    ├── aktualizacje/         instrukcje przejścia między wersjami (1.1 … 2.2)
     └── archiwum/             podręcznik PDF wersji 1.0
 ```
 
@@ -622,6 +767,10 @@ sebastian-start/
         ├── teksty/                 pełne teksty dokumentów i wątków  🔒
         ├── rag/fakty/              fakty pogrupowane pod RAG
         └── tmp/                    pliki chwilowe (zawsze puste po pracy)
+    └── dokumenty/                  (od 2.2) skany i opracowania  🔒
+        ├── dokumenty.sqlite3       postęp i odczyt każdej strony 🔒
+        ├── wrzuc-tutaj/            folder do wrzucania skanów z Findera
+        └── 0001-<nazwa>/           oryginal.pdf, skan.pdf, …_opracowanie.pdf, odczyt.md (rozdział 8a.6)
 ```
 
 🔒 oznacza dane wrażliwe: maile, dane klientów, klucze.
@@ -660,6 +809,15 @@ sebastian-start/
 | `attachments`, `message_attachments`, `att_done` | Teksty załączników (pod SHA-1), powiązania, stan sprawdzenia |
 | `rag_sync` | Co i kiedy wysłano do Open WebUI |
 | `meta` | Znaczniki czasu i stany: ostatni skan, profil, Bieżące sprawy, logowanie Google (`login_at`), dostęp do Dysku (`drive_state`, `drive_notified`), błędy logowania do skrzynek (`mail_fail_<konto>`) |
+
+Opracowane dokumenty są w kolejce nauki jako `files.id = doc:<nr>` (od 2.2).
+
+**`data/dokumenty/dokumenty.sqlite3`** (od 2.2)
+
+| Tabela | Zawartość |
+| --- | --- |
+| `jobs` | Dokumenty: nazwa, folder, plik źródłowy, rodzaj (`kind_hint`: auto/kw/ogolny, `profile`: kw/ogolny), `status` (`queued` → `prepare` → `pages` → `structure` → `build` → `done`; także `paused`, `error`), opis postępu, wielkości, `meta` (numer KW, sąd, podsumowanie, do wyjaśnienia, użyty OCR) |
+| `pages` | Każda strona: tekst cyfrowy, OCR, rodzaj, obserwacje (JSON), odczyt końcowy, inne odczytania, pewność, czas, `verified` (sprawdzona ręcznie), `entries` (wpisy JSON; puste = do ponownego uporządkowania), dział |
 
 ---
 
@@ -720,6 +878,20 @@ Każde polecenie uruchamiaj w folderze `sebastian-start` z aktywnym `.venv`: `py
 | `learn-import ŚCIEŻKA --merge` | **Dołącza** wiedzę dawnego Drive Learnera do działającej nauki (dokumenty, fakty, profil, teksty, logowanie). Nic z poczty nie ginie. Przed scaleniem robi kopię `data/learner/stan-przed-scaleniem-….sqlite3` |
 | `learn-import ŚCIEŻKA [--force]` | Przeniesienie stanu Drive Learnera do **pustej** nauki. `--force` **zastępuje** obecny stan (utrata poczty z nauki). Nie używaj, gdy nauka już działa — użyj `--merge` |
 | `learn-run` | Pętla nauki na pierwszym planie (normalnie uruchamia ją launchd) |
+
+### 11.4. Dokumenty (od 2.2)
+
+| Polecenie | Co robi |
+| --- | --- |
+| `doc-add PLIK [--nazwa N] [--typ auto\|kw\|ogolny]` | Kopiuje skan do `data/dokumenty/` i dodaje do kolejki |
+| `doc-list` | Lista dokumentów: stan, postęp, szacunek czasu, wielkość wyniku |
+| `doc-status NR` | Szczegóły: etap, rodzaje stron, strony do sprawdzenia, numer KW, ścieżka wyniku |
+| `doc-run [NR]` | Analiza w tym oknie Terminala (gdy nauka nie działa w tle). Mac nie uśnie, Ctrl+C przerywa, a postęp zostaje |
+| `doc-test PLIK [--strona N]` | Czyta jedną stronę i pokazuje wynik (do wyboru modelu). Nic nie zapisuje |
+| `doc-pause NR` / `doc-resume NR` | Wstrzymanie / wznowienie (także po błędzie) |
+| `doc-rebuild NR [pdf\|struktura\|strony]` | Ponownie: tylko PDF / porządkowanie wpisów / czytanie stron (strony sprawdzone ręcznie zostają) |
+| `doc-export NR` | ZIP ze stronami do sprawdzenia (obrazy + odczyt) |
+| `doc-remove NR [--tak]` | Usuwa dokument z folderem (pyta o potwierdzenie) |
 
 ---
 
@@ -831,6 +1003,32 @@ Zmieniaj poleceniem `python sebastian.py learn-set KLUCZ WARTOŚĆ`, potem `lear
 | `RAG_SYNC_EVERY_HOURS` | `24` | Automatyczna wysyłka |
 | `RAG_MAX_UPLOADS_PER_RUN` | `300` | Limit plików na rundę |
 
+**Dokumenty (od 2.2)**
+
+| Klucz | Domyślnie | Znaczenie |
+| --- | --- | --- |
+| `DOC_ENABLED` | `tak` | Usługa nauki opracowuje dokumenty z kolejki |
+| `DOC_VISION_MODEL` | `qwen2.5vl:7b` | Model wizyjny (musi być w `ollama list`) |
+| `DOC_VISION_MODEL_2` | puste | Drugi model do podwójnego czytania pisma; puste = ten sam model, inne polecenie |
+| `DOC_DOUBLE_READ` | `tak` | Pismo ręczne czytane dwa razy; różnice oznaczane jako niepewne |
+| `DOC_PAUSE_LEARNING` | `tak` | Nauka z poczty czeka, gdy trwa analiza dokumentu |
+| `DOC_READ_DPI` | `200` | Rozdzielczość, w jakiej model ogląda stronę |
+| `DOC_READ_WIDTH` | `1600` | Do tej szerokości (px) powiększane są pasy z pismem |
+| `DOC_MAX_STRIPS` | `4` | Na ile pasów najwyżej dzielona jest strona |
+| `DOC_SCAN_DPI` | `200` | Rozdzielczość skanów w wyniku (mniej = mniejszy plik) |
+| `DOC_JPEG_QUALITY` | `75` | Jakość JPEG skanów |
+| `DOC_KEEP_COLOR` | `tak` | Kolor zostaje na stronach z kolorem (czerwone wykreślenia, pieczęcie) |
+| `DOC_OPTIMIZE` | `2` | Kompresja ocrmypdf: 1 bezstratna, 2 zalecana, 3 najmocniejsza |
+| `DOC_CLEAN_FINAL` | `nie` | Czyszczenie tła także w skanie wynikowym (może osłabić blade pismo) |
+| `DOC_OCR_LANGS` | `pol+deu+eng` | Języki Tesseracta (używane tylko zainstalowane) |
+| `DOC_NUM_CTX` | `12288` | Kontekst modelu wizyjnego |
+| `DOC_KEEP_ALIVE` | `10m` | Jak długo Ollama trzyma model wizyjny w pamięci |
+| `DOC_CHECK_BELOW` | `0.85` | Strony z mniejszą pewnością trafiają „do sprawdzenia” |
+| `DOC_SCAN_LABELS` | `tak` | Mały podpis „Skan — strona N · « spis treści” na skanach |
+| `DOC_TO_LEARNING` | `tak` | Opracowany dokument trafia do nauki |
+| `DOC_SCOPE` | `private` | Zakres w nauce (wpływa na RAG: `RAG_SCOPES`) |
+| `DOC_MAX_UPLOAD_MB` | `3000` | Największy plik przez panel (większe: folder `wrzuc-tutaj`) |
+
 ---
 
 ## 13. Bezpieczeństwo i prywatność
@@ -864,6 +1062,7 @@ Tak się zdarzyło 15.10.2026: repozytorium z folderem `data/` było publiczne. 
 - Open WebUI: kopie w kontenerze może czytać administrator kontenera. Narzędzia sprawdzają e-mail użytkownika i zakres. Używaj **lokalnych** modeli i lokalnego silnika osadzeń (`bge-m3`).
 - Zakres firmowy (`work`) zawiera dane klientów inPartners. Nie podłączaj go do modeli współdzielonych z innymi osobami.
 - Model ma zakaz zapisywania w faktach danych wrażliwych innych osób. Pełne teksty w `teksty/` zawierają jednak całe dokumenty.
+- `data/dokumenty/` zawiera pełne skany (np. księgi wieczyste z PESEL-ami i adresami). Traktuj je jak resztę `data/`. ZIP „do sprawdzenia” powstaje tylko na żądanie. Zastanów się, komu go przekazujesz.
 - Logi nie zawierają treści maili ani haseł. Przy prośbie o pomoc nie wysyłaj bazy, `panel.token`, `learner.json` ani maili klientów.
 
 ---
@@ -925,6 +1124,7 @@ Aktualizacje przychodzą jako plik `Sebastian_aktualizacja_X_Y.py` albo paczka Z
 | W logu `token repeat limit reached` / „Model zapętlił się na fragmencie” | Model utknął na powtarzalnym tekście (np. tabela z PDF). Od 2.1.1 program ponawia z inną temperaturą, a w razie potrzeby pomija ten jeden fragment. Pojedyncze wpisy są normalne. Gdy jest ich dużo, rozważ inny model (`learn-set MODEL …`) |
 | Mac zwalnia | `learn-set PAUSE_BETWEEN_CALLS_S 3` albo mniejszy `MODEL`, potem `learn-start` |
 | Kończy się miejsce | `du -sh data/learner/*`. Ogranicz `MAIL_HISTORY_SINCE` / `ATTACHMENTS_SINCE` albo wyłącz `SAVE_TEXT` |
+| Dokumenty: dokument nie rusza / jest wolny / ma słaby odczyt | Rozdział 8a.8 |
 | Komunikat aktualizatora „STOP” | Nic nie zmieniono albo przywrócono kopię. Skopiuj komunikat i skonsultuj |
 
 **Pierwszy krok przy każdym problemie:** `python sebastian.py check`. Pokazuje, co nie działa, i podpowiada polecenie naprawcze.
@@ -942,7 +1142,9 @@ Przy prośbie o pomoc podaj: wynik `check`, dokładne polecenie, komunikat błę
 - **Nauka** łączy się z Sebastianem przez `learner.bind(s)`. Moduł nie ma efektów ubocznych przy imporcie, bo panel też go importuje. Sygnały i logowanie konfiguruje dopiero `run()`.
 - **Polecenia `learn-*` i `check`** są obsługiwane przed blokadą `job.lock`, więc nie blokują poranka. Pozostałe polecenia biorą blokadę.
 - **Dostęp do Dysku** obsługuje klasa `Drive` w `learner.py`. Nie ponawia logowania przy każdym wątku: próbuje po zmianie `token.json` albo co `RETRY_HOURS`. Stan zapisuje w `meta.drive_state` (`ok` / `expired` / `off`), a powiadomienie wysyła najwyżej raz na dobę (`meta.drive_notified`).
-- **Diagnostyka `check`** (`learner.cmd_check`) tylko czyta. Każdy nowy element systemu powinien dostać w niej swoją kontrolę z podpowiedzią naprawy.
+- **Diagnostyka `check`** (`learner.cmd_check`) tylko czyta. Każdy nowy element systemu powinien dostać w niej swoją kontrolę z podpowiedzią naprawy (Dokumenty: `learner_docs.check`).
+- **Dokumenty** (`learner_docs.py`) mają własną bazę `data/dokumenty/dokumenty.sqlite3` i etapy wznawialne (`process()` → `prepare` / `read_pages` / `structure` / `build`). Każdy etap zwraca `False`, gdy trzeba poczekać (brak modelu, wstrzymanie, poranek, `STOP`) — wtedy nic nie jest oznaczane jako zrobione. Wątek `worker()` działa w procesie nauki. Blokada `fcntl` na `.praca.lock` pilnuje, by `doc-run` i usługa nie pracowały jednocześnie. `busy()` mówi nauce, by poczekała. Zasada bezpieczeństwa: model wizyjny tylko przepisuje, model tekstowy tylko porządkuje, a każdy wpis musi mieć cytat sprawdzany funkcją `quote_found()`. Numer KW i sąd są wyszukiwane wyrażeniami regularnymi, nie przez model.
+- **Duże pliki w panelu:** ogólny limit żądania to 6 MB. Tylko trasa `docs_upload` podnosi go w `protect()` (`request.max_content_length`) przed odczytem formularza (CSRF).
 - **IMAP:** zawsze `select(…, readonly=True)` i `BODY.PEEK`. Testy to sprawdzają.
 - **AI:** Sebastian używa `format` ze schematem JSON i walidacji (`validate_result`, terminy muszą mieć cytat z treści). Nauka używa `format: json` i odrzuca nieczytelne odpowiedzi. Dla modeli „myślących” (qwen3, deepseek-r1…) wysyłane jest `think: false`.
 - **Podpis wątku (`files.sig`)** decyduje o ponownym czytaniu. Zmiana sposobu liczenia podpisu powoduje ponowne czytanie **wszystkich** wątków. Zmieniaj go tak, jak 2.1: tylko dla wątków, których zmiana dotyczy.
@@ -952,10 +1154,10 @@ Przy prośbie o pomoc podaj: wynik `check`, dokładne polecenie, komunikat błę
 
 ```bash
 python -m pip install -r requirements-test.txt
-python -m unittest test_sebastian.py test_learner.py -v
+python -m unittest test_sebastian.py test_learner.py test_docs.py -v
 ```
 
-Testy używają tymczasowego katalogu danych, symulowanego IMAP i symulowanej Ollamy. Nie dotykają prawdziwych skrzynek. Testy załączników wymagają `requirements-learner.txt`. Każda zmiana powinna dodać test do odpowiedniego pliku. Opis zakresu testów jest w `docs/TESTY.md`.
+Testy używają tymczasowego katalogu danych, symulowanego IMAP i symulowanej Ollamy. Nie dotykają prawdziwych skrzynek. Testy załączników i dokumentów wymagają `requirements-learner.txt` (testy dokumentów generują własny „skan” i nie potrzebują ocrmypdf ani modelu wizyjnego). Każda zmiana powinna dodać test do odpowiedniego pliku. Opis zakresu testów jest w `docs/TESTY.md`.
 
 **Środowisko testowe z danymi demo** (bez prawdziwej poczty):
 
@@ -977,13 +1179,14 @@ Panel demo nie może działać równocześnie z panelem w tle (ten sam port). Na
 
 ### 15.4. Wydawanie aktualizacji
 
-Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3):
+Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2):
 
 - jeden plik `Sebastian_aktualizacja_X_Y.py` z zawartością nowych plików,
 - sprawdzenie skrótów SHA-256 plików poprzedniej wersji (odmowa przy ręcznych zmianach, `--force` świadomie),
 - zatrzymanie nauki **z odczekaniem, aż launchd ją naprawdę zwolni** (inaczej `bootstrap` zwraca kod 5), kopia plików i bazy w `backups/`, atomowa podmiana (`os.replace`),
 - test importu i `learn-status`, przywrócenie kopii przy błędzie,
-- przeładowanie panelu (`launchctl kickstart -k`) i wznowienie nauki.
+- przeładowanie panelu (`launchctl kickstart -k`) i wznowienie nauki,
+- (od 2.2) doinstalowanie brakujących bibliotek z `requirements-learner.txt` **przed** podmianą plików oraz — za zgodą użytkownika — narzędzi zewnętrznych (`brew install ocrmypdf`, `ollama pull …`) **po** udanej aktualizacji, tak żeby ich błąd nie cofał aktualizacji.
 
 ### 15.5. Git
 
@@ -1002,6 +1205,7 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3):
 - Brak CC/BCC i „odpowiedz wszystkim”. Kalendarz bez synchronizacji na żywo i bez API map.
 - Nauka czyta wątek ponownie po każdej nowej odpowiedzi. Przy bardzo długich wątkach to koszt czasu.
 - Akta spraw i osób (zestawienia per osoba lub sprawa z faktów i tekstów) to kolejny planowany etap. Dane są już zbierane (`teksty/`, `facts` ze źródłem i datą).
+- Dokumenty: model wizyjny był testowany w kodzie na symulowanych odpowiedziach. Jakość odczytu konkretnych skanów zależy od modelu, więc przed dużym dokumentem warto zrobić `doc-test` na kilku trudnych stronach. Wykreślenie zapisane jako osobny wpis na innej stronie nie zawsze jest łączone z pierwotnym wpisem (8a.7). Niewidoczna warstwa tekstu na skanach pisma ręcznego nie jest dopasowana do położenia słów (wyszukiwanie znajdzie stronę, ale nie podświetli dokładnego miejsca).
 
 ---
 
@@ -1019,6 +1223,7 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3):
 | 2.1.1 | 15.10.2026 | Odporność na „zapętlenie” modelu (`token repeat limit reached`): kara za powtórzenia, ponowienie z inną temperaturą, pominięcie jednego trudnego fragmentu zamiast całego dokumentu |
 | 2.1.2 | 15.10.2026 | Polecenie `check` (pełna diagnostyka), `learn-import --merge` (scalenie Drive Learnera z działającą nauką), niezawodne `learn-start`/`learn-stop` (czekanie na macOS) |
 | 2.1.3 | 19.10.2026 | Wygaśnięcie logowania do Dysku: jeden komunikat zamiast wpisu przy każdym wątku, baner w panelu, polecenie `learn-drive` z wyborem (zaloguj ponownie / wyłącz Dysk) |
+| 2.2 | 19.10.2026 | **Dokumenty**: duże skany (druk, maszynopis, pismo ręczne, Grundbuch) → mały PDF ze spisem treści i linkami; model wizyjny z podwójnym czytaniem pisma, wpisy KW wg działów z weryfikacją cytatów, sprawdzanie i poprawki stron w panelu, praca wznawialna w tle (1–2 dni), przekazanie do nauki; polecenia `doc-*`, sekcja „6. Dokumenty” w `check` |
 
 Szczegóły każdej wersji: `docs/aktualizacje/AKTUALIZACJA_X_Y.md`.
 
@@ -1038,6 +1243,10 @@ Szczegóły każdej wersji: `docs/aktualizacje/AKTUALIZACJA_X_Y.md`.
 | **Bieżące sprawy** | Przegląd spraw z ostatnich tygodni, odtwarzany od nowa |
 | **Profil wiedzy** | Trwała, scalana wiedza o właścicielu w sekcjach |
 | **RAG** | Wyszukiwanie pasujących fragmentów wiedzy i podawanie ich modelowi przy odpowiedzi |
+| **Model wizyjny** | Model, który dostaje obraz strony (nie tylko tekst) i „widzi” układ, pismo ręczne, przekreślenia, pieczęcie |
+| **OCR** | Rozpoznawanie tekstu ze skanu (Tesseract). Dobre dla druku, słabe dla pisma ręcznego |
+| **Opracowanie (Dokumenty)** | Wynikowy PDF: spis treści, wpisy, odczyt i skany z linkami |
+| **Do sprawdzenia** | Strona z niepewnym odczytem — do porównania ze skanem w panelu |
 | **Embedding / bge-m3** | Zamiana tekstu na wektor do wyszukiwania po znaczeniu; bge-m3 dobrze rozumie polski |
 | **Zakres (scope)** | `private` (Gmail, Murena) albo `work` (Partners); `drive` dla Dysku w nauce |
 | **LaunchAgent** | Zadanie macOS uruchamiane po zalogowaniu użytkownika |

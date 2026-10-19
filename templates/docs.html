@@ -1,0 +1,17 @@
+{% extends 'base.html' %}{% block body %}
+<h1>Dokumenty — skany w porządku</h1>
+<p class="notice">Wrzuć duży skan (np. księgę wieczystą — drukowaną, pisaną na maszynie albo ręcznie). Sebastian na Twoim Macu wyprostuje i zmniejszy skan, przeczyta każdą stronę lokalnym modelem, który „widzi” stronę ({{model}}), uporządkuje wpisy i złoży <b>mały PDF ze spisem treści i klikalnymi odnośnikami</b>. Nic nie wychodzi poza Maca. Duży dokument może się analizować nawet 1–2 dni — postęp jest zapisywany, więc restart nie szkodzi.</p>
+{% if not ready %}<p class="notice"><b>Uwaga:</b> {{msg}}</p>{% endif %}
+{% if not running %}<p class="notice"><b>Usługa nauki nie działa w tle</b> — dokumenty czekają. Włącz: <code>python sebastian.py learn-start</code> (albo przetwórz od razu w Terminalu: <code>python sebastian.py doc-run</code>).</p>{% endif %}
+{% if not ocrmypdf %}<p class="notice">Brak <b>ocrmypdf</b> — dokumenty będą czytane, ale bez prostowania stron i z mniejszą kompresją. Zainstaluj: <code>brew install ocrmypdf</code></p>{% endif %}
+<div class="card"><h2>Dodaj dokument</h2>
+<form method="post" action="/docs/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{csrf}}">
+<label>Plik (PDF albo zdjęcia skanu, do {{max_mb}} MB)<br><input type="file" name="plik" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp" required></label>
+<label>Nazwa (opcjonalnie)<br><input type="text" name="nazwa" placeholder="np. KW Kraków, ul. Przykładowa 1"></label>
+<label>Rodzaj<br><select name="typ"><option value="auto">rozpoznaj sam</option><option value="kw">księga wieczysta / Grundbuch</option><option value="ogolny">inny dokument (akt, umowa, akta sprawy)</option></select></label>
+<button>Wgraj i dodaj do kolejki</button></form>
+<p><small>Bardzo duże pliki możesz też po prostu skopiować w Finderze do folderu <code>{{inbox}}</code> — Sebastian sam je zauważy (po minucie od skończenia kopiowania). W Terminalu: <code>python sebastian.py doc-add ~/Downloads/plik.pdf</code></small></p></div>
+<div class="card"><h2>Dokumenty</h2>{% if jobs %}<table><tr><th>Nr</th><th>Dokument</th><th>Stron</th><th>Stan</th><th>Postęp / wynik</th></tr>
+{% for j in jobs %}<tr><td>{{j.id}}</td><td><a href="/docs/{{j.id}}">{{j.name}}</a><br><small>{{j.src_name}}</small></td><td>{{j.pages}}</td><td>{{j.status_pl}}</td><td>{{j.progress}}{% if j.status=='done' %}<br><a href="/docs/{{j.id}}/pdf">Otwórz PDF</a>{% endif %}</td></tr>{% endfor %}</table>
+{% else %}<p>Jeszcze nic tu nie ma.</p>{% endif %}</div>
+{% endblock %}

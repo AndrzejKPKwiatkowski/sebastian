@@ -8,3 +8,7 @@ python-pptx>=1.0,<2
 openpyxl>=3.1,<4
 pytesseract>=0.3.13,<1
 pillow>=10.4,<13
+# Dokumenty (Sebastian 2.2): składanie PDF i dzielenie stron z pismem ręcznym
+reportlab>=4.2,<6
+numpy>=1.26,<3
+fonttools>=4.50,<5

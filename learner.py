@@ -1,4 +1,4 @@
-"""Sebastian 2.1.3 — moduł nauki (dawny Drive Learner) z czytaniem załączników.
+"""Sebastian 2.2 — moduł nauki (dawny Drive Learner) z czytaniem załączników i dokumentów (skanów).
 
 Lokalny model (Ollama) czyta w tle Dysk Google, pocztę z Sebastiana i pełne archiwum
 skrzynek, wyciąga fakty o właścicielu i składa z nich:
@@ -93,6 +93,28 @@ DEFAULTS = {
     "RAG_SCOPES": ["drive", "private", "work"],
     "RAG_SYNC_EVERY_HOURS": 24,
     "RAG_MAX_UPLOADS_PER_RUN": 300,
+    # Dokumenty — opracowanie skanów, także pisanych ręcznie (2.2)
+    "DOC_ENABLED": True,                # usługa nauki opracowuje też dokumenty z kolejki
+    "DOC_VISION_MODEL": "qwen2.5vl:7b", # model, który „widzi” stronę (ollama pull qwen2.5vl:7b)
+    "DOC_VISION_MODEL_2": "",           # drugi model do podwójnego czytania pisma; puste = ten sam
+    "DOC_DOUBLE_READ": True,            # pismo ręczne czytane dwa razy — różnice oznaczane jako niepewne
+    "DOC_PAUSE_LEARNING": True,         # nauka czeka, gdy trwa analiza dokumentu (nie walczą o Ollamę)
+    "DOC_READ_DPI": 200,                # rozdzielczość, z jaką model ogląda stronę
+    "DOC_READ_WIDTH": 1600,             # do takiej szerokości (px) powiększane są pasy z pismem ręcznym
+    "DOC_MAX_STRIPS": 4,                # na ile pasów najwyżej dzielona jest strona z pismem
+    "DOC_SCAN_DPI": 200,                # rozdzielczość skanów w wynikowym PDF (mniej = mniejszy plik)
+    "DOC_JPEG_QUALITY": 75,
+    "DOC_KEEP_COLOR": True,             # kolor zostaje na stronach z kolorem (np. czerwone wykreślenia)
+    "DOC_OPTIMIZE": 2,                  # kompresja ocrmypdf: 1 bezstratna, 2 zalecana, 3 najmocniejsza
+    "DOC_CLEAN_FINAL": False,           # czyszczenie tła także w wynikowym skanie (może osłabić blade pismo)
+    "DOC_OCR_LANGS": "pol+deu+eng",
+    "DOC_NUM_CTX": 12288,
+    "DOC_KEEP_ALIVE": "10m",
+    "DOC_CHECK_BELOW": 0.85,            # strony z mniejszą pewnością odczytu trafiają „do sprawdzenia”
+    "DOC_SCAN_LABELS": True,            # na skanach mały podpis „strona N · « spis treści”
+    "DOC_TO_LEARNING": True,            # opracowany dokument trafia też do nauki (fakty, RAG)
+    "DOC_SCOPE": "private",
+    "DOC_MAX_UPLOAD_MB": 3000,          # największy plik przyjmowany przez panel
 }
 
 CURRENT_CAT = "Bieżące sprawy i zobowiązania"
@@ -779,6 +801,10 @@ def process_file(con, service, f):
         import learner_mail
         log.info(f"→ {f['path']}")
         text, origin = learner_mail.thread_text(con, f["id"])
+    elif f["id"].startswith("doc:"):
+        import learner_docs
+        log.info(f"→ {f['path']}  (opracowany skan)")
+        text, origin = learner_docs.learning_text(f["id"]), "dokument opracowany przez Sebastiana (data/dokumenty)"
     else:
         if service is None:
             return
@@ -819,7 +845,7 @@ def process_file(con, service, f):
 
 
 def next_file(con, drive_ok):
-    where = "status='new'" + ("" if drive_ok else " AND (id LIKE 'mail:%' OR id LIKE 'import:%')")
+    where = "status='new'" + ("" if drive_ok else " AND (id LIKE 'mail:%' OR id LIKE 'import:%' OR id LIKE 'doc:%')")
     return con.execute(f"SELECT * FROM files WHERE {where} ORDER BY priority, modified DESC LIMIT 1").fetchone()
 
 
@@ -964,7 +990,7 @@ def update_current(con, force=False):
 
 def stats(con):
     g = lambda q: con.execute(q).fetchone()[0]  # noqa: E731
-    drive = "id NOT LIKE 'mail:%' AND id NOT LIKE 'import:%'"
+    drive = "id NOT LIKE 'mail:%' AND id NOT LIKE 'import:%' AND id NOT LIKE 'doc:%'"
     mail = "(id LIKE 'mail:%' OR id LIKE 'import:%')"
     return {
         "drive_all": g(f"SELECT COUNT(*) FROM files WHERE {drive}"),
@@ -982,6 +1008,7 @@ def stats(con):
         "attachments": g("SELECT COUNT(*) FROM attachments WHERE text<>''"),
         "att_messages": g("SELECT COUNT(*) FROM att_done WHERE state='ok'"),
         "att_unknown": g("SELECT COUNT(*) FROM history_mails WHERE att IS NULL"),
+        "docs_done": g("SELECT COUNT(*) FROM files WHERE id LIKE 'doc:%' AND status='done'"),
     }
 
 
@@ -1231,14 +1258,21 @@ def run():
     drive = Drive(con)
     if C.MAIL_ENABLED and C.MAIL_HISTORY:
         threading.Thread(target=learner_mail.history_worker, name="archiwum", daemon=True).start()
+    docs_busy = lambda: False  # noqa: E731
+    if C.DOC_ENABLED:
+        import learner_docs
+        threading.Thread(target=learner_docs.worker, name="dokumenty", daemon=True).start()
+        if C.DOC_PAUSE_LEARNING:
+            docs_busy = learner_docs.busy
     log.info(f"Start nauki. Model: {C.MODEL}. Dysk: {'tak' if drive.service else 'nie'}. "
              f"Poczta: {'tak' if C.MAIL_ENABLED else 'nie'}.")
     busy_logged = False
     while not STOP:
         try:
-            if sebastian_busy():
+            if sebastian_busy() or docs_busy():
                 if not busy_logged:
-                    log.info("Trwa poranna analiza Sebastiana — czekam, żeby nie zajmować Ollamy.")
+                    log.info("Trwa poranna analiza Sebastiana — czekam, żeby nie zajmować Ollamy." if sebastian_busy() else
+                             "Trwa analiza dokumentu (zakładka Dokumenty) — nauka czeka, żeby nie zajmować Ollamy.")
                     busy_logged = True
                 sleep(60)
                 continue
@@ -1306,6 +1340,12 @@ def cmd_status():
     print(f"Ostatni RAG:        {meta_get(con, 'last_rag_sync', '—')}")
     print(f"Wyniki:             {LEARN / 'wyniki'}")
     print(f"Dostęp do Dysku:    {drive_status_text(con)}")
+    with contextlib.suppress(Exception):
+        import learner_docs
+        with contextlib.closing(learner_docs.db()) as dc:
+            n = dc.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+            active = dc.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','prepare','pages','structure','build')").fetchone()[0]
+        print(f"Dokumenty (skany):  {n} · w toku: {active} (szczegóły: python sebastian.py doc-list)")
 
 
 def coerce(key, value):
@@ -1722,6 +1762,13 @@ def cmd_check():
                                                             "Ustawienia systemowe → Prywatność i ochrona → FileVault")
     free_gb = shutil.disk_usage(S.DATA).free / 1e9
     (ok if free_gb > 30 else warn)(f"wolne miejsce na dysku: {free_gb:.0f} GB")
+
+    print("\n6. Dokumenty (skany)")
+    try:
+        import learner_docs
+        learner_docs.check(ok, warn, bad)
+    except Exception as e:
+        warn(f"nie sprawdzono dokumentów ({type(e).__name__}: {str(e)[:120]})")
 
     print("\n" + ("✓ Wszystko działa." if not problems and not warnings else
                   f"Do poprawy: {len(problems)} · Do sprawdzenia: {len(warnings)}"))

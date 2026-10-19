@@ -1,8 +1,8 @@
 # Sebastian — lokalne centrum spraw, które uczy się o Tobie
 
-Sebastian działa na Macu właściciela. Codziennie pobiera pocztę z trzech skrzynek (tylko odczyt), lokalny model AI (Ollama) ją streszcza i porządkuje, a Ty w panelu decydujesz, co pominąć, co zrobić i na co odpowiedzieć. Moduł **Nauka** czyta w tle Dysk Google, całą pocztę i załączniki, a potem buduje **Bieżące sprawy** i **Profil wiedzy**. Wiedza trafia też do Open WebUI, żeby czat z lokalnym modelem znał kontekst.
+Sebastian działa na Macu właściciela. Codziennie pobiera pocztę z trzech skrzynek (tylko odczyt), lokalny model AI (Ollama) ją streszcza i porządkuje, a Ty w panelu decydujesz, co pominąć, co zrobić i na co odpowiedzieć. Moduł **Nauka** czyta w tle Dysk Google, całą pocztę i załączniki, a potem buduje **Bieżące sprawy** i **Profil wiedzy**. Wiedza trafia też do Open WebUI, żeby czat z lokalnym modelem znał kontekst. Moduł **Dokumenty** zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w mały PDF ze spisem treści i klikalnymi odnośnikami.
 
-**Wersja: 2.1.3**
+**Wersja: 2.2**
 
 ## Od czego zacząć
 
@@ -16,10 +16,12 @@ Sebastian działa na Macu właściciela. Codziennie pobiera pocztę z trzech skr
 
 ```bash
 cd ~/SebastianSystem/sebastian-start && source .venv/bin/activate
-python sebastian.py check           # pełne sprawdzenie: Ollama, panel, poranek, nauka, Dysk, bezpieczeństwo
+python sebastian.py check           # pełne sprawdzenie: Ollama, panel, poranek, nauka, Dysk, bezpieczeństwo, dokumenty
 python sebastian.py doctor          # czy Ollama i model działają
 python sebastian.py learn-status    # postęp nauki
 python sebastian.py learn-drive     # Dysk Google: zaloguj ponownie albo wyłącz
+python sebastian.py doc-add ~/Downloads/KW.pdf   # skan do opracowania (albo panel → Dokumenty)
+python sebastian.py doc-list        # postęp opracowania dokumentów
 python sebastian.py backup          # kopia bazy panelu
 ```
 

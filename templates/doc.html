@@ -1,0 +1,21 @@
+{% extends 'base.html' %}{% block body %}
+<p><a href="/docs">← Dokumenty</a></p>
+<h1>{{job.name}}</h1>
+<p class="notice">Stan: <b>{{status_pl}}</b>{% if progress %} — {{progress}}{% endif %}{% if job.error %}<br><b>Błąd:</b> {{job.error}}{% endif %}<br><small>Folder: <code>{{folder}}</code></small></p>
+{% if edited %}<p class="notice"><b>Masz poprawione strony.</b> Złóż nowy PDF, żeby poprawki trafiły do spisu treści i wpisów.</p>{% endif %}
+<div class="quick-controls">
+{% if job.status=='done' %}<a href="/docs/{{job.id}}/pdf"><button type="button">Otwórz PDF</button></a><a href="/docs/{{job.id}}/pdf?pobierz=1"><button type="button" class="secondary">Pobierz PDF</button></a><a href="/docs/{{job.id}}/odczyt"><button type="button" class="secondary">Pobierz odczyt (tekst)</button></a>{% endif %}
+{% if job.status in ['queued','prepare','pages','structure','build'] %}<form method="post" action="/docs/{{job.id}}/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="pause"><button class="secondary">Wstrzymaj</button></form>{% endif %}
+{% if job.status in ['paused','error'] %}<form method="post" action="/docs/{{job.id}}/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="resume"><button>Wznów</button></form>{% endif %}
+{% if job.status in ['done','error'] %}<form method="post" action="/docs/{{job.id}}/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="apply"><button{% if not edited %} class="secondary"{% endif %}>Złóż PDF z poprawkami</button></form>
+<form method="post" action="/docs/{{job.id}}/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="rebuild"><button class="secondary">Uporządkuj treść od nowa</button></form>{% endif %}
+</div>
+{% if meta.numer or meta.sad %}<p>{% if meta.numer %}Numer księgi: <b>{{meta.numer}}</b>{% endif %}{% if meta.sad %} · {{meta.sad}}{% endif %}</p>{% endif %}
+{% if meta.podsumowanie %}<details class="card" open><summary><b>Podsumowanie</b> (model, na podstawie wpisów)</summary><p>{{meta.podsumowanie}}</p></details>{% endif %}
+{% if meta.do_wyjasnienia %}<details class="card"><summary><b>Do wyjaśnienia</b> ({{meta.do_wyjasnienia|length}})</summary><ul>{% for x in meta.do_wyjasnienia[:60] %}<li>{{x.tekst}}{% if x.wpisy %} <small>({{x.wpisy|join(', ')}})</small>{% endif %}</li>{% endfor %}</ul></details>{% endif %}
+<div class="card"><h2>Strony</h2>
+<p><a href="?f=all">wszystkie ({{counts.all}})</a> · <a href="?f=check">do sprawdzenia ({{counts.check}})</a> · <a href="?f=hand">z pismem ręcznym ({{counts.hand}})</a></p>
+<p><small>Kliknij stronę, żeby porównać odczyt ze skanem i go poprawić. Strony „do sprawdzenia” mają niepewne fragmenty (żółte w PDF) albo niską zgodność dwóch odczytów.{% if counts.check %} Możesz też <a href="/docs/{{job.id}}/do-sprawdzenia.zip">pobrać je jako ZIP</a> (obrazy + odczyt) — np. żeby pokazać trudne pismo komuś albo innemu narzędziu; poprawki wpisujesz potem tutaj.{% endif %}</small></p>
+<div style="display:flex;flex-wrap:wrap;gap:12px">{% for r in rows %}<a href="/docs/{{job.id}}/strona/{{r.n}}" style="width:150px;text-decoration:none;color:inherit"><img src="/docs/{{job.id}}/img/{{r.n}}?w=300" loading="lazy" alt="strona {{r.n}}" style="width:150px;border:2px solid {{'#e0a400' if r.check else '#d9e2e5'}};border-radius:6px;background:#fff"><br><small><b>{{r.n}}</b> · {{r.kind_pl}}{% if r.status=='done' and r.kind not in ['tekst','pusta'] %} · {{((r.conf or 0)*100)|round|int}}%{% endif %}{% if r.verified %} · ✓{% elif r.check %} · do sprawdzenia{% endif %}</small></a>{% endfor %}</div></div>
+<details class="card"><summary>Usuń dokument</summary><form method="post" action="/docs/{{job.id}}/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="remove"><p>Usuwa folder dokumentu (oryginał, skan, opracowanie) i jego wpisy. Wpisz TAK:</p><input type="text" name="confirm" style="width:120px"> <button class="secondary">Usuń</button></form></details>
+{% endblock %}

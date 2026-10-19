@@ -94,3 +94,24 @@ Data: 2026-10-19. Wynik: 30 testów zaliczonych.
 - Zakładka Nauka pokazuje baner przy wygasłym logowaniu.
 
 Nie sprawdzono tu: prawdziwego wygaśnięcia tokenu Google i powiadomień macOS. Sprawdzisz je na Macu poleceniem `python sebastian.py learn-drive`.
+
+
+# Weryfikacja 2.2 — Dokumenty (skany → uporządkowany PDF)
+
+Data: 2026-10-19. Wynik: 43 testy zaliczone (13 nowych w `test_docs.py`).
+
+Testy generują własny „skan” (obrazy stron z tekstem księgi wieczystej) i udają model wizyjny oraz tekstowy:
+
+- **Cały przebieg:** przygotowanie → czytanie stron → porządkowanie → PDF. Strona „pisana ręcznie” jest czytana dwa razy. Słowo, w którym odczyty się różnią, jest oznaczone jako niepewne, a strona trafia „do sprawdzenia”. Słowo oznaczone przez model `[?]` jest niepewne.
+- **Weryfikacja cytatów:** wpis „wymyślony” przez model (cytatu nie ma w odczycie) jest oznaczony i trafia do „Do wyjaśnienia”. Odwołanie podsumowania do nieistniejącego wpisu jest odrzucane. Tekst przekreślony (`~~`) oznacza wpis jako wykreślony.
+- **PDF:** strona 1 ma spis treści i numer księgi. Wszystkie linki „skan s. N” prowadzą do właściwych stron skanu (żaden link `scan:` nie zostaje). W bocznym spisie jest „6. Skany oryginału” i każda strona. Na skanie działa wyszukiwanie tekstu z odczytu pisma. Link „« spis treści” prowadzi do strony 1.
+- **Wznawianie:** przerwanie w trakcie strony (Ctrl+C / zatrzymanie usługi) nie zapisuje niedokończonej strony. Po wznowieniu gotowe strony nie są czytane ponownie.
+- **Poprawki w panelu:** zła CSRF → 403, zapis strony, „Złóż PDF z poprawkami” porządkuje ponownie tylko poprawioną stronę. Strona sprawdzona znika z listy „do sprawdzenia”. ZIP „do sprawdzenia” zawiera obraz strony i odczyt.
+- **Duży plik w panelu:** wgranie pliku > 7 MB przechodzi (osobny limit tylko dla wgrywania), a inne formularze nadal mają limit 6 MB (413).
+- **Folder „wrzuc-tutaj”:** świeżo kopiowany plik czeka, starszy trafia do kolejki. Blokada: drugi proces nie wejdzie, `busy()` działa.
+- **Usługa nauki:** `learn-run` ma w środku wątek dokumentów, który opracowuje dokument z kolejki. Zatrzymanie kończy wątki.
+- **Nauka:** opracowany dokument trafia do kolejki nauki (`doc:<nr>`) i jest przetwarzany jak dokument. Nie liczy się do „Dysku”.
+- Polecenia `doc-*` są kierowane do modułu, a `doctor` nie.
+- Dodatkowo, ręcznie: 12-stronicowy kolorowy skan 300 dpi (48 MB) po przygotowaniu przez ocrmypdf ma 5,1 MB (bez ocrmypdf 5,3 MB), strona przekrzywiona o 1,5° została wyprostowana, a polskie znaki w PDF są poprawne (Arial/DejaVu, tylko użyte litery).
+
+Nie sprawdzono tu: **jakości odczytu prawdziwym modelem wizyjnym** (`qwen2.5vl:7b`) na Twoich skanach, w szczególności pisma ręcznego i kurrenty, ani rzeczywistego czasu pracy na Macu. Sprawdzisz to poleceniem `python sebastian.py doc-test PLIK --strona N` na kilku trudnych stronach przed wrzuceniem całej księgi.
