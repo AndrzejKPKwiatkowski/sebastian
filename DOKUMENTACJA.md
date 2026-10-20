@@ -1,7 +1,7 @@
 # Sebastian — pełna dokumentacja projektu
 
-**Wersja opisana w dokumencie: 2.2** (październik 2026)
-Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników, oraz modułem Dokumenty, który zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w uporządkowany PDF ze spisem treści.
+**Wersja opisana w dokumencie: 2.3** (październik 2026)
+Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników, modułem Dokumenty, który zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w uporządkowany PDF ze spisem treści, oraz Sebastianem na WhatsAppie: poranny przegląd z głosówką i rozmowa w ciągu dnia.
 
 > **Dla kogo jest ten dokument.** Dla osoby, która przejmuje projekt albo musi coś w nim zrobić ręcznie: zainstalować od zera, przenieść na inny komputer, naprawić, zaktualizować albo rozwinąć kod. Nie trzeba być programistą, żeby korzystać z rozdziałów 1–14. Rozdział 15 jest dla osoby, która zmienia kod.
 
@@ -13,11 +13,12 @@ Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę
 2. [Zasady, których projekt pilnuje](#2-zasady-których-projekt-pilnuje)
 3. [Jak to działa — architektura](#3-jak-to-działa--architektura)
 4. [Wymagania](#4-wymagania)
-5. [Instalacja od zera (wersja 2.2)](#5-instalacja-od-zera-wersja-22)
+5. [Instalacja od zera (wersja 2.3)](#5-instalacja-od-zera-wersja-23)
 6. [Codzienna praca w panelu](#6-codzienna-praca-w-panelu)
 7. [Praca w tle — harmonogramy macOS](#7-praca-w-tle--harmonogramy-macos)
 8. [Moduł Nauka — szczegóły](#8-moduł-nauka--szczegóły)
 8a. [Dokumenty — skany i księgi wieczyste (od 2.2)](#8a-dokumenty--skany-i-księgi-wieczyste-od-22)
+8b. [WhatsApp — Sebastian w telefonie (od 2.3)](#8b-whatsapp--sebastian-w-telefonie-od-23)
 9. [Połączenie z Open WebUI](#9-połączenie-z-open-webui)
 10. [Mapa plików i danych](#10-mapa-plików-i-danych)
 11. [Wszystkie polecenia](#11-wszystkie-polecenia)
@@ -32,7 +33,7 @@ Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę
 
 ## 1. Czym jest Sebastian
 
-Sebastian to program działający **wyłącznie na Macu właściciela** (Mac Studio M1 Max). Składa się z trzech współpracujących części.
+Sebastian to program działający **wyłącznie na Macu właściciela** (Mac Studio M1 Max). Składa się z czterech współpracujących części.
 
 **Centrum spraw (panel).** Strona w przeglądarce pod adresem http://127.0.0.1:8765. Sebastian:
 
@@ -55,6 +56,12 @@ Sebastian to program działający **wyłącznie na Macu właściciela** (Mac Stu
 - prostują i zmniejszają skan, czytają każdą stronę lokalnym **modelem wizyjnym**; pismo ręczne czytają dwa razy i zaznaczają miejsca niepewne,
 - porządkują wpisy (działy księgi, właściciele, hipoteki, służebności…) i składają **mały PDF ze spisem treści i klikalnymi odnośnikami** do wpisów i stron skanu,
 - pozwalają w panelu porównać odczyt ze skanem i go poprawić (rozdział 8a).
+
+**WhatsApp (od wersji 2.3).** Sebastian jako kontakt w telefonie:
+
+- codziennie rano wysyła krótki przegląd dnia i głosówkę („Hej Andrzej! …”), w której opowiada, na co zwrócić uwagę,
+- odpowiada na Twoje wiadomości i głosówki: zadania, pilne sprawy, kalendarz, „zrobione 2”, „zapamiętaj: …” i zwykłe pytania o Twoje sprawy,
+- przysyła powiadomienia (dokument gotowy, wygasło logowanie…), z ciszą nocną (rozdział 8b).
 
 **Open WebUI** to osobna aplikacja (w Dockerze), w której rozmawia się z lokalnym modelem. Sebastian przekazuje do niej raporty, pamięć i wiedzę z nauki (rozdział 9).
 
@@ -91,6 +98,8 @@ Pilnuj ich przy każdej zmianie kodu i konfiguracji.
      │          │        ▼                                                               │
      └─IMAP archiwum + załączniki ─► NAUKA (learner*.py, w tle) ── fakty ──► Ollama      │
   skany (panel / wrzuc-tutaj) ─► DOKUMENTY (learner_docs.py) ─ model wizyjny ─┘          │
+  telefon ⇄ WhatsApp (E2E) ⇄ WHATSAPP (whatsapp*.py, w tle) ─ przegląd, rozmowa ─► Ollama │
+                │                 głos: Piper → głosówka · słuch: mlx-whisper · odczyt baz│
                 │                       data/dokumenty/  …_opracowanie.pdf  ──► nauka    │
   Dysk Google ─────── API (odczyt) ─►   data/learner/stan.sqlite3                        │
                 │                       data/learner/wyniki/  Bieżące sprawy, Profil     │
@@ -121,15 +130,19 @@ Pilnuj ich przy każdej zmianie kodu i konfiguracji.
 | Nauka — panel | `learner_web.py`, `templates/learner.html` | Zakładka „Nauka” (tylko podgląd) |
 | Dokumenty | `learner_docs.py` | Przygotowanie skanu (ocrmypdf), czytanie stron modelem wizyjnym, wpisy KW, składanie PDF, polecenia `doc-*` |
 | Dokumenty — panel | `learner_docs_web.py`, `templates/docs.html`, `doc.html`, `doc_page.html` | Zakładka „Dokumenty”: wgrywanie, postęp, sprawdzanie i poprawki stron |
+| WhatsApp | `whatsapp.py` | Przegląd (dane → model → tekst + głosówka), rozmowa i komendy, kolejka wysyłki, harmonogram, usługa `wa-run`, polecenia `wa-*` |
+| WhatsApp — połączenie | `whatsapp_link.py` | Połączenie z WhatsAppem (neonize), filtr „tylko właściciel”, parowanie QR/kodem |
+| WhatsApp — panel | `whatsapp_web.py`, `templates/whatsapp.html` | Zakładka „WhatsApp”: stan, podgląd i odsłuch przeglądu, wysyłka, historia rozmowy |
 | Narzędzia Open WebUI | `openwebui_tool.py`, `openwebui_memory_tool.py` | Kod do wklejenia w Open WebUI → Tools: „moje sprawy” i „pamięć” |
 | Wygląd panelu | `templates/*.html`, `static/*.js` | Szablony HTML (Jinja2) i drobne skrypty |
-| Testy | `test_sebastian.py`, `test_learner.py`, `test_docs.py` | Testy automatyczne (bez prawdziwych skrzynek i bez Ollamy) |
+| Testy | `test_sebastian.py`, `test_learner.py`, `test_docs.py`, `test_whatsapp.py` | Testy automatyczne (bez prawdziwych skrzynek i bez Ollamy) |
 
 ### Bazy danych
 
 - `data/sebastian.sqlite3`: maile pobrane przez Sebastiana, analizy, decyzje, zadania, odpowiedzi, kalendarz, notatki. **To serce panelu.**
 - `data/learner/stan.sqlite3`: stan nauki: lista dokumentów i wątków, fakty, podsumowania, archiwum maili, załączniki, synchronizacja z Open WebUI.
 - `data/dokumenty/dokumenty.sqlite3` (od 2.2): dokumenty ze skanów i odczyt każdej strony.
+- `data/whatsapp/whatsapp.sqlite3` (od 2.3): kolejka wysyłki, rozmowa, historia przeglądów.
 
 Nauka **czyta** bazę Sebastiana, ale do niej nie pisze. Archiwum skrzynek, które dociąga nauka, trafia wyłącznie do bazy nauki, więc nie zaśmieca kolejki decyzji w panelu.
 
@@ -147,6 +160,8 @@ Nauka **czyta** bazę Sebastiana, ale do niej nie pisze. Archiwum skrzynek, któ
 | Tesseract | `brew install tesseract tesseract-lang` | Tekst ze skanów i zdjęć (Dysk, załączniki, Dokumenty) |
 | ocrmypdf | `brew install ocrmypdf` | Dokumenty: prostowanie, kompresja i warstwa OCR skanów (zalecane, rozdział 8a.3) |
 | Model wizyjny | `ollama pull qwen2.5vl:7b` (ok. 6 GB) | Dokumenty: czytanie stron, także pisma ręcznego. Wymaga Ollamy 0.7+ |
+| ffmpeg, libmagic | `brew install ffmpeg libmagic` | WhatsApp: głosówki i biblioteka połączenia (rozdział 8b.4) |
+| Konto WhatsApp dla Sebastiana | zalecane: osobny numer (karta SIM/eSIM + WhatsApp Business) | Można też użyć własnego numeru (czat „Ty”), rozdział 8b.1 |
 | Docker Desktop + Open WebUI | opcjonalnie | Rozmowa z modelem z wiedzą Sebastiana |
 | Hasła do skrzynek | IMAP/SMTP | Gmail: **hasło aplikacji** (wymaga 2FA). Murena: hasło konta. Partners: hasło według instrukcji firmy |
 | Google Cloud | projekt z włączonym Google Drive API i kluczem OAuth „Aplikacja komputerowa” | Tylko do czytania Dysku przez naukę (rozdział 5.6) |
@@ -157,7 +172,7 @@ Nauka **czyta** bazę Sebastiana, ale do niej nie pisze. Archiwum skrzynek, któ
 
 ---
 
-## 5. Instalacja od zera (wersja 2.2)
+## 5. Instalacja od zera (wersja 2.3)
 
 > Każde polecenie wklejaj do **Terminala** (Cmd + Spacja → „Terminal”) i zatwierdzaj Enterem. Nie przepisuj znaku `%` z końca linii poleceń. Hasła wpisywane w Terminalu są niewidoczne. To normalne.
 
@@ -311,6 +326,7 @@ Rozdział 9.
 - [ ] Zakładka Nauka: po kilku godzinach pojawiają się „Bieżące sprawy”.
 - [ ] FileVault włączony (Ustawienia systemowe → Prywatność i ochrona).
 - [ ] Dokumenty: `brew install ocrmypdf`, `ollama pull qwen2.5vl:7b`; w `check` sekcja „6. Dokumenty” bez ✗ (rozdział 8a.3).
+- [ ] WhatsApp: `wa-setup`, `wa-login`, `wa-test` (próbna głosówka). Sebastian przysłał powitanie, a na „pomoc” odpowiada listą komend (rozdział 8b.4).
 - [ ] `python sebastian.py check` kończy się „✓ Wszystko działa” albo tylko ostrzeżeniami, które rozumiesz.
 
 ---
@@ -397,7 +413,7 @@ python sebastian.py import-text imports/notatka.txt --scope private --source not
 
 ### 6.8. Rytm pracy właściciela
 
-- **Codziennie (5 min):** panel → Do decyzji → maks. 3 rzeczy do działania. Zakładka Nauka → Bieżące sprawy.
+- **Codziennie (5 min):** przegląd i głosówka na WhatsAppie przy kawie. Potem panel → Do decyzji → maks. 3 rzeczy do działania. W ciągu dnia: pytania do Sebastiana na WhatsAppie („pilne”, „zadania”, „zrobione 2”).
 - **Gdy przychodzi duży skan (np. księga wieczysta):** panel → Dokumenty → wgraj. Po opracowaniu przejrzyj strony „do sprawdzenia” i kliknij „Złóż PDF z poprawkami” (rozdział 8a).
 - **Raz w tygodniu (jeśli Dysk jest włączony):** `python sebastian.py learn-drive` → 1, gdy Mac pokaże powiadomienie. Jeśli Dysk jest już w pełni przeczytany, możesz go wyłączyć (`learn-drive off`) i ten krok odpada.
 - **Raz w tygodniu lub po każdej zmianie:** `python sebastian.py check`, czyli pełne sprawdzenie systemu z podpowiedziami.
@@ -414,6 +430,7 @@ Sebastian używa **LaunchAgents** (`~/Library/LaunchAgents/`). Działają po zal
 | `pl.sebastian.panel` | `sebastian.py serve` | zawsze, restart po awarii | `morning-setup` / `schedule remove` |
 | `pl.sebastian.jobs` | `sebastian.py morning-run` | 06:30 + co 15 minut | `morning-setup` / `schedule remove` |
 | `pl.sebastian.learner` | `caffeinate -is … sebastian.py learn-run` | zawsze, restart po awarii | `learn-start` / `learn-stop` |
+| `pl.sebastian.whatsapp` | `caffeinate -i … sebastian.py wa-run` | zawsze, restart po awarii (od 2.3) | `wa-start` / `wa-stop` |
 
 ### Poranek (`morning-run`)
 
@@ -438,6 +455,7 @@ Mac musi być włączony, zalogowany i nieuśpiony, z działającą Ollamą, Int
 ```bash
 launchctl print gui/$(id -u)/pl.sebastian.panel | head -5
 launchctl print gui/$(id -u)/pl.sebastian.learner | head -5
+launchctl print gui/$(id -u)/pl.sebastian.whatsapp | head -5
 launchctl kickstart -k gui/$(id -u)/pl.sebastian.panel    # przeładuj panel (np. po aktualizacji kodu)
 tail -n 30 data/logs/jobs.log
 tail -f data/logs/learner.log
@@ -653,6 +671,113 @@ Baza: `data/dokumenty/dokumenty.sqlite3` (`jobs` — dokumenty i etapy; `pages` 
 
 ---
 
+## 8b. WhatsApp — Sebastian w telefonie (od 2.3)
+
+Sebastian jest też kontaktem na WhatsAppie. **Rano** wysyła krótki przegląd dnia i **głosówkę** („Hej Andrzej! …”), w której opowiada szerzej, na co zwrócić uwagę. W ciągu dnia **odpowiada na Twoje wiadomości i głosówki**: komendy (zadania, pilne, kalendarz…) i zwykłe pytania o Twoje sprawy. Dostajesz też **powiadomienia** (dokument gotowy, wygasło logowanie do Dysku…), z ciszą nocną.
+
+### 8b.1. Jak to działa
+
+```
+ Twój telefon (WhatsApp)  ⇄  WhatsApp (szyfrowanie end-to-end)  ⇄  Mac: usługa pl.sebastian.whatsapp (wa-run)
+                                                                     │  „połączone urządzenie”, jak WhatsApp Web
+                                                                     ├─ przegląd: dane z panelu, kalendarza, nauki, dokumentów → model (Ollama) → tekst
+                                                                     ├─ głos: tekst → Piper (polski głos, lokalnie) → ffmpeg → głosówka OGG/Opus
+                                                                     ├─ słuch: Twoja głosówka → mlx-whisper (lokalnie) → tekst
+                                                                     └─ odpowiedź: komenda albo model z kontekstem Twoich spraw
+```
+
+- **Połączenie:** Sebastian łączy się z kontem WhatsApp jako **połączone urządzenie** (Ustawienia → Połączone urządzenia), tak jak WhatsApp Web. Robi to biblioteka `neonize` (oparta na `whatsmeow`). Wiadomości są szyfrowane end-to-end, jak w telefonie. Sesja (klucze) leży w `data/whatsapp/sesja.sqlite3`.
+- **Konto Sebastiana — zalecane: osobny numer.** Np. tania karta SIM (albo drugi numer/eSIM) z aplikacją **WhatsApp Business** na zapasowym telefonie lub jako drugi numer w Twoim telefonie. Zapisz ten numer w kontaktach jako „Sebastian”. Wtedy Sebastian jest zwykłym kontaktem, a Twoje główne konto nie jest powiązane z nieoficjalną biblioteką. **Można też połączyć Twój własny numer.** Sebastian pisze wtedy w czacie „Ty” (wiadomości do siebie) i słucha tylko tego, co tam napiszesz.
+- **Słucha tylko Ciebie.** Przyjmuje wyłącznie wiadomości z numeru `WA_OWNER_PHONE` (także w nowej adresacji WhatsAppa „LID”). Grupy, statusy i inni ludzie są ignorowani i nawet nie zapisywani. Wiadomości starsze niż 6 godzin (np. po wyłączeniu Maca) są zapisywane, ale bez odpowiedzi.
+- **Telefon z kontem Sebastiana musi mieć od czasu do czasu Internet.** WhatsApp odłącza połączone urządzenia, gdy główny telefon jest offline przez ok. 14 dni.
+
+### 8b.2. Poranny przegląd
+
+1. O `WA_BRIEF_TIME` (domyślnie 07:00) usługa sprawdza, czy skończyła się poranna analiza poczty (06:30). Czeka na nią najwyżej godzinę. Jeśli Mac był uśpiony, przegląd przyjdzie po przebudzeniu, ale nie później niż `WA_BRIEF_LATEST` (11:30).
+2. Zbiera dane (tylko odczyt): nowe maile z poranka według priorytetu (macierz z panelu), otwarte zadania z terminami (także po terminie), pilne i ważne sprawy, wpisy z kalendarzy zaimportowanych w panelu, liczbę maili do decyzji, stan dokumentów oraz notatkę „Bieżące sprawy” z nauki. Tylko z zakresów `WA_SCOPES`.
+3. Model Sebastiana (ten od poczty; `WA_MODEL`) pisze **wiadomość** (do ok. 900 znaków, w punktach) i **tekst głosówki** (ok. 1,5–2 minuty, mową potoczną, „Hej Andrzej! …”). Model dostaje wyłącznie zebrane dane i ma zakaz wymyślania. Gdy Ollama nie działa, przychodzi **przegląd awaryjny** złożony z samych liczb i tytułów.
+4. Głosówka powstaje lokalnie: **Piper** z polskim głosem `pl_PL-darkman-medium` (męski). Gdy go nie ma, używany jest głos macOS (`say`, `WA_SAY_VOICE`). `ffmpeg` zamienia nagranie na format głosówki WhatsApp (OGG/Opus).
+5. Wiadomość i głosówka trafiają do kolejki i są wysyłane. Historia przeglądów z nagraniem do odsłuchania jest w panelu: zakładka **WhatsApp**.
+
+Opcjonalnie: **wieczorne podsumowanie** (`WA_EVENING`, co zamknięte, co jutro w kalendarzu) i **tygodniowe** (`WA_WEEKLY`).
+
+### 8b.3. Rozmowa — co możesz napisać (albo nagrać)
+
+| Wiadomość | Co robi Sebastian |
+| --- | --- |
+| `pomoc` | Lista komend |
+| `przegląd` / `co dziś` | Dzisiejszy przegląd od nowa (tekst + głosówka) |
+| `pilne` | Pilne i ważne sprawy (z poczty i zadań) |
+| `zadania` | Otwarte zadania z numerami i terminami |
+| `zrobione 2` | Oznacza zadanie nr 2 (z ostatniej listy) jako wykonane — jak przycisk w panelu: wpis w dzienniku zdarzeń, można cofnąć |
+| `poczta` | Nowe maile z poranka z priorytetami |
+| `kalendarz` / `jutro` | Wpisy na dziś / jutro |
+| `dokumenty` | Postęp opracowania skanów |
+| `zapamiętaj: …` | Notatka w Pamięci bota (prywatnej). Korzystają z niej analizy i Open WebUI |
+| `wieczór` / `tydzień` | Podsumowanie teraz |
+| `cisza` / `cisza do 14` / `wznów` | Wyciszenie powiadomień (na pytania Sebastian dalej odpowiada) |
+| `status` | Czy działa Ollama, poranek, nauka, dokumenty |
+| każde inne pytanie | Odpowiedź modelu z danych: dzisiejszy kontekst, Bieżące sprawy, fakty z nauki pasujące do słów pytania, maile z ostatnich 120 dni, notatki. Jeśli czegoś nie wie — mówi to wprost |
+
+**Głosówki od Ciebie** są zamieniane na tekst lokalnie (`mlx-whisper`, model `WA_WHISPER_MODEL`, pobierany przy pierwszym użyciu, ok. 1,5 GB). Na głosówkę Sebastian odpowiada tekstem i głosówką (`WA_REPLY_VOICE`). Podczas pisania odpowiedzi widać „pisze…”, a Twoja wiadomość dostaje niebieskie ptaszki.
+
+Sebastian **nie wysyła maili, nie usuwa i nie zmienia niczego poza dwiema świadomymi komendami** (`zrobione N`, `zapamiętaj:`). Obie zostawiają ślad w dzienniku zdarzeń panelu. Treść maili traktuje jako dane, nie polecenia.
+
+**Rozmowa bez WhatsAppa** (np. do wypróbowania odpowiedzi): `python sebastian.py wa-chat`. Te same komendy i odpowiedzi, w Terminalu.
+
+### 8b.4. Uruchomienie (jednorazowo, ok. 15 minut)
+
+Aktualizator 2.3 proponuje kroki 1–2 sam.
+
+```bash
+brew install ffmpeg libmagic                         # głosówki i biblioteka WhatsApp
+python -m pip install -r requirements-whatsapp.txt   # neonize, Piper, mlx-whisper
+python sebastian.py wa-setup                         # Twój numer, imię, godzina przeglądu; pobiera polski głos
+python sebastian.py wa-login                         # połączenie: kod QR w Terminalu
+python sebastian.py wa-test                          # sprawdzenie + próbna głosówka (odtwarza się na Macu)
+```
+
+`wa-login`: na telefonie z kontem **Sebastiana** wybierz WhatsApp → Ustawienia → **Połączone urządzenia** → **Połącz urządzenie** i zeskanuj kod z Terminala (jest też w `data/whatsapp/qr.png`). Gdy skanowanie jest niewygodne: `python sebastian.py wa-login --kod`. Wtedy w telefonie wybierz „Połącz za pomocą numeru telefonu” i wpisz pokazany kod. Na końcu `wa-login` proponuje uruchomienie usługi w tle (`wa-start`). Po starcie Sebastian wysyła powitanie z listą komend.
+
+**Próba bez WhatsAppa:** `python sebastian.py wa-set WA_TRANSPORT plik`. Wiadomości trafiają wtedy do `data/whatsapp/wyslane/`. Podgląd przeglądu z odsłuchem: `python sebastian.py wa-brief --podglad` albo panel → WhatsApp → „Podgląd przeglądu”.
+
+### 8b.5. Pliki i baza
+
+`data/whatsapp/` 🔒:
+
+| Plik | Zawartość |
+| --- | --- |
+| `whatsapp.json` | Ustawienia `WA_*` (12.3) |
+| `whatsapp.sqlite3` | `outbox` (kolejka wysyłki: tekst/głos, cel, próby, błędy), `inbox` (Twoje wiadomości, także transkrypcje głosówek), `briefs` (historia przeglądów: tekst, tekst głosówki, nagranie, model/awaryjny), `meta` (wysłane przeglądy, wyciszenie, znak życia usługi, połączone konto, numery zadań z ostatniej listy) |
+| `sesja.sqlite3` | **Klucze połączenia z WhatsAppem** — jak hasło. Kto ma ten plik, może pisać jako konto Sebastiana |
+| `glosy/` | Głos Piper (`.onnx` + `.json`) |
+| `nagrania/` | Głosówki (`.ogg` wysłane, `.wav` do odsłuchu w panelu) |
+| `wyslane/` | Tylko w trybie próby (`WA_TRANSPORT plik`) |
+
+Log: `data/logs/whatsapp.log` (bez treści wiadomości). Błędy programu: `data/logs/whatsapp.err`.
+
+### 8b.6. Prywatność i ryzyko — uczciwie
+
+- **Co wychodzi z Maca:** przegląd, głosówki i odpowiedzi przechodzą przez WhatsApp (szyfrowane end-to-end; Meta widzi metadane: kto, kiedy, ile). Na telefonie zostają treści spraw, także klientów, jeśli `WA_SCOPES` obejmuje `work`. Rozważ `python sebastian.py wa-set WA_SCOPES private`, jeśli sprawy firmowe nie powinny trafiać na telefon. Zabezpiecz telefon kodem.
+- **Nieoficjalny klient:** `neonize`/`whatsmeow` nie są oficjalnym API WhatsAppa. Przy małym ruchu (kilka wiadomości dziennie do jednej osoby) ryzyko blokady jest niskie, ale realne. To główny powód, dla którego zalecany jest osobny numer dla Sebastiana. Oficjalna alternatywa (WhatsApp Business Cloud API) wymaga firmy w Meta, płatnych szablonów wiadomości i publicznego adresu internetowego dla Maca. Dlatego nie jest tu użyta (15.6).
+- Sesja WhatsApp i cały `data/whatsapp/` **nigdy nie trafiają na GitHub** (`data/` w `.gitignore`).
+
+### 8b.7. Najczęstsze problemy
+
+| Objaw | Działanie |
+| --- | --- |
+| Nie przyszedł poranny przegląd | `python sebastian.py wa-status` (ostatni przegląd, usługa, kolejka). Mac był uśpiony po `WA_BRIEF_LATEST`? Ręcznie: napisz „przegląd” albo panel → „Wyślij mi przegląd teraz” |
+| „Połączenie z WhatsAppem wygasło” / baner w panelu | Usunięte z Połączonych urządzeń albo telefon Sebastiana długo offline: `python sebastian.py wa-login` |
+| Sebastian nie odpowiada | `wa-status`: usługa działa i jest połączona? Piszesz z numeru `WA_OWNER_PHONE`? `tail -n 50 data/logs/whatsapp.log` |
+| Przegląd bez głosówki | `python sebastian.py wa-test` (ffmpeg, głos). Brak głosu Piper: `python sebastian.py wa-voice` |
+| „Nie umiem jeszcze odsłuchać” | `python -m pip install mlx-whisper` (pierwsze użycie pobiera model) |
+| `brak libmagic` / `neonize` | `brew install libmagic` / `python -m pip install -r requirements-whatsapp.txt`, potem `wa-start` |
+| Odpowiedzi trwają długo | Ollama jest zajęta (np. analiza dokumentu). Odpowiedź przyjdzie, gdy model się zwolni |
+| Za dużo powiadomień | `cisza` na WhatsAppie albo `python sebastian.py wa-set WA_NOTICES nie` |
+| Inny głos | `python sebastian.py wa-voice pl_PL-gosia-medium` (kobiecy) albo `wa-set WA_VOICE_ENGINE say` i `wa-set WA_SAY_VOICE Zosia`; tempo: `wa-set WA_VOICE_SPEED 1.1` (wolniej) |
+
+---
+
 ## 9. Połączenie z Open WebUI
 
 Są trzy niezależne mechanizmy. Można używać dowolnych.
@@ -729,16 +854,19 @@ sebastian-start/
 ├── learner_web.py            zakładka Nauka
 ├── learner_docs.py           Dokumenty: skany → uporządkowany PDF (od 2.2)
 ├── learner_docs_web.py       zakładka Dokumenty
+├── whatsapp.py               WhatsApp: przegląd, głos, rozmowa, usługa (od 2.3)
+├── whatsapp_link.py          WhatsApp: połączenie (neonize), filtr właściciela
+├── whatsapp_web.py           zakładka WhatsApp
 ├── openwebui_tool.py         narzędzie Open WebUI „moje sprawy”
 ├── openwebui_memory_tool.py  narzędzie Open WebUI „pamięć”
 ├── rollback.py               PRZESTARZAŁE (1.3) — nie używać, patrz 15.6
 ├── templates/  static/       panel (HTML, JS)
-├── test_sebastian.py  test_learner.py  test_docs.py
-├── requirements*.txt  install.command  start.command
+├── test_sebastian.py  test_learner.py  test_docs.py  test_whatsapp.py
+├── requirements*.txt  install.command  start.command   (requirements-whatsapp.txt — od 2.3)
 ├── README.md  DOKUMENTACJA.md  ZACZNIJ_TUTAJ.txt
 └── docs/
     ├── TESTY.md              co i jak przetestowano
-    ├── aktualizacje/         instrukcje przejścia między wersjami (1.1 … 2.2)
+    ├── aktualizacje/         instrukcje przejścia między wersjami (1.1 … 2.3)
     └── archiwum/             podręcznik PDF wersji 1.0
 ```
 
@@ -771,6 +899,12 @@ sebastian-start/
         ├── dokumenty.sqlite3       postęp i odczyt każdej strony 🔒
         ├── wrzuc-tutaj/            folder do wrzucania skanów z Findera
         └── 0001-<nazwa>/           oryginal.pdf, skan.pdf, …_opracowanie.pdf, odczyt.md (rozdział 8a.6)
+    └── whatsapp/                   (od 2.3) 🔒
+        ├── whatsapp.json           ustawienia WA_*
+        ├── whatsapp.sqlite3        kolejka, rozmowa, przeglądy 🔒
+        ├── sesja.sqlite3           KLUCZE połączenia z WhatsAppem 🔒🔒
+        ├── glosy/  nagrania/       głos Piper, głosówki
+        └── wyslane/                tylko tryb próby (WA_TRANSPORT plik)
 ```
 
 🔒 oznacza dane wrażliwe: maile, dane klientów, klucze.
@@ -818,6 +952,8 @@ Opracowane dokumenty są w kolejce nauki jako `files.id = doc:<nr>` (od 2.2).
 | --- | --- |
 | `jobs` | Dokumenty: nazwa, folder, plik źródłowy, rodzaj (`kind_hint`: auto/kw/ogolny, `profile`: kw/ogolny), `status` (`queued` → `prepare` → `pages` → `structure` → `build` → `done`; także `paused`, `error`), opis postępu, wielkości, `meta` (numer KW, sąd, podsumowanie, do wyjaśnienia, użyty OCR) |
 | `pages` | Każda strona: tekst cyfrowy, OCR, rodzaj, obserwacje (JSON), odczyt końcowy, inne odczytania, pewność, czas, `verified` (sprawdzona ręcznie), `entries` (wpisy JSON; puste = do ponownego uporządkowania), dział |
+
+**`data/whatsapp/whatsapp.sqlite3`** (od 2.3) — opis tabel: rozdział 8b.5. Polecenie `zrobione N` z WhatsAppa zapisuje w `data/sebastian.sqlite3` zdarzenie `whatsapp_done` w `events` (z wpisem w `undo_decisions`), a `zapamiętaj:` — notatkę w `knowledge_notes`.
 
 ---
 
@@ -892,6 +1028,23 @@ Każde polecenie uruchamiaj w folderze `sebastian-start` z aktywnym `.venv`: `py
 | `doc-rebuild NR [pdf\|struktura\|strony]` | Ponownie: tylko PDF / porządkowanie wpisów / czytanie stron (strony sprawdzone ręcznie zostają) |
 | `doc-export NR` | ZIP ze stronami do sprawdzenia (obrazy + odczyt) |
 | `doc-remove NR [--tak]` | Usuwa dokument z folderem (pyta o potwierdzenie) |
+
+### 11.5. WhatsApp (od 2.3)
+
+| Polecenie | Co robi |
+| --- | --- |
+| `wa-setup` | Konfiguracja: Twój numer, imię, godzina przeglądu, wieczór; pobiera polski głos |
+| `wa-login [--kod]` | Połączenie z WhatsAppem (kod QR albo kod do wpisania w telefonie), na końcu propozycja `wa-start` |
+| `wa-start` / `wa-stop` | Usługa w tle (`pl.sebastian.whatsapp`) |
+| `wa-status` | Stan: połączenie, ostatni przegląd, głos, kolejka, wyciszenie |
+| `wa-test` | Sprawdzenie (biblioteki, ffmpeg, głos, słuch, model, usługa) i próbna głosówka |
+| `wa-brief [--rodzaj rano\|wieczor\|tydzien] [--podglad]` | Złóż przegląd: wyślij albo tylko pokaż i odtwórz na Macu |
+| `wa-send "tekst"` | Wyślij sobie wiadomość (np. do sprawdzenia połączenia) |
+| `wa-chat` | Rozmowa z Sebastianem w Terminalu (bez WhatsAppa) |
+| `wa-voice [NAZWA]` | Pobierz głos Piper (domyślnie `pl_PL-darkman-medium`; np. `pl_PL-gosia-medium`) |
+| `wa-settings` / `wa-set KLUCZ WARTOŚĆ` | Ustawienia `WA_*` (12.3) |
+| `wa-logout` | Odłącz Sebastiana od WhatsAppa i usuń sesję |
+| `wa-run` | Pętla usługi na pierwszym planie (normalnie uruchamia ją launchd) |
 
 ---
 
@@ -1029,6 +1182,34 @@ Zmieniaj poleceniem `python sebastian.py learn-set KLUCZ WARTOŚĆ`, potem `lear
 | `DOC_SCOPE` | `private` | Zakres w nauce (wpływa na RAG: `RAG_SCOPES`) |
 | `DOC_MAX_UPLOAD_MB` | `3000` | Największy plik przez panel (większe: folder `wrzuc-tutaj`) |
 
+### 12.3. `data/whatsapp/whatsapp.json` (WhatsApp, od 2.3)
+
+Zmiana: `python sebastian.py wa-set KLUCZ WARTOŚĆ`, potem `wa-start` (przeładowanie usługi).
+
+| Klucz | Domyślnie | Znaczenie |
+| --- | --- | --- |
+| `WA_ENABLED` | `nie` → `tak` po `wa-setup` | Włącza WhatsApp |
+| `WA_TRANSPORT` | `linked` | `linked` = WhatsApp (połączone urządzenie); `plik` = próba bez wysyłki (`data/whatsapp/wyslane/`) |
+| `WA_OWNER_PHONE` | — | Twój numer z kierunkowym (np. `48600111222`). Jedyny, któremu Sebastian odpowiada i do którego pisze |
+| `WA_OWNER_NAME` | puste | Imię w powitaniu; puste = pierwsze słowo `OWNER_NAME` nauki |
+| `WA_MODEL` | puste | Model do przeglądów i rozmów; puste = model Sebastiana |
+| `WA_BRIEF` / `WA_BRIEF_TIME` / `WA_BRIEF_LATEST` | `tak` / `07:00` / `11:30` | Poranny przegląd; po `LATEST` już nie przychodzi |
+| `WA_BRIEF_DAYS` | `1,2,3,4,5,6,7` | Dni tygodnia (1 = poniedziałek). Np. tylko robocze: `1,2,3,4,5` |
+| `WA_EVENING` / `WA_EVENING_TIME` | `nie` / `20:30` | Wieczorne podsumowanie |
+| `WA_WEEKLY` / `WA_WEEKLY_DAY` / `WA_WEEKLY_TIME` | `nie` / `7` / `18:00` | Tygodniowe podsumowanie |
+| `WA_VOICE` | `tak` | Głosówki w przeglądach |
+| `WA_VOICE_ENGINE` | `auto` | `piper` / `say` / `auto` (Piper, gdy jest głos) |
+| `WA_PIPER_VOICE` | `pl_PL-darkman-medium` | Głos Piper (pobierz: `wa-voice NAZWA`) |
+| `WA_SAY_VOICE` | `Zosia` | Głos macOS przy `say` |
+| `WA_VOICE_SPEED` | `1.0` | Tempo Piper (>1 wolniej) |
+| `WA_VOICE_MAX_WORDS` | `260` | Długość głosówki (ok. 1,5–2 min) |
+| `WA_SCOPES` | `private, work` | Z których skrzynek sprawy trafiają na WhatsApp |
+| `WA_CHAT` | `tak` | Odpowiadanie na pytania (komendy działają zawsze) |
+| `WA_TRANSCRIBE` / `WA_WHISPER_MODEL` | `tak` / `mlx-community/whisper-large-v3-turbo` | Rozumienie Twoich głosówek |
+| `WA_REPLY_VOICE` | `tak` | Na głosówkę odpowiedź także głosówką |
+| `WA_NOTICES` | `tak` | Powiadomienia systemowe na WhatsApp |
+| `WA_QUIET` | `22:00-07:00` | Cisza nocna dla powiadomień (przychodzą po jej końcu) |
+
 ---
 
 ## 13. Bezpieczeństwo i prywatność
@@ -1062,6 +1243,7 @@ Tak się zdarzyło 15.10.2026: repozytorium z folderem `data/` było publiczne. 
 - Open WebUI: kopie w kontenerze może czytać administrator kontenera. Narzędzia sprawdzają e-mail użytkownika i zakres. Używaj **lokalnych** modeli i lokalnego silnika osadzeń (`bge-m3`).
 - Zakres firmowy (`work`) zawiera dane klientów inPartners. Nie podłączaj go do modeli współdzielonych z innymi osobami.
 - Model ma zakaz zapisywania w faktach danych wrażliwych innych osób. Pełne teksty w `teksty/` zawierają jednak całe dokumenty.
+- `data/whatsapp/sesja.sqlite3` to klucze połączenia z WhatsAppem. Kto ma ten plik, może pisać jako konto Sebastiana. Przy podejrzeniu wycieku: `wa-logout` i w telefonie usuń urządzenie z „Połączonych urządzeń”. Przegląd i odpowiedzi trafiają na telefon (rozdział 8b.6).
 - `data/dokumenty/` zawiera pełne skany (np. księgi wieczyste z PESEL-ami i adresami). Traktuj je jak resztę `data/`. ZIP „do sprawdzenia” powstaje tylko na żądanie. Zastanów się, komu go przekazujesz.
 - Logi nie zawierają treści maili ani haseł. Przy prośbie o pomoc nie wysyłaj bazy, `panel.token`, `learner.json` ani maili klientów.
 
@@ -1125,6 +1307,7 @@ Aktualizacje przychodzą jako plik `Sebastian_aktualizacja_X_Y.py` albo paczka Z
 | Mac zwalnia | `learn-set PAUSE_BETWEEN_CALLS_S 3` albo mniejszy `MODEL`, potem `learn-start` |
 | Kończy się miejsce | `du -sh data/learner/*`. Ogranicz `MAIL_HISTORY_SINCE` / `ATTACHMENTS_SINCE` albo wyłącz `SAVE_TEXT` |
 | Dokumenty: dokument nie rusza / jest wolny / ma słaby odczyt | Rozdział 8a.8 |
+| WhatsApp: brak przeglądu / brak odpowiedzi / brak głosówki | Rozdział 8b.7, `python sebastian.py wa-status`, `wa-test` |
 | Komunikat aktualizatora „STOP” | Nic nie zmieniono albo przywrócono kopię. Skopiuj komunikat i skonsultuj |
 
 **Pierwszy krok przy każdym problemie:** `python sebastian.py check`. Pokazuje, co nie działa, i podpowiada polecenie naprawcze.
@@ -1144,6 +1327,7 @@ Przy prośbie o pomoc podaj: wynik `check`, dokładne polecenie, komunikat błę
 - **Dostęp do Dysku** obsługuje klasa `Drive` w `learner.py`. Nie ponawia logowania przy każdym wątku: próbuje po zmianie `token.json` albo co `RETRY_HOURS`. Stan zapisuje w `meta.drive_state` (`ok` / `expired` / `off`), a powiadomienie wysyła najwyżej raz na dobę (`meta.drive_notified`).
 - **Diagnostyka `check`** (`learner.cmd_check`) tylko czyta. Każdy nowy element systemu powinien dostać w niej swoją kontrolę z podpowiedzią naprawy (Dokumenty: `learner_docs.check`).
 - **Dokumenty** (`learner_docs.py`) mają własną bazę `data/dokumenty/dokumenty.sqlite3` i etapy wznawialne (`process()` → `prepare` / `read_pages` / `structure` / `build`). Każdy etap zwraca `False`, gdy trzeba poczekać (brak modelu, wstrzymanie, poranek, `STOP`) — wtedy nic nie jest oznaczane jako zrobione. Wątek `worker()` działa w procesie nauki. Blokada `fcntl` na `.praca.lock` pilnuje, by `doc-run` i usługa nie pracowały jednocześnie. `busy()` mówi nauce, by poczekała. Zasada bezpieczeństwa: model wizyjny tylko przepisuje, model tekstowy tylko porządkuje, a każdy wpis musi mieć cytat sprawdzany funkcją `quote_found()`. Numer KW i sąd są wyszukiwane wyrażeniami regularnymi, nie przez model.
+- **WhatsApp** (`whatsapp.py`) jest niezależny od transportu: `FileTransport` (próba) i `whatsapp_link.LinkedTransport` (neonize) mają te same metody (`start`, `stop`, `send_text`, `send_voice`, `typing`, `connected`). Biblioteka WhatsApp wywołuje `on_message` z własnego wątku, więc tam jest tylko `queue.put`, a całą pracę robi pętla `tick()`. Wszystko, co wychodzi, przechodzi przez tabelę `outbox`, dzięki czemu panel i inne procesy (np. `learner.notify` → `whatsapp.notice`) mogą bezpiecznie zlecać wysyłkę. Filtr „tylko właściciel” jest w `LinkedTransport.parse()` i ma testy na prawdziwych strukturach neonize. Zmiany danych z WhatsAppa to tylko `zrobione N` (jak szybki przycisk: `events` + `undo_decisions`) i `zapamiętaj:`.
 - **Duże pliki w panelu:** ogólny limit żądania to 6 MB. Tylko trasa `docs_upload` podnosi go w `protect()` (`request.max_content_length`) przed odczytem formularza (CSRF).
 - **IMAP:** zawsze `select(…, readonly=True)` i `BODY.PEEK`. Testy to sprawdzają.
 - **AI:** Sebastian używa `format` ze schematem JSON i walidacji (`validate_result`, terminy muszą mieć cytat z treści). Nauka używa `format: json` i odrzuca nieczytelne odpowiedzi. Dla modeli „myślących” (qwen3, deepseek-r1…) wysyłane jest `think: false`.
@@ -1154,10 +1338,10 @@ Przy prośbie o pomoc podaj: wynik `check`, dokładne polecenie, komunikat błę
 
 ```bash
 python -m pip install -r requirements-test.txt
-python -m unittest test_sebastian.py test_learner.py test_docs.py -v
+python -m unittest test_sebastian.py test_learner.py test_docs.py test_whatsapp.py -v
 ```
 
-Testy używają tymczasowego katalogu danych, symulowanego IMAP i symulowanej Ollamy. Nie dotykają prawdziwych skrzynek. Testy załączników i dokumentów wymagają `requirements-learner.txt` (testy dokumentów generują własny „skan” i nie potrzebują ocrmypdf ani modelu wizyjnego). Każda zmiana powinna dodać test do odpowiedniego pliku. Opis zakresu testów jest w `docs/TESTY.md`.
+Testy używają tymczasowego katalogu danych, symulowanego IMAP i symulowanej Ollamy. Nie dotykają prawdziwych skrzynek. Testy załączników i dokumentów wymagają `requirements-learner.txt` (testy dokumentów generują własny „skan” i nie potrzebują ocrmypdf ani modelu wizyjnego). Testy WhatsApp nie łączą się z WhatsAppem. Filtr nadawcy sprawdzają na strukturach neonize, gdy biblioteka jest zainstalowana, a konwersję głosu, gdy jest ffmpeg; w przeciwnym razie te testy są pomijane. Każda zmiana powinna dodać test do odpowiedniego pliku. Opis zakresu testów jest w `docs/TESTY.md`.
 
 **Środowisko testowe z danymi demo** (bez prawdziwej poczty):
 
@@ -1179,7 +1363,7 @@ Panel demo nie może działać równocześnie z panelem w tle (ten sam port). Na
 
 ### 15.4. Wydawanie aktualizacji
 
-Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2):
+Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2, 2.3):
 
 - jeden plik `Sebastian_aktualizacja_X_Y.py` z zawartością nowych plików,
 - sprawdzenie skrótów SHA-256 plików poprzedniej wersji (odmowa przy ręcznych zmianach, `--force` świadomie),
@@ -1205,6 +1389,7 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2):
 - Brak CC/BCC i „odpowiedz wszystkim”. Kalendarz bez synchronizacji na żywo i bez API map.
 - Nauka czyta wątek ponownie po każdej nowej odpowiedzi. Przy bardzo długich wątkach to koszt czasu.
 - Akta spraw i osób (zestawienia per osoba lub sprawa z faktów i tekstów) to kolejny planowany etap. Dane są już zbierane (`teksty/`, `facts` ze źródłem i datą).
+- WhatsApp: połączenie przez nieoficjalną bibliotekę (`neonize==0.5.2`, przypięta wersja — przed zmianą wersji sprawdź testy `LinkFilterTests` i parowanie na Macu). Oficjalne WhatsApp Business Cloud API odrzucono świadomie: wiadomości inicjowane przez firmę wymagają płatnych, zatwierdzanych szablonów, odbiór wymaga publicznego adresu (tunelu) do Maca, a treść przechodzi przez serwery Meta bez szyfrowania end-to-end do Maca. Telefonów (połączeń głosowych) Sebastian nie wykonuje.
 - Dokumenty: model wizyjny był testowany w kodzie na symulowanych odpowiedziach. Jakość odczytu konkretnych skanów zależy od modelu, więc przed dużym dokumentem warto zrobić `doc-test` na kilku trudnych stronach. Wykreślenie zapisane jako osobny wpis na innej stronie nie zawsze jest łączone z pierwotnym wpisem (8a.7). Niewidoczna warstwa tekstu na skanach pisma ręcznego nie jest dopasowana do położenia słów (wyszukiwanie znajdzie stronę, ale nie podświetli dokładnego miejsca).
 
 ---
@@ -1224,6 +1409,7 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2):
 | 2.1.2 | 15.10.2026 | Polecenie `check` (pełna diagnostyka), `learn-import --merge` (scalenie Drive Learnera z działającą nauką), niezawodne `learn-start`/`learn-stop` (czekanie na macOS) |
 | 2.1.3 | 19.10.2026 | Wygaśnięcie logowania do Dysku: jeden komunikat zamiast wpisu przy każdym wątku, baner w panelu, polecenie `learn-drive` z wyborem (zaloguj ponownie / wyłącz Dysk) |
 | 2.2 | 19.10.2026 | **Dokumenty**: duże skany (druk, maszynopis, pismo ręczne, Grundbuch) → mały PDF ze spisem treści i linkami; model wizyjny z podwójnym czytaniem pisma, wpisy KW wg działów z weryfikacją cytatów, sprawdzanie i poprawki stron w panelu, praca wznawialna w tle (1–2 dni), przekazanie do nauki; polecenia `doc-*`, sekcja „6. Dokumenty” w `check` |
+| 2.3 | 20.10.2026 | **WhatsApp**: poranny przegląd z głosówką („Hej Andrzej!”, polski głos Piper, lokalnie), rozmowa i komendy (zadania, zrobione N, pilne, poczta, kalendarz, dokumenty, zapamiętaj, cisza), rozumienie głosówek (mlx-whisper), powiadomienia z ciszą nocną, opcjonalnie wieczór i tydzień; zakładka WhatsApp, polecenia `wa-*`, sekcja „7. WhatsApp” w `check` |
 
 Szczegóły każdej wersji: `docs/aktualizacje/AKTUALIZACJA_X_Y.md`.
 
@@ -1247,6 +1433,9 @@ Szczegóły każdej wersji: `docs/aktualizacje/AKTUALIZACJA_X_Y.md`.
 | **OCR** | Rozpoznawanie tekstu ze skanu (Tesseract). Dobre dla druku, słabe dla pisma ręcznego |
 | **Opracowanie (Dokumenty)** | Wynikowy PDF: spis treści, wpisy, odczyt i skany z linkami |
 | **Do sprawdzenia** | Strona z niepewnym odczytem — do porównania ze skanem w panelu |
+| **Połączone urządzenie** | Komputer połączony z kontem WhatsApp (jak WhatsApp Web). Tak łączy się Sebastian |
+| **Głosówka (PTT)** | Wiadomość głosowa WhatsApp. Sebastian nagrywa ją lokalnie (Piper) w formacie OGG/Opus |
+| **Przegląd** | Poranna (albo wieczorna/tygodniowa) wiadomość Sebastiana: tekst + głosówka |
 | **Embedding / bge-m3** | Zamiana tekstu na wektor do wyszukiwania po znaczeniu; bge-m3 dobrze rozumie polski |
 | **Zakres (scope)** | `private` (Gmail, Murena) albo `work` (Partners); `drive` dla Dysku w nauce |
 | **LaunchAgent** | Zadanie macOS uruchamiane po zalogowaniu użytkownika |

@@ -1,0 +1,34 @@
+{% extends 'base.html' %}{% block body %}
+<h1>WhatsApp — Sebastian w telefonie</h1>
+<p class="notice">Codziennie o <b>{{c.WA_BRIEF_TIME}}</b>{% if not c.WA_BRIEF %} (wyłączone){% endif %} Sebastian wysyła na WhatsApp krótki przegląd dnia i głosówkę („Hej {{name or '…'}}!”). Odpowiada na Twoje wiadomości i głosówki — tylko Tobie (+{{c.WA_OWNER_PHONE or '—'}}). Napisz do niego <b>pomoc</b>, żeby zobaczyć komendy.{% if not c.WA_ENABLED %}<br><b>Jeszcze nieskonfigurowany.</b> W Terminalu: <code>python sebastian.py wa-setup</code>, potem <code>wa-login</code>.{% endif %}</p>
+{% if info.logged_out %}<p class="notice"><b>Połączenie z WhatsAppem wygasło</b> ({{info.logged_out[:16]|replace('T',' ')}}). Połącz ponownie: <code>python sebastian.py wa-login</code></p>{% endif %}
+<div class="grid">
+<div class="card"><h2>Stan</h2><table>
+<tr><td>Usługa w tle</td><td>{{'działa' if running else 'wyłączona — python sebastian.py wa-start'}}{% if info.heartbeat %}<br><small>znak życia: {{info.heartbeat[:16]|replace('T',' ')}}</small>{% endif %}</td></tr>
+<tr><td>WhatsApp</td><td>{{ {'linked':'połączone urządzenie','plik':'próba (pliki, bez wysyłki)'}.get(c.WA_TRANSPORT, c.WA_TRANSPORT) }}{% if info.linked_as %} · konto +{{info.linked_as}}{% endif %}{% if info.connected=='1' %} · połączony ✓{% endif %}</td></tr>
+<tr><td>Ostatni przegląd</td><td>{{info['sent:rano'] or '—'}}</td></tr>
+<tr><td>Głos</td><td>{{engine or 'brak — python sebastian.py wa-test'}}</td></tr>
+<tr><td>Kolejka</td><td>{{pending}} do wysłania · {{errors}} nieudanych</td></tr>
+{% if info.mute_until %}<tr><td>Wyciszone do</td><td>{{info.mute_until[:16]|replace('T',' ')}}</td></tr>{% endif %}
+</table></div>
+<div class="card"><h2>Sprawdzenie</h2><ul style="padding-left:18px">{% for level, text, fix in checks %}<li>{{ {'ok':'✓','warn':'⚠','bad':'✗'}[level] }} {{text}}{% if fix and level!='ok' %}<br><small><code>{{fix}}</code></small>{% endif %}</li>{% endfor %}</ul></div>
+</div>
+<div class="quick-controls">
+<form method="post" action="/whatsapp/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="preview"><select name="rodzaj"><option value="rano">poranny</option><option value="wieczor">wieczorny</option><option value="tydzien">tygodniowy</option></select> <button class="secondary">Podgląd przeglądu (bez wysyłki)</button></form>
+<form method="post" action="/whatsapp/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="send"><input type="hidden" name="rodzaj" value="rano"><button>Wyślij mi przegląd teraz</button></form>
+<form method="post" action="/whatsapp/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="test"><button class="secondary">Wiadomość testowa</button></form>
+{% if errors %}<form method="post" action="/whatsapp/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="retry"><button class="secondary">Ponów nieudane</button></form>{% endif %}
+{% if info.mute_until %}<form method="post" action="/whatsapp/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="unmute"><button class="secondary">Włącz powiadomienia</button></form>{% endif %}
+</div>
+<p><small>Podgląd składa przegląd modelem — może potrwać 1–2 minuty.</small></p>
+{% for b in briefs %}<details class="card"{% if loop.first %} open{% endif %}><summary><b>{{ {'rano':'Poranny','wieczor':'Wieczorny','tydzien':'Tygodniowy'}.get(b.kind, b.kind) }} przegląd</b> · {{b.created[:16]|replace('T',' ')}}{% if b.source=='awaryjny' %} · bez modelu (awaryjny){% endif %}</summary>
+<pre>{{b.text}}</pre>{% if b.audio %}<audio controls preload="none" src="/whatsapp/nagranie/{{b.id}}" style="width:100%"></audio>{% endif %}
+<details><summary>Tekst głosówki</summary><p>{{b.voice_text}}</p></details></details>{% endfor %}
+<div class="card"><h2>Rozmowa</h2>{% if talk %}<table>{% for m in talk %}<tr><td style="white-space:nowrap"><small>{{m.t[:16]|replace('T',' ')}}</small><br><b>{{'Ty' if m.who=='ty' else 'Sebastian'}}</b>{% if m.kind=='voice' %} 🎤{% endif %}</td><td>{{(m.body or '')[:600]}}{% if m.note and m.note not in ('sent','pending') %}<br><small>{{m.note}}</small>{% endif %}</td></tr>{% endfor %}</table>{% else %}<p>Jeszcze nic. Napisz do Sebastiana na WhatsAppie „pomoc”.</p>{% endif %}</div>
+<details class="card"><summary>Ustawienia</summary><p>Zmiana: <code>python sebastian.py wa-set KLUCZ WARTOŚĆ</code>, potem <code>wa-start</code>. Lista: <code>wa-settings</code>.</p><table>
+<tr><td>Przegląd poranny</td><td>{{'tak' if c.WA_BRIEF else 'nie'}} · {{c.WA_BRIEF_TIME}} (najpóźniej {{c.WA_BRIEF_LATEST}}) · dni {{c.WA_BRIEF_DAYS|join(',')}}</td></tr>
+<tr><td>Wieczór / tydzień</td><td>{{'tak ' ~ c.WA_EVENING_TIME if c.WA_EVENING else 'nie'}} / {{'tak' if c.WA_WEEKLY else 'nie'}}</td></tr>
+<tr><td>Głosówki</td><td>{{'tak' if c.WA_VOICE else 'nie'}} · odpowiedź głosem na głos: {{'tak' if c.WA_REPLY_VOICE else 'nie'}}</td></tr>
+<tr><td>Skrzynki w przeglądzie</td><td>{{c.WA_SCOPES|join(', ')}}</td></tr>
+<tr><td>Cisza nocna</td><td>{{c.WA_QUIET}}</td></tr></table></details>
+{% endblock %}

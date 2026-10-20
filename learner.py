@@ -1,4 +1,4 @@
-"""Sebastian 2.2 — moduł nauki (dawny Drive Learner) z czytaniem załączników i dokumentów (skanów).
+"""Sebastian 2.3 — moduł nauki (dawny Drive Learner) z czytaniem załączników i dokumentów (skanów).
 
 Lokalny model (Ollama) czyta w tle Dysk Google, pocztę z Sebastiana i pełne archiwum
 skrzynek, wyciąga fakty o właścicielu i składa z nich:
@@ -281,6 +281,11 @@ def sebastian_db():
 
 
 def notify(title, text):
+    with contextlib.suppress(Exception):      # 2.3: to samo powiadomienie także na WhatsApp (jeśli włączony)
+        import whatsapp
+        if whatsapp.S is None:
+            whatsapp.bind(S)
+        whatsapp.notice(title.replace("Sebastian — ", "").replace("Sebastian - ", ""), text)
     if sys.platform != "darwin":
         return
     import subprocess
@@ -1769,6 +1774,13 @@ def cmd_check():
         learner_docs.check(ok, warn, bad)
     except Exception as e:
         warn(f"nie sprawdzono dokumentów ({type(e).__name__}: {str(e)[:120]})")
+
+    print("\n7. WhatsApp")
+    try:
+        import whatsapp
+        whatsapp.bind(S).check(ok, warn, bad)
+    except Exception as e:
+        warn(f"nie sprawdzono WhatsAppa ({type(e).__name__}: {str(e)[:120]})")
 
     print("\n" + ("✓ Wszystko działa." if not problems and not warnings else
                   f"Do poprawy: {len(problems)} · Do sprawdzenia: {len(warnings)}"))

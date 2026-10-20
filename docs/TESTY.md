@@ -115,3 +115,23 @@ Testy generują własny „skan” (obrazy stron z tekstem księgi wieczystej) i
 - Dodatkowo, ręcznie: 12-stronicowy kolorowy skan 300 dpi (48 MB) po przygotowaniu przez ocrmypdf ma 5,1 MB (bez ocrmypdf 5,3 MB), strona przekrzywiona o 1,5° została wyprostowana, a polskie znaki w PDF są poprawne (Arial/DejaVu, tylko użyte litery).
 
 Nie sprawdzono tu: **jakości odczytu prawdziwym modelem wizyjnym** (`qwen2.5vl:7b`) na Twoich skanach, w szczególności pisma ręcznego i kurrenty, ani rzeczywistego czasu pracy na Macu. Sprawdzisz to poleceniem `python sebastian.py doc-test PLIK --strona N` na kilku trudnych stronach przed wrzuceniem całej księgi.
+
+
+# Weryfikacja 2.3 — WhatsApp
+
+Data: 2026-10-20. Wynik: 59 testów zaliczonych (16 nowych w `test_whatsapp.py`).
+
+Bez prawdziwego WhatsAppa i bez Ollamy (model udawany, połączenie „plik” albo udawany klient neonize):
+
+- **Przegląd:** dane z panelu (zadania z terminami, nowe maile, kalendarz z importowanego ICS) trafiają do modelu, a wynik to tekst i głosówka zaczynająca się od „Hej Andrzej!”. Bez modelu powstaje przegląd awaryjny z samych faktów. `WA_SCOPES private` wyklucza sprawy firmowe.
+- **Harmonogram:** nie przed 07:00, nie po 11:30, nie dwa razy dziennie, tylko w wybrane dni. Czeka na poranną analizę, ale najwyżej godzinę. Wieczór o 20:30.
+- **Usługa (`tick`):** powitanie raz po połączeniu, potem przegląd. Zlecenie z panelu („Wyślij przegląd teraz”) składa przegląd. Znak życia zapisany.
+- **Rozmowa:** pomoc, zadania (numery i terminy), `zrobione 1` (status w bazie, wpis `whatsapp_done` w `events` i `undo_decisions`, drugi raz — „już zamknięte”, zły numer — komunikat), przegląd, `zapamiętaj:` (notatka prywatna), cisza/wznów, poczta, kalendarz, pytanie do modelu.
+- **Wiadomości przychodzące:** duplikat ignorowany, nasze własne wiadomości (echo w czacie „Ty”) ignorowane. Wiadomość starsza niż 6 h jest zapisana bez odpowiedzi. Głosówka bez transkrypcji dostaje grzeczną odpowiedź, a głosówka z transkrypcją — odpowiedź tekstem i głosem.
+- **Powiadomienia:** w ciszy nocnej czekają do rana, bez powtórzeń w ciągu doby, wyciszenie działa. `learner.notify` (np. „dokument gotowy”) trafia też na WhatsApp. Przy wyłączonym WhatsAppie nic nie jest kolejkowane.
+- **Głos:** prawdziwy ffmpeg zamienia nagranie na Opus (format głosówki). Znaczniki i linki są usuwane z tekstu do czytania.
+- **Filtr nadawcy na prawdziwych strukturach neonize 0.5.2:** osobny numer — tylko właściciel, także w adresacji LID (zapamiętany i rozpoznany przez bibliotekę); obcy, grupy i nasze wiadomości odrzucone. Czat „Ty” — tylko wiadomości właściciela do siebie, bez echa. Głosówka wysyłana jako PTT `audio/ogg; codecs=opus`, zawsze do właściciela.
+- **Panel:** strona, podgląd (nic nie wysyła), zła CSRF → 403, „Wyślij teraz” → zlecenie.
+- Dodatkowo, ręcznie: prawdziwy klient neonize tworzy się, rejestruje zdarzenia i przy braku sieci ponawia połączenie bez zawieszania usługi. Zatrzymanie działa.
+
+Nie sprawdzono tu: **parowania i wysyłki na prawdziwym WhatsAppie** (sieć WhatsApp jest tu niedostępna), brzmienia polskiego głosu Piper (głosu nie da się tu pobrać), rozpoznawania mowy mlx-whisper (tylko Mac z Apple Silicon) ani jakości przeglądów pisanych przez prawdziwy model. Sprawdzisz to na Macu: `wa-test` (głos), `wa-brief --podglad`, `wa-login`, a potem „pomoc” na WhatsAppie.

@@ -437,9 +437,10 @@ def make_app():
     progress.register(app,sys.modules[__name__])
     quick_actions.register(app,sys.modules[__name__])
     knowledge.register(app,sys.modules[__name__])
-    import learner_web, learner_docs_web
+    import learner_web, learner_docs_web, whatsapp_web
     learner_web.register(app,sys.modules[__name__])
     learner_docs_web.register(app,sys.modules[__name__])
+    whatsapp_web.register(app,sys.modules[__name__])
     return app
 
 def schedule(install):
@@ -459,6 +460,25 @@ def schedule(install):
         path.write_bytes(plistlib.dumps(job))
         subprocess.run(['launchctl','bootstrap','gui/'+uid,str(path)],check=True)
     print('Harmonogram '+('wlaczony: 07:00 i 20:30 czasu Maca, panel po logowaniu.' if install else 'wylaczony.'))
+
+def wa_command(args):
+    """Polecenia WhatsApp (2.3). Jak polecenia nauki — bez blokady poranka."""
+    import whatsapp
+    W=whatsapp.bind(sys.modules[__name__]); cmd=args.cmd
+    if cmd=='wa-run': W.run()
+    elif cmd=='wa-setup': W.cmd_setup()
+    elif cmd=='wa-login': W.cmd_login(args.kod)
+    elif cmd=='wa-logout': W.cmd_logout()
+    elif cmd=='wa-start': W.cmd_start()
+    elif cmd=='wa-stop': W.cmd_stop()
+    elif cmd=='wa-status': W.cmd_status()
+    elif cmd=='wa-brief': W.cmd_brief(args.rodzaj,args.podglad)
+    elif cmd=='wa-send': W.cmd_send(args.text)
+    elif cmd=='wa-chat': W.cmd_chat()
+    elif cmd=='wa-test': W.cmd_test()
+    elif cmd=='wa-set': W.cmd_set(args.key,args.value)
+    elif cmd=='wa-settings': W.cmd_settings()
+    elif cmd=='wa-voice': W.cmd_voice(args.name)
 
 def learn_command(args):
     """Polecenia modułu nauki (Dysk Google + poczta). Nie blokują pozostałych zadań Sebastiana."""
@@ -528,6 +548,12 @@ def main():
     for name in ('doc-pause','doc-resume'): a=sp.add_parser(name); a.add_argument('id',type=int)
     a=sp.add_parser('doc-remove'); a.add_argument('id',type=int); a.add_argument('--tak',action='store_true')
     a=sp.add_parser('doc-export'); a.add_argument('id',type=int)
+    for name in ('wa-setup','wa-run','wa-start','wa-stop','wa-status','wa-chat','wa-test','wa-settings','wa-logout'): sp.add_parser(name)
+    a=sp.add_parser('wa-login'); a.add_argument('--kod',action='store_true')
+    a=sp.add_parser('wa-brief'); a.add_argument('--rodzaj',choices=['rano','wieczor','tydzien'],default='rano'); a.add_argument('--podglad',action='store_true')
+    a=sp.add_parser('wa-send'); a.add_argument('text')
+    a=sp.add_parser('wa-set'); a.add_argument('key'); a.add_argument('value')
+    a=sp.add_parser('wa-voice'); a.add_argument('name',nargs='?',default=None)
     a=sp.add_parser('learn-drive'); a.add_argument('action',nargs='?',default='',choices=['','login','off','on','status'])
     a=sp.add_parser('learn-test'); a.add_argument('id')
     a=sp.add_parser('learn-mail-test'); a.add_argument('--account',default='')
@@ -547,6 +573,9 @@ def main():
     a=sp.add_parser('schedule'); a.add_argument('action',choices=['install','remove'])
     a=sp.add_parser('morning-run'); a.add_argument('--force',action='store_true')
     args=p.parse_args()
+    if args.cmd.startswith('wa-'):
+        if not (DATA/'config.json').exists(): raise RuntimeError('Najpierw python sebastian.py init')
+        wa_command(args); return
     if args.cmd.startswith('learn') or args.cmd.startswith('doc-') or args.cmd=='check':
         if not (DATA/'config.json').exists(): raise RuntimeError('Najpierw python sebastian.py init')
         learn_command(args); return
