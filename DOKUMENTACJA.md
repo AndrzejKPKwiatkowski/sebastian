@@ -1,7 +1,7 @@
 # Sebastian — pełna dokumentacja projektu
 
-**Wersja opisana w dokumencie: 2.4** (październik 2026)
-Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników, modułem Dokumenty, który zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w uporządkowany PDF ze spisem treści, oraz Sebastianem na WhatsAppie: poranny przegląd z głosówką, rozmowa w ciągu dnia (także z rodziną — tylko sprawy prywatne) i podsumowania Twojego własnego WhatsAppa (kto pisał, komu odpisać, do kogo oddzwonić).
+**Wersja opisana w dokumencie: 2.5** (październik 2026)
+Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników, modułem Dokumenty, który zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w uporządkowany PDF ze spisem treści, oraz Sebastianem na WhatsAppie: poranny przegląd z głosówką, rozmowa w ciągu dnia (także z wybranymi numerami z listy dozwolonych — z dostępem prywatnym albo pełnym), podsumowania Twojego własnego WhatsAppa (kto pisał, komu odpisać, do kogo oddzwonić) oraz trwała pamięć rozmów: załączniki, akta osób i nauka z rozmów.
 
 > **Dla kogo jest ten dokument.** Dla osoby, która przejmuje projekt albo musi coś w nim zrobić ręcznie: zainstalować od zera, przenieść na inny komputer, naprawić, zaktualizować albo rozwinąć kod. Nie trzeba być programistą, żeby korzystać z rozdziałów 1–14. Rozdział 15 jest dla osoby, która zmienia kod.
 
@@ -19,7 +19,7 @@ Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę
 8. [Moduł Nauka — szczegóły](#8-moduł-nauka--szczegóły)
 8a. [Dokumenty — skany i księgi wieczyste (od 2.2)](#8a-dokumenty--skany-i-księgi-wieczyste-od-22)
 8b. [WhatsApp — Sebastian w telefonie (od 2.3)](#8b-whatsapp--sebastian-w-telefonie-od-23)
-    - [8b.8. Rodzina (od 2.4)](#8b8-rodzina--żona-pisze-do-sebastiana-od-24) · [8b.9. Twój WhatsApp (od 2.4)](#8b9-twój-whatsapp--kto-pisał-komu-odpisać-do-kogo-oddzwonić-od-24)
+    - [8b.8. Lista dozwolonych numerów (od 2.4)](#8b8-lista-dozwolonych-numerów--kto-może-pisać-do-sebastiana-od-24-dostęp-pełny-od-25) · [8b.9. Twój WhatsApp (od 2.4)](#8b9-twój-whatsapp--kto-pisał-komu-odpisać-do-kogo-oddzwonić-od-24)
 9. [Połączenie z Open WebUI](#9-połączenie-z-open-webui)
 10. [Mapa plików i danych](#10-mapa-plików-i-danych)
 11. [Wszystkie polecenia](#11-wszystkie-polecenia)
@@ -176,7 +176,7 @@ Nauka **czyta** bazę Sebastiana, ale do niej nie pisze. Archiwum skrzynek, któ
 
 ---
 
-## 5. Instalacja od zera (wersja 2.4)
+## 5. Instalacja od zera (wersja 2.5)
 
 > Każde polecenie wklejaj do **Terminala** (Cmd + Spacja → „Terminal”) i zatwierdzaj Enterem. Nie przepisuj znaku `%` z końca linii poleceń. Hasła wpisywane w Terminalu są niewidoczne. To normalne.
 
@@ -766,9 +766,18 @@ Log: `data/logs/whatsapp.log` (bez treści wiadomości). Błędy programu: `data
 - **Nieoficjalny klient:** `neonize`/`whatsmeow` nie są oficjalnym API WhatsAppa. Przy małym ruchu (kilka wiadomości dziennie do jednej osoby) ryzyko blokady jest niskie, ale realne. To główny powód, dla którego zalecany jest osobny numer dla Sebastiana. Oficjalna alternatywa (WhatsApp Business Cloud API) wymaga firmy w Meta, płatnych szablonów wiadomości i publicznego adresu internetowego dla Maca. Dlatego nie jest tu użyta (15.6).
 - Sesja WhatsApp i cały `data/whatsapp/` **nigdy nie trafiają na GitHub** (`data/` w `.gitignore`).
 
-### 8b.8. Rodzina — żona pisze do Sebastiana (od 2.4)
+### 8b.8. Lista dozwolonych numerów — kto może pisać do Sebastiana (od 2.4, dostęp pełny od 2.5)
 
-Do Sebastiana mogą pisać też wybrane osoby, np. żona. Każda z nich ma **dostęp tylko do spraw prywatnych**:
+**Sebastian rozmawia wyłącznie z numerami z listy dozwolonych:** Twój numer (`WA_OWNER_PHONE`) i numery dodane przez `wa-user`. Wiadomości z każdego innego numeru są **ignorowane**: Sebastian nie odpowiada, nie zapisuje ich i nie oznacza jako przeczytane (nadawca nie widzi niebieskich ptaszków). Grupy i statusy też są pomijane. Połączeń głosowych Sebastian nie odbiera z żadnego numeru — rozmowa to wiadomości i głosówki.
+
+Każda dodana osoba ma jeden z dwóch poziomów dostępu:
+
+| Dostęp | Co oznacza |
+| --- | --- |
+| `prywatny` (domyślny) | tylko sprawy prywatne — tabela niżej; nie zamyka zadań |
+| `pelny` (od 2.5) | **wszystko jak Ty**: poczta firmowa i klienci, Bieżące sprawy, dokumenty, Twój WhatsApp i akta osób (8b.9), zamykanie zadań (`zrobione N`). Odpowiedzi idą na jej numer, z własnym porannym przeglądem i własną numeracją zadań. Powiadomienia systemowe (np. o błędach, wylogowaniu) trafiają tylko do Ciebie |
+
+Dostęp **prywatny** w szczegółach:
 
 | Widzi | Nie widzi |
 | --- | --- |
@@ -780,12 +789,14 @@ Do Sebastiana mogą pisać też wybrane osoby, np. żona. Każda z nich ma **dos
 - **Wymaga osobnego numeru Sebastiana.** Gdy Sebastian jest połączony z Twoim własnym numerem (czat „Ty”), rodzina nie może z nim pisać — `check` to pokaże.
 
 ```bash
-python sebastian.py wa-user dodaj          # pyta: numer, imię, forma w powitaniu (np. Kasiu), kim jest (np. żona), przegląd, głosówka
+python sebastian.py wa-user dodaj          # pyta: numer, imię, forma w powitaniu (np. Kasiu), kim jest (np. żona), dostęp, przegląd, głosówka
 python sebastian.py wa-user                # lista osób
 python sebastian.py wa-user usun 48500111222
 ```
 
-Bez pytań: `python sebastian.py wa-user dodaj 48500111222 --imie Kasia --wolacz Kasiu --kto żona --przeglad tak --glos tak`. Po zmianie usługa przeładowuje się sama.
+Bez pytań: `python sebastian.py wa-user dodaj 48500111222 --imie Kasia --wolacz Kasiu --kto żona --dostep pelny --przeglad tak --glos tak`. Po zmianie usługa przeładowuje się sama. Zmiana dostępu: `wa-user usun NUMER`, potem `wa-user dodaj` z nowym `--dostep`.
+
+Numery wpisujesz tylko na Macu (zapisują się w `data/whatsapp/whatsapp.json`) — **nie wpisuj ich do kodu ani do repozytorium**. Dostęp `pelny` oznacza, że na telefon tej osoby trafiają także sprawy klientów — zastanów się nad tym, tak jak przy własnym telefonie (8b.6).
 
 ### 8b.9. Twój WhatsApp — kto pisał, komu odpisać, do kogo oddzwonić (od 2.4)
 
@@ -793,9 +804,10 @@ Sebastian może **czytać Twoje własne konto WhatsApp** i co rano (oraz na żą
 
 **Jak działa**
 - Twoje konto jest połączone jako **drugie „połączone urządzenie”** (osobna sesja: `obserwacja-sesja.sqlite3`). Połączenie **tylko czyta**: Sebastian niczego z Twojego konta nie wysyła, **nie oznacza wiadomości jako przeczytanych** (rozmówcy nie widzą niebieskich ptaszków) i nie pokazuje Cię „online”.
-- Zapisywane są rozmowy 1:1 (grupy — `WA_WATCH_GROUPS tak`), Twoje odpowiedzi (żeby wiedzieć, kto jeszcze czeka), połączenia przychodzące i **głosówki od innych zamienione na tekst** (lokalnie; nagranie nie jest przechowywane). Zdjęcia i dokumenty — tylko jako podpis/nazwa pliku.
-- Zbieranie zaczyna się **od chwili połączenia** — wcześniejszej historii WhatsApp Sebastian nie pobiera.
-- Wiadomości starsze niż `WA_WATCH_KEEP_DAYS` (90 dni) są codziennie usuwane z Maca.
+- Zapisywane są rozmowy 1:1 (grupy — `WA_WATCH_GROUPS tak`), Twoje odpowiedzi (żeby wiedzieć, kto jeszcze czeka), połączenia przychodzące i **głosówki od innych zamienione na tekst** (lokalnie; nagranie nie jest przechowywane).
+- **Od 2.5 rozmowy zostają na Macu na stałe** (`WA_WATCH_KEEP_DAYS 0`). Jeśli wolisz limit: `wa-set WA_WATCH_KEEP_DAYS 365`.
+- **Załączniki (od 2.5):** PDF, Word, Excel, PowerPoint, teksty — Sebastian je pobiera i czyta (tak jak nauka czyta załączniki poczty), także te, które **Ty** wysyłasz. Ze zdjęć wyciąga tekst (OCR — np. zdjęcie faktury czy pisma; zwykłe zdjęcia bez tekstu są pomijane). Zapisywany jest **tekst**, nie plik (kopie plików: `WA_WATCH_KEEP_FILES tak` → `data/whatsapp/pliki/`). Ten sam plik czytany jest raz. Limit: `WA_WATCH_ATTACH_MAX_MB` (25 MB).
+- **Historia:** przy połączeniu WhatsApp przesyła część wcześniejszych rozmów (zwykle ostatnie tygodnie–miesiące, decyduje telefon) — od 2.5 Sebastian je zapisuje. Głosówki i zdjęcia z historii są tylko oznaczane („[głosówka]”); dokumenty z historii są czytane, jeśli telefon jeszcze je udostępnia.
 
 **Skąd sugestie**
 - **„Czeka na odpowiedź”** liczy program, nie model: ostatnia wiadomość w rozmowie jest od rozmówcy i ma ponad 2 godziny.
@@ -807,7 +819,7 @@ Sebastian może **czytać Twoje własne konto WhatsApp** i co rano (oraz na żą
 - W **porannym przeglądzie** (tekst i głosówka wspominają najważniejsze rozmowy) oraz osobną wiadomością „📱 WhatsApp od wczoraj” z listami *Oddzwoń / Odpisz / Porozmawiaj / Warto się odezwać*.
 - Na żądanie: `whatsapp` / `kto pisał` (ostatnia doba; `kto pisał 3 dni`), `do kogo` (same sugestie), `rozmowa Jan` (streszczenie rozmowy z daną osobą z 14 dni).
 - W panelu: zakładka WhatsApp → „Twój WhatsApp”. W Terminalu: `python sebastian.py wa-watch podsumowanie`.
-- **Tylko Ty** — rodzina (8b.8) nie ma dostępu do tych podsumowań.
+- **Tylko Ty** i osoby z dostępem `pelny` — dostęp prywatny (8b.8) nie widzi tych podsumowań ani akt.
 
 **Włączenie**
 
@@ -819,7 +831,14 @@ python sebastian.py wa-set WA_WATCH_IGNORE "kurier, bank, 48600000000"   # kogo 
 python sebastian.py wa-watch off         # wstrzymaj (dane zostają) · wa-watch usun — odłącz i usuń wszystkie dane
 ```
 
-**Ryzyko i prywatność — uczciwie.** To nieoficjalne połączenie (jak WhatsApp Web) na **Twoim głównym numerze**. Samo czytanie jest najmniej „podejrzanym” zachowaniem, ale ryzyko blokady przez WhatsApp nie jest zerowe. Rozmowy Twoich znajomych i klientów są zapisywane na Macu (`obserwacja.sqlite3`, FileVault!) i przetwarzane wyłącznie lokalnym modelem; nie trafiają do nauki ani do Open WebUI. Podsumowania przychodzą na czat z Sebastianem — czyli na telefon.
+**Akta osób (od 2.5).** Dla każdej osoby, z którą rozmawiasz, Sebastian prowadzi notatkę: *Kim jest · Sprawy i ustalenia · Otwarte · Warto pamiętać · Ostatni kontakt*. Notatka jest dopisywana w tle (gdy przybędą nowe wiadomości), z rozmów i przesłanych załączników; bez PESEL-i, numerów kont i spraw zdrowotnych. Gdzie:
+- na WhatsAppie: `kto to Jan`, `co wiem o Jan`, `akta Jan`; zwykłe pytania („o czym rozmawiałem z Markiem w sprawie umowy?”) też korzystają z akt,
+- w panelu: „Twój WhatsApp” → lista osób; pliki `data/whatsapp/ludzie/<imię> (<numer>).md`,
+- `python sebastian.py wa-watch ludzie` — odśwież akta teraz.
+
+**Nauka z rozmów (od 2.5, `WA_WATCH_TO_LEARNING`).** Każdy miesiąc rozmowy z daną osobą trafia do modułu Nauka jako osobna pozycja (`wa:<rozmowa>:<RRRR-MM>`, zakres `whatsapp`). Fakty z rozmów zasilają Bieżące sprawy i Profil wiedzy, ale **nie trafiają do Open WebUI (RAG)** ani do osób z dostępem prywatnym. Nowa wiadomość w miesiącu = ponowne przeczytanie tego miesiąca.
+
+**Ryzyko i prywatność — uczciwie.** To nieoficjalne połączenie (jak WhatsApp Web) na **Twoim głównym numerze**. Samo czytanie jest najmniej „podejrzanym” zachowaniem, ale ryzyko blokady przez WhatsApp nie jest zerowe. Rozmowy Twoich znajomych i klientów — **od 2.5 na stałe, razem z treścią załączników i aktami osób** — są zapisywane na Macu (`obserwacja.sqlite3`, `ludzie/`, FileVault!) i przetwarzane wyłącznie lokalnym modelem; nie trafiają do Open WebUI. Podsumowania i akta przychodzą na czat z Sebastianem — czyli na telefon (Twój i osób z dostępem `pelny`). Nie chcesz akt albo nauki: `wa-set WA_WATCH_PEOPLE nie` / `wa-set WA_WATCH_TO_LEARNING nie`.
 
 ### 8b.7. Najczęstsze problemy
 
@@ -833,7 +852,9 @@ python sebastian.py wa-watch off         # wstrzymaj (dane zostają) · wa-watch
 | `brak libmagic` / `neonize` | `brew install libmagic` / `python -m pip install -r requirements-whatsapp.txt`, potem `wa-start` |
 | Odpowiedzi trwają długo | Ollama jest zajęta (np. analiza dokumentu). Odpowiedź przyjdzie, gdy model się zwolni |
 | Za dużo powiadomień | `cisza` na WhatsAppie albo `python sebastian.py wa-set WA_NOTICES nie` |
-| Żona nie dostaje odpowiedzi | `wa-user` (czy jest na liście), `check` — Sebastian musi mieć osobny numer (8b.8) |
+| Żona nie dostaje odpowiedzi | `wa-user` (czy jest na liście i z jakim dostępem), `check` — Sebastian musi mieć osobny numer (8b.8) |
+| Ktoś spoza listy pisze do Sebastiana | Nic się nie dzieje — numery spoza `wa-user` są ignorowane (8b.8) |
+| Brak akt osoby | Akta powstają w tle po kilku wiadomościach; `python sebastian.py wa-watch ludzie` |
 | Brak „📱 WhatsApp od wczoraj” | `python sebastian.py wa-watch` — połączone? Zbieranie działa od chwili połączenia; `WA_WATCH_IN_BRIEF` |
 | „Straciłem wgląd w Twojego WhatsAppa” | Usunięte z Połączonych urządzeń albo telefon długo offline: `python sebastian.py wa-watch login` |
 | Inny głos | `python sebastian.py wa-voice pl_PL-gosia-medium` (kobiecy) albo `wa-set WA_VOICE_ENGINE say` i `wa-set WA_SAY_VOICE Zosia`; tempo: `wa-set WA_VOICE_SPEED 1.1` (wolniej) |
@@ -967,7 +988,9 @@ sebastian-start/
         ├── whatsapp.sqlite3        kolejka, rozmowa, przeglądy 🔒
         ├── sesja.sqlite3           KLUCZE połączenia z WhatsAppem 🔒🔒
         ├── obserwacja-sesja.sqlite3  KLUCZE do TWOJEGO konta WhatsApp (2.4) 🔒🔒
-        ├── obserwacja.sqlite3      Twoje rozmowy z WhatsAppa (2.4, usuwane po WA_WATCH_KEEP_DAYS) 🔒🔒
+        ├── obserwacja.sqlite3      Twoje rozmowy z WhatsAppa, treść załączników, akta osób (2.4; od 2.5 na stałe) 🔒🔒
+        ├── ludzie/                 akta osób jako pliki .md (2.5) 🔒🔒
+        ├── pliki/                  kopie załączników — tylko przy WA_WATCH_KEEP_FILES (2.5) 🔒🔒
         ├── glosy/  nagrania/       głos Piper, głosówki
         └── wyslane/                tylko tryb próby (WA_TRANSPORT plik)
 ```
@@ -1109,8 +1132,8 @@ Każde polecenie uruchamiaj w folderze `sebastian-start` z aktywnym `.venv`: `py
 | `wa-voice [NAZWA]` | Pobierz głos Piper (domyślnie `pl_PL-darkman-medium`; np. `pl_PL-gosia-medium`) |
 | `wa-settings` / `wa-set KLUCZ WARTOŚĆ` | Ustawienia `WA_*` (12.3) |
 | `wa-logout` | Odłącz Sebastiana od WhatsAppa i usuń sesję |
-| `wa-user [lista\|dodaj\|usun] [NUMER]` | (2.4) Rodzina: kto jeszcze może pisać do Sebastiana (tylko sprawy prywatne), z osobnym przeglądem |
-| `wa-watch [status\|login\|podsumowanie\|off\|on\|usun]` | (2.4) Obserwacja Twojego WhatsAppa: połączenie (QR / `--kod`), podsumowanie (`--godzin N`), wstrzymanie, usunięcie danych |
+| `wa-user [lista\|dodaj\|usun] [NUMER]` | (2.4) Lista dozwolonych numerów: kto jeszcze może pisać do Sebastiana, z osobnym przeglądem; `--dostep prywatny\|pelny` (2.5) |
+| `wa-watch [status\|login\|podsumowanie\|ludzie\|off\|on\|usun]` | (2.4) Obserwacja Twojego WhatsAppa: połączenie (QR / `--kod`), podsumowanie (`--godzin N`), odświeżenie akt osób (2.5), wstrzymanie, usunięcie danych |
 | `wa-run` | Pętla usługi na pierwszym planie (normalnie uruchamia ją launchd) |
 
 ---
@@ -1276,14 +1299,20 @@ Zmiana: `python sebastian.py wa-set KLUCZ WARTOŚĆ`, potem `wa-start` (przeład
 | `WA_REPLY_VOICE` | `tak` | Na głosówkę odpowiedź także głosówką |
 | `WA_NOTICES` | `tak` | Powiadomienia systemowe na WhatsApp |
 | `WA_QUIET` | `22:00-07:00` | Cisza nocna dla powiadomień (przychodzą po jej końcu) |
-| `WA_USERS` | — | (2.4) Rodzina — tylko przez `wa-user` |
+| `WA_USERS` | — | (2.4) Lista dozwolonych numerów i ich dostęp — tylko przez `wa-user` |
 | `WA_WATCH` | `nie` | (2.4) Obserwacja Twojego WhatsAppa (włącza `wa-watch login`) |
 | `WA_WATCH_PHONE` | — | Twój obserwowany numer (ustawia `wa-watch login`) |
 | `WA_WATCH_GROUPS` | `nie` | Także grupy |
 | `WA_WATCH_TRANSCRIBE` | `tak` | Głosówki od innych → tekst (lokalnie) |
-| `WA_WATCH_KEEP_DAYS` | `90` | Po ilu dniach wiadomości są usuwane z Maca |
+| `WA_WATCH_KEEP_DAYS` | `0` | Po ilu dniach wiadomości są usuwane z Maca; `0` = na stałe (2.5; wcześniej 90) |
 | `WA_WATCH_IGNORE` | — | Numery/nazwy do pomijania (lista po przecinku) |
 | `WA_WATCH_IN_BRIEF` | `tak` | Podsumowanie WhatsAppa w porannym przeglądzie |
+| `WA_WATCH_ATTACHMENTS` | `tak` | (2.5) Czytaj załączniki z rozmów (PDF, Office, tekst) |
+| `WA_WATCH_OCR_IMAGES` | `tak` | (2.5) Tekst ze zdjęć (OCR) |
+| `WA_WATCH_ATTACH_MAX_MB` | `25` | (2.5) Większych plików nie pobiera |
+| `WA_WATCH_KEEP_FILES` | `nie` | (2.5) Zachowuj kopie plików w `data/whatsapp/pliki/` (domyślnie tylko tekst) |
+| `WA_WATCH_TO_LEARNING` | `tak` | (2.5) Rozmowy → moduł Nauka (bez Open WebUI) |
+| `WA_WATCH_PEOPLE` | `tak` | (2.5) Akta osób |
 
 ---
 
@@ -1486,6 +1515,7 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2, 2.3):
 | 2.1.3 | 19.10.2026 | Wygaśnięcie logowania do Dysku: jeden komunikat zamiast wpisu przy każdym wątku, baner w panelu, polecenie `learn-drive` z wyborem (zaloguj ponownie / wyłącz Dysk) |
 | 2.2 | 19.10.2026 | **Dokumenty**: duże skany (druk, maszynopis, pismo ręczne, Grundbuch) → mały PDF ze spisem treści i linkami; model wizyjny z podwójnym czytaniem pisma, wpisy KW wg działów z weryfikacją cytatów, sprawdzanie i poprawki stron w panelu, praca wznawialna w tle (1–2 dni), przekazanie do nauki; polecenia `doc-*`, sekcja „6. Dokumenty” w `check` |
 | 2.3 | 20.10.2026 | **WhatsApp**: poranny przegląd z głosówką („Hej Andrzej!”, polski głos Piper, lokalnie), rozmowa i komendy (zadania, zrobione N, pilne, poczta, kalendarz, dokumenty, zapamiętaj, cisza), rozumienie głosówek (mlx-whisper), powiadomienia z ciszą nocną, opcjonalnie wieczór i tydzień; zakładka WhatsApp, polecenia `wa-*`, sekcja „7. WhatsApp” w `check` |
+| 2.5 | 20.10.2026 | **WhatsApp — pamięć rozmów i dostęp pełny**: rozmowy przechowywane na stałe, czytanie załączników (PDF, Office, OCR zdjęć — także wysłanych przez Ciebie), zapis historii przesłanej przy połączeniu, akta osób (`kto to Jan`, `wa-watch ludzie`, panel), nauka z rozmów (zakres `whatsapp`, bez Open WebUI); lista dozwolonych numerów z poziomem dostępu `prywatny`/`pelny` (`wa-user dodaj --dostep pelny`) |
 | 2.4 | 20.10.2026 | **WhatsApp — rodzina i Twoje konto**: żona (i inne osoby z `wa-user`) pisze do Sebastiana i dostaje własny przegląd — tylko sprawy prywatne; obserwacja Twojego WhatsAppa (tylko odczyt): kto pisał, o czym, komu odpisać, do kogo oddzwonić, z kim dawno nie rozmawiałeś — w przeglądzie i na żądanie (`whatsapp`, `do kogo`, `rozmowa Jan`) |
 
 Szczegóły każdej wersji: `docs/aktualizacje/AKTUALIZACJA_X_Y.md`.

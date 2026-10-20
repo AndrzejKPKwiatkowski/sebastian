@@ -1,4 +1,4 @@
-"""Sebastian 2.4 — zakładka „WhatsApp”: stan połączenia, podgląd i wysyłka przeglądu, historia rozmowy."""
+"""Sebastian 2.5 — zakładka „WhatsApp”: stan połączenia, podgląd i wysyłka przeglądu, historia rozmowy."""
 import contextlib, json, time
 from pathlib import Path
 from flask import abort, flash, redirect, render_template, request, send_file, session
@@ -31,7 +31,8 @@ def register(app, s):
                 n, last = WW.status_counts()
                 with contextlib.closing(WW.db()) as wc:
                     row = wc.execute('SELECT data, created FROM digests ORDER BY created DESC LIMIT 1').fetchone()
-                watch = {'count': n, 'last': last, 'digest': WW.digest_text(json.loads(row['data'])) if row else '',
+                    people = [dict(r) for r in wc.execute("SELECT name, summary, updated FROM people WHERE summary<>'' ORDER BY updated DESC LIMIT 100")]
+                watch = {'count': n, 'last': last, 'people': people, 'digest': WW.digest_text(json.loads(row['data'])) if row else '',
                          'digest_at': row['created'][:16].replace('T', ' ') if row else ''}
         return render_template('whatsapp.html', watch=watch, c=W.C, checks=W.checks(), briefs=briefs, talk=talk, info=info, family=W.family(),
                                pending=pending, errors=errors, running=W.agent_loaded(), name=W.owner_name(),

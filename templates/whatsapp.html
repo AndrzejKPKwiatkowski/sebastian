@@ -7,7 +7,7 @@
 <tr><td>Usługa w tle</td><td>{{'działa' if running else 'wyłączona — python sebastian.py wa-start'}}{% if info.heartbeat %}<br><small>znak życia: {{info.heartbeat[:16]|replace('T',' ')}}</small>{% endif %}</td></tr>
 <tr><td>WhatsApp</td><td>{{ {'linked':'połączone urządzenie','plik':'próba (pliki, bez wysyłki)'}.get(c.WA_TRANSPORT, c.WA_TRANSPORT) }}{% if info.linked_as %} · konto +{{info.linked_as}}{% endif %}{% if info.connected=='1' %} · połączony ✓{% endif %}</td></tr>
 <tr><td>Ostatni przegląd</td><td>{{info['sent:rano'] or '—'}}</td></tr>
-<tr><td>Kto może pisać</td><td>Ty (+{{c.WA_OWNER_PHONE or '—'}}){% for u in family %}<br>{{u.name or ('+' ~ u.phone)}}{% if u.desc %} ({{u.desc}}){% endif %} — tylko sprawy prywatne{% if u.brief %}, przegląd rano{% endif %}{% endfor %}<br><small>Dodasz osobę: <code>python sebastian.py wa-user dodaj</code></small></td></tr>
+<tr><td>Kto może pisać</td><td>Ty (+{{c.WA_OWNER_PHONE or '—'}}){% for u in family %}<br>{{u.name or ('+' ~ u.phone)}}{% if u.desc %} ({{u.desc}}){% endif %} — {% if u.role == 'pelny' %}pełny dostęp (jak Ty){% else %}tylko sprawy prywatne{% endif %}{% if u.brief %}, przegląd rano{% endif %}{% endfor %}<br><small>Tylko te numery — wszystkie inne Sebastian ignoruje. Dodasz osobę: <code>python sebastian.py wa-user dodaj</code> (dostęp: prywatny albo pelny)</small></td></tr>
 <tr><td>Głos</td><td>{{engine or 'brak — python sebastian.py wa-test'}}</td></tr>
 <tr><td>Kolejka</td><td>{{pending}} do wysłania · {{errors}} nieudanych</td></tr>
 {% if info.mute_until %}<tr><td>Wyciszone do</td><td>{{info.mute_until[:16]|replace('T',' ')}}</td></tr>{% endif %}
@@ -23,8 +23,9 @@
 </div>
 <p><small>Podgląd składa przegląd modelem — może potrwać 1–2 minuty.</small></p>
 <div class="card"><h2>Twój WhatsApp — kto pisał, do kogo oddzwonić</h2>
-{% if watch %}<p>Zapisane wiadomości: {{watch.count}} · ostatnia: {{watch.last}}. Sebastian tylko czyta — niczego nie wysyła z Twojego konta i nie oznacza wiadomości jako przeczytanych.</p>
+{% if watch %}<p>Zapisane wiadomości: {{watch.count}} · ostatnia: {{watch.last}}. Sebastian tylko czyta — niczego nie wysyła z Twojego konta i nie oznacza wiadomości jako przeczytanych. Rozmowy i treść załączników zostają na Macu na stałe.</p>
 {% if watch.digest %}<p><small>Ostatnie podsumowanie: {{watch.digest_at}}</small></p><pre>{{watch.digest}}</pre>{% endif %}
+{% if watch.people %}<details><summary><b>Akta osób</b> ({{watch.people|length}}) — co Sebastian wie z Waszych rozmów</summary>{% for p in watch.people %}<details style="margin-left:12px"><summary>{{p.name}} <small class="muted">· {{p.updated[:16]|replace('T',' ')}}</small></summary><pre>{{p.summary}}</pre></details>{% endfor %}</details>{% endif %}
 <form method="post" action="/whatsapp/akcja"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="akcja" value="watch_digest"><input type="hidden" name="rodzaj" value="rano"><button class="secondary">Podsumuj ostatnią dobę</button></form>
 {% else %}<p>Wyłączone. Sebastian może czytać Twoje rozmowy na WhatsAppie (tylko odczyt) i co rano mówić, kto pisał, komu odpisać i do kogo oddzwonić. Włączysz: <code>python sebastian.py wa-watch login</code></p>{% endif %}</div>
 {% for b in briefs %}<details class="card"{% if loop.first %} open{% endif %}><summary><b>{{ {'rano':'Poranny','wieczor':'Wieczorny','tydzien':'Tygodniowy'}.get(b.kind, b.kind) }} przegląd</b> · {{b.created[:16]|replace('T',' ')}}{% if b.source=='awaryjny' %} · bez modelu (awaryjny){% endif %}</summary>

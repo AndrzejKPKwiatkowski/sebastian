@@ -148,3 +148,17 @@ Data: 2026-10-20. Wynik: 67 testów zaliczonych (8 nowych).
 - Ręcznie: prawdziwy klient obserwacji tworzy się z obsługą połączeń przychodzących, przy braku sieci ponawia bez zawieszania.
 
 Nie sprawdzono tu: połączenia z prawdziwym WhatsAppem (sieć niedostępna) — w szczególności tego, jak WhatsApp przekazuje połączonemu urządzeniu informacje o połączeniach i nazwy kontaktów na Twoim koncie. Sprawdzisz po `wa-watch login`: następnego dnia `python sebastian.py wa-watch podsumowanie`.
+
+
+# Weryfikacja 2.5 — pamięć rozmów, załączniki, akta osób, dostęp pełny
+
+Data: 2026-10-20. Wynik: 77 testów zaliczonych (10 nowych; `test_whatsapp.py`: 34).
+
+- **Na stałe:** domyślnie `WA_WATCH_KEEP_DAYS 0` — sprzątanie niczego nie usuwa; po ustawieniu liczby dni starsze wiadomości znikają jak dotąd.
+- **Załączniki:** PDF przesłany w rozmowie (także przez Ciebie) jest czytany raz (ten sam plik drugi raz — z pamięci), tekst trafia do zapisu rozmowy i podsumowań („📎 …”), zdjęcia bez tekstu są pomijane.
+- **Historia przy połączeniu:** odczyt struktur `HistorySync` (rozmowy, Twoje wiadomości, nazwy), pominięte statusy, grupy i kanały, głosówki z historii oznaczone bez pobierania.
+- **Nauka z rozmów:** miesiąc rozmowy → pozycja `wa:<rozmowa>:<miesiąc>` w nauce (zakres `whatsapp`), tekst z oznaczeniem Twoich wiadomości i załącznikami, przetworzenie przez `process_file`, ponowne przeczytanie po nowej wiadomości; fakty z WhatsAppa nie trafiają do osób z dostępem prywatnym ani do Open WebUI.
+- **Akta osób:** aktualizacja z rozmowy (model udawany), `kto to Jan?` (także z odmianą i znakiem zapytania), akta w kontekście zwykłych pytań, plik `.md`, odmowa dla dostępu prywatnego.
+- **Dostęp pełny:** osoba dodana z `--dostep pelny` widzi zadania firmowe, dokumenty, może zamykać zadania (własna numeracja), ma zakresy jak właściciel, a model dostaje informację, że rozmawia z osobą z pełnym dostępem. Powitanie mówi o pełnym dostępie. Numer spoza listy jest ignorowany. Nieznany poziom dostępu → błąd.
+
+Nie sprawdzono tu: jak dużo historii przekaże prawdziwy telefon przy połączeniu, pobierania plików z serwerów WhatsAppa (sieć niedostępna) ani jakości akt pisanych przez prawdziwy model. Sprawdzisz na Macu: `python sebastian.py wa-watch` (liczba akt i załączników), potem `kto to <imię>` na WhatsAppie.

@@ -355,6 +355,46 @@ class FamilyTests(Base):
         self.assertIsNone(W.user_by_phone(WIFE))
 
 
+class FullAccessTests(Base):
+    """2.5: numer z dostępem „pełny” — jak właściciel (np. żona), a inne numery dalej ignorowane."""
+    def setUp(self):
+        super().setUp()
+        with patch.object(W, "agent_loaded", lambda: False):
+            W.cmd_user("dodaj", WIFE, "Kasia", "Kasiu", "żona", "nie", "nie", "pelny")
+        self.wife = W.user_by_phone(WIFE)
+
+    def test_full_access_like_owner(self):
+        self.assertEqual(self.wife["role"], "pelny")
+        self.assertTrue(W.full(self.wife))
+        self.assertFalse(W.is_owner(self.wife))
+        prompts = []
+
+        def spy(prompt, **k):
+            prompts.append(prompt)
+            return "OK."
+        with self.con() as con, patch.object(W, "ask", spy):
+            text = W.handle(con, "zadania", user=self.wife)[0]
+            self.assertIn("Potwierdzić dokumenty", text)                 # zadanie firmowe też
+            self.assertNotIn("tylko", W.handle(con, "dokumenty", user=self.wife)[0][:80])
+            W.handle(con, "Co z dokumentami do spotkania?", user=self.wife)
+            self.assertIn("pełny dostęp", prompts[-1])
+            self.assertIn("✓ Zrobione", W.handle(con, "zrobione 1", user=self.wife)[0])
+            # numeracja zadań osobna dla każdej osoby
+            self.assertTrue(W.meta_get(con, f"task_numbers:{WIFE}"))
+        with W.as_user(self.wife):
+            self.assertEqual(sorted(W.allowed_scopes()), sorted(W.C.WA_SCOPES))
+        t = W.FileTransport()
+        t.start()
+        with self.con() as con, patch.object(W, "due_kind", lambda con: None), patch.object(W, "due_family", lambda con: []):
+            W.tick(con, t, queue.Queue(), {"beat": 0})
+            body = con.execute("SELECT body FROM outbox WHERE purpose='welcome' AND to_phone=?", (WIFE,)).fetchone()[0]
+            self.assertIn("taki sam dostęp", body)
+            W.handle_incoming(con, t, {"id": "X2", "kind": "text", "text": "zadania", "ts": time.time(), "from": "48777"})
+            self.assertFalse(con.execute("SELECT 1 FROM inbox WHERE wa_id='X2'").fetchone())   # spoza listy — ignorowany
+        with patch.object(W, "agent_loaded", lambda: False), self.assertRaises(RuntimeError):
+            W.cmd_user("dodaj", "48555666777", "X", "X", "", "nie", "nie", "admin")
+
+
 class WatchTests(Base):
     """2.4: Sebastian czyta Twojego WhatsAppa (tylko odczyt) i podpowiada, komu odpisać / do kogo oddzwonić."""
     def setUp(self):
@@ -458,6 +498,97 @@ class WatchTests(Base):
             self.assertEqual(con.execute("SELECT text FROM wmsg WHERE id='n1'").fetchone()[0], "Zadzwoń proszę")
 
 
+class MemoryTests(WatchTests):
+    """2.5: rozmowy na stałe, załączniki, nauka z rozmów, akta osób."""
+    def test_permanent_by_default(self):
+        W.save_settings({"WA_WATCH_KEEP_DAYS": 0})
+        with contextlib.closing(self.WW.db()) as con:
+            self.assertEqual(self.WW.cleanup(con), 0)
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM wmsg WHERE chat='48444'").fetchone()[0], 12)
+        self.assertEqual(W.DEFAULTS["WA_WATCH_KEEP_DAYS"], 0)
+
+    def pdf(self, text):
+        import fitz
+        doc = fitz.open()
+        doc.new_page().insert_text((72, 72), text)
+        return doc.tobytes()
+
+    def test_attachments_read_once_and_in_transcript(self):
+        pdf = self.pdf("Umowa najmu lokalu. Czynsz miesieczny 2500 zl, termin platnosci do 10 dnia miesiaca.")
+        with contextlib.closing(self.WW.db()) as con:
+            for mid in ("f1", "f2"):
+                self.WW.store(con, {"id": mid, "chat": "48111", "chat_name": "Jan Nowak", "sender": "48111", "from_me": False,
+                                    "is_group": False, "ts": int(time.time()), "kind": "doc", "text": "[dokument: umowa.pdf]",
+                                    "file_bytes": pdf, "file_name": "umowa.pdf", "file_mime": "application/pdf"})
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM wattach").fetchone()[0], 1)        # ten sam plik raz
+            self.assertIn("Czynsz", con.execute("SELECT text FROM wattach").fetchone()[0])
+            text = self.WW.transcript(con, "48111")
+            self.assertIn("📎 Załącznik: umowa.pdf", text)
+            self.assertIn("ten sam plik co wyżej", text)
+            self.assertIn("Czynsz", " ".join(c["lines"][-1] for c in self.WW.chats(con, 0) if c["chat"] == "48111"))
+        self.assertFalse((W.home() / "pliki").exists())                                        # domyślnie tylko tekst
+
+    def test_learning_from_conversations(self):
+        import learner as L
+        L.bind(s)
+        with contextlib.closing(self.WW.db()) as con:
+            for i, (me, txt) in enumerate([(False, "Czy możesz podpisać umowę do piątku?"), (True, "Tak, podpiszę w czwartek"),
+                                           (False, "Super, dzięki")]):
+                self.WW.store(con, {"id": f"l{i}", "chat": "48111", "chat_name": "Jan Nowak", "sender": "48111", "from_me": me,
+                                    "is_group": False, "ts": int(time.time()) - 100 + i, "kind": "text", "text": txt})
+        self.assertGreaterEqual(self.WW.sync_learning(), 1)
+        month = dt.datetime.now(s.TZ).strftime("%Y-%m")
+        fid = f"wa:48111:{month}"
+        with contextlib.closing(L.db()) as lc:
+            f = lc.execute("SELECT * FROM files WHERE id=?", (fid,)).fetchone()
+            self.assertEqual((f["status"], f["scope"]), ("new", "whatsapp"))
+        self.assertEqual(self.WW.sync_learning(), 0)                                              # bez zmian — bez pracy
+        text = self.WW.learning_text(fid)
+        self.assertIn("WYSŁANE PRZEZE MNIE: Tak, podpiszę w czwartek", text)
+        facts = json.dumps({"fakty": [{"kategoria": L.CURRENT_CAT, "fakt": "Andrzej podpisze umowę z Janem Nowakiem w czwartek."}]})
+        with patch.object(L, "ask", lambda *a, **k: facts), contextlib.closing(L.db()) as lc:
+            L.process_file(lc, None, lc.execute("SELECT * FROM files WHERE id=?", (fid,)).fetchone())
+            self.assertEqual(lc.execute("SELECT status FROM files WHERE id=?", (fid,)).fetchone()[0], "done")
+            st = L.stats(lc)
+            self.assertEqual((st["wa_done"], st["drive_all"]), (1, 0))
+        with contextlib.closing(self.WW.db()) as con:
+            self.WW.store(con, {"id": "l9", "chat": "48111", "chat_name": "Jan Nowak", "sender": "48111", "from_me": False,
+                                "is_group": False, "ts": int(time.time()), "kind": "text", "text": "Jeszcze jedno"})
+        self.WW.sync_learning()
+        with contextlib.closing(L.db()) as lc:
+            self.assertEqual(lc.execute("SELECT status FROM files WHERE id=?", (fid,)).fetchone()[0], "new")   # nowa wiadomość → ponownie
+        with patch.object(W, "agent_loaded", lambda: False):
+            W.cmd_user("dodaj", WIFE, "Kasia", "Kasiu", "żona", "nie", "nie")
+        with W.as_user(W.user_by_phone(WIFE)):
+            self.assertNotIn("czwartek", W.search_context("kiedy podpisze umowę Jan"))            # rodzina nie widzi WhatsAppa
+        self.assertIn("czwartek", W.search_context("kiedy podpisze umowę Jan"))
+
+    def test_people_notes(self):
+        def ask(prompt, **k):
+            if "Prowadzisz akta" in prompt:
+                if "WhatsAppie: Jan Nowak" not in prompt:
+                    return "**Kim jest dla Andrzej** Znajomy."
+                self.assertIn("potwierdzisz termin", prompt)
+                return "**Kim jest dla Andrzej** Klient.\n**Otwarte / do zrobienia** Potwierdzić termin w piątek."
+            if "Pytanie:" in prompt:
+                self.assertIn("Akta: Jan Nowak", prompt)
+                return "Jan czeka na potwierdzenie terminu."
+            return self.fake_digest_ask(prompt, **k)
+        with patch.object(W, "ask", ask):
+            self.assertGreaterEqual(self.WW.update_people(limit=5), 1)
+            self.assertIn("Potwierdzić termin", self.WW.person_text("jan"))
+            with self.con() as con:
+                self.assertIn("Klient", W.handle(con, "kto to Jan?")[0])
+                self.assertIn("Jan czeka", W.handle(con, "Co mam ustalić z Jan?")[0])
+            self.assertEqual(self.WW.update_people(limit=5), 0)                                  # nic nowego
+        self.assertTrue(any("Jan Nowak" in p.name for p in (W.home() / "ludzie").iterdir()))
+        with patch.object(W, "agent_loaded", lambda: False):
+            W.cmd_user("dodaj", WIFE, "Kasia", "Kasiu", "żona", "nie", "nie")
+        with self.con() as con:
+            self.assertIn("tylko", W.handle(con, "kto to Jan", user=W.user_by_phone(WIFE))[0])
+            self.assertIn("tylko", W.handle(con, "co wiem o Janie", user=W.user_by_phone(WIFE))[0])
+
+
 # ---------------------------------------------------------------- filtr nadawcy na prawdziwych strukturach neonize
 
 try:
@@ -529,6 +660,31 @@ class WatcherParseTests(unittest.TestCase):
         g = w.parse(self.ev("48111", E.Message(conversation="x"), chat="120363", group=True))
         self.assertEqual((g["chat_name"], g["is_group"]), ("Rodzina", True))
         self.assertFalse(hasattr(w.client, "marked"))                     # nic nie jest oznaczane jako przeczytane
+
+    def test_history_sync(self):
+        from neonize.proto.waHistorySync import WAWebProtobufsHistorySync_pb2 as H
+        from neonize.proto.waWeb import WAWebProtobufsWeb_pb2 as Wb
+        from neonize.proto.waCommon import WACommon_pb2 as Cm
+        w = self.watcher()
+
+        def wm(mid, from_me, msg, ts=1760000000):
+            return H.HistorySyncMsg(message=Wb.WebMessageInfo(key=Cm.MessageKey(remoteJID="48111@s.whatsapp.net", fromMe=from_me, ID=mid),
+                                                               message=msg, messageTimestamp=ts, pushName="Janek"))
+        data = H.HistorySync(syncType=H.HistorySync.INITIAL_BOOTSTRAP, conversations=[
+            H.Conversation(ID="48111@s.whatsapp.net", name="Jan Nowak", messages=[
+                wm("h1", False, E.Message(conversation="Pamiętasz o spotkaniu?")),
+                wm("h2", True, E.Message(conversation="Tak, będę")),
+                wm("h3", False, E.Message(audioMessage=E.AudioMessage(PTT=True))),
+                wm("h4", False, E.Message(documentMessage=E.DocumentMessage(fileName="oferta.pdf", fileLength=1000))),
+                wm("h5", False, E.Message(reactionMessage=E.ReactionMessage(text="👍")))]),
+            H.Conversation(ID="status@broadcast", messages=[wm("s1", False, E.Message(conversation="x"))]),
+            H.Conversation(ID="120363@g.us", messages=[wm("g1", False, E.Message(conversation="x"))])])
+        got = {m["id"]: m for m in w.parse_history(data)}
+        self.assertEqual(sorted(got), ["h1", "h2", "h3", "h4"])
+        self.assertEqual((got["h1"]["chat"], got["h1"]["chat_name"], got["h1"]["from_me"]), ("48111", "Jan Nowak", False))
+        self.assertTrue(got["h2"]["from_me"])
+        self.assertEqual((got["h3"]["kind"], got["h3"]["text"], got["h3"]["audio_bytes"]), ("voice", "[głosówka]", None))
+        self.assertEqual((got["h4"]["kind"], got["h4"]["file_name"], got["h4"]["file_bytes"]), ("doc", "oferta.pdf", b"OGGDATA"))
 
 
 @unittest.skipUnless(HAVE_NEONIZE, "brak biblioteki neonize")

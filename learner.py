@@ -1,4 +1,4 @@
-"""Sebastian 2.3 — moduł nauki (dawny Drive Learner) z czytaniem załączników i dokumentów (skanów).
+"""Sebastian 2.5 — moduł nauki (dawny Drive Learner) z czytaniem załączników i dokumentów (skanów).
 
 Lokalny model (Ollama) czyta w tle Dysk Google, pocztę z Sebastiana i pełne archiwum
 skrzynek, wyciąga fakty o właścicielu i składa z nich:
@@ -405,7 +405,8 @@ MUSIC_EXT = (".mp3", ".flac", ".aac", ".wav", ".aiff", ".ogg", ".alac")
 
 
 def is_mail_item(f):
-    return f["id"].startswith(("mail:", "import:"))
+    """Rozmowy (maile, notatki, WhatsApp) — czytane jako rozmowa, z oznaczeniem własnych wiadomości."""
+    return f["id"].startswith(("mail:", "import:", "wa:"))
 
 
 def skip_reason(f):
@@ -717,7 +718,8 @@ def build_prompt(f, chunk, n, parts):
     common = dict(owner=C.OWNER_NAME, context=C.OWNER_CONTEXT, part=n, parts=parts, text=chunk,
                   rules=FACT_RULES, categories="; ".join(CATEGORIES))
     if is_mail_item(f):
-        kind = "notatkę / zapis rozmowy" if f["id"].startswith("import:") else "wątek e-mail"
+        kind = ("notatkę / zapis rozmowy" if f["id"].startswith("import:") else
+                "rozmowę na WhatsAppie (jeden miesiąc)" if f["id"].startswith("wa:") else "wątek e-mail")
         return MAIL_PROMPT.format(kind=kind, addrs=", ".join(own_addresses()) or "—",
                                   current_cat=CURRENT_CAT, **common)
     return DRIVE_PROMPT.format(path=f["path"], modified=(f["modified"] or "")[:10], **common)
@@ -802,7 +804,11 @@ def process_file(con, service, f):
     if reason:
         return mark(con, f, "skip", reason)
     origin = ""
-    if is_mail_item(f):
+    if f["id"].startswith("wa:"):
+        import whatsapp_watch
+        log.info(f"→ {f['path']}")
+        text, origin = whatsapp_watch.learning_text(f["id"]), "WhatsApp (data/whatsapp/obserwacja.sqlite3)"
+    elif is_mail_item(f):
         import learner_mail
         log.info(f"→ {f['path']}")
         text, origin = learner_mail.thread_text(con, f["id"])
@@ -850,7 +856,7 @@ def process_file(con, service, f):
 
 
 def next_file(con, drive_ok):
-    where = "status='new'" + ("" if drive_ok else " AND (id LIKE 'mail:%' OR id LIKE 'import:%' OR id LIKE 'doc:%')")
+    where = "status='new'" + ("" if drive_ok else " AND (id LIKE 'mail:%' OR id LIKE 'import:%' OR id LIKE 'doc:%' OR id LIKE 'wa:%')")
     return con.execute(f"SELECT * FROM files WHERE {where} ORDER BY priority, modified DESC LIMIT 1").fetchone()
 
 
@@ -995,7 +1001,7 @@ def update_current(con, force=False):
 
 def stats(con):
     g = lambda q: con.execute(q).fetchone()[0]  # noqa: E731
-    drive = "id NOT LIKE 'mail:%' AND id NOT LIKE 'import:%' AND id NOT LIKE 'doc:%'"
+    drive = "id NOT LIKE 'mail:%' AND id NOT LIKE 'import:%' AND id NOT LIKE 'doc:%' AND id NOT LIKE 'wa:%'"
     mail = "(id LIKE 'mail:%' OR id LIKE 'import:%')"
     return {
         "drive_all": g(f"SELECT COUNT(*) FROM files WHERE {drive}"),
@@ -1014,6 +1020,8 @@ def stats(con):
         "att_messages": g("SELECT COUNT(*) FROM att_done WHERE state='ok'"),
         "att_unknown": g("SELECT COUNT(*) FROM history_mails WHERE att IS NULL"),
         "docs_done": g("SELECT COUNT(*) FROM files WHERE id LIKE 'doc:%' AND status='done'"),
+        "wa_done": g("SELECT COUNT(*) FROM files WHERE id LIKE 'wa:%' AND status='done'"),
+        "wa_new": g("SELECT COUNT(*) FROM files WHERE id LIKE 'wa:%' AND status='new'"),
     }
 
 
@@ -1333,6 +1341,8 @@ def cmd_status():
           f"{st['drive_skip']} pominiętych · {st['drive_error']} błędów")
     print(f"Wątki poczty:       {st['mail_done']} przeczytanych · {st['mail_new']} w kolejce · {st['mail_error']} błędów")
     print(f"Archiwum maili:     {st['history']} pobranych wiadomości")
+    if st["wa_done"] or st["wa_new"]:
+        print(f"WhatsApp:           {st['wa_done']} rozmów-miesięcy przeczytanych · {st['wa_new']} w kolejce")
     for r in con.execute("SELECT * FROM history_folders ORDER BY account, folder"):
         state = f"{r['fetched']}/{r['total']}" + (f" · błąd: {r['error']}" if r["error"] else "")
         print(f"   {r['account']:<10} {r['folder'][:40]:<40} {state}")

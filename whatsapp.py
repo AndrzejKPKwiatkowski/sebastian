@@ -1,4 +1,4 @@
-"""Sebastian 2.4 — WhatsApp: poranny przegląd (tekst + głosówka) i rozmowa z Sebastianem.
+"""Sebastian 2.5 — WhatsApp: poranny przegląd (tekst + głosówka) i rozmowa z Sebastianem.
 
 Jak to działa:
   • Usługa w tle (`wa-run`, launchd: pl.sebastian.whatsapp) jest połączona z WhatsAppem jako „połączone
@@ -65,9 +65,15 @@ DEFAULTS = {
     "WA_WATCH_PHONE": "",              # Twój numer obserwowany (ustawia wa-watch login)
     "WA_WATCH_GROUPS": False,          # także grupy (zwykle dużo szumu)
     "WA_WATCH_TRANSCRIBE": True,       # głosówki od innych → tekst (lokalnie)
-    "WA_WATCH_KEEP_DAYS": 90,          # starsze wiadomości są usuwane z Maca
+    "WA_WATCH_KEEP_DAYS": 0,           # 0 = rozmowy przechowywane na stałe (2.5); np. 365 = usuwaj starsze niż rok
     "WA_WATCH_IGNORE": [],             # numery/nazwy do pominięcia (np. kurier, bank)
     "WA_WATCH_IN_BRIEF": True,         # podsumowanie WhatsAppa w porannym przeglądzie
+    "WA_WATCH_ATTACHMENTS": True,      # 2.5: czytaj załączniki (PDF, Word, Excel…) przesyłane w rozmowach
+    "WA_WATCH_OCR_IMAGES": True,       # 2.5: tekst ze zdjęć (OCR) — np. zdjęcia dokumentów, faktur
+    "WA_WATCH_ATTACH_MAX_MB": 25,
+    "WA_WATCH_KEEP_FILES": False,      # 2.5: zachowaj też kopie plików (data/whatsapp/pliki/); domyślnie tylko tekst
+    "WA_WATCH_TO_LEARNING": True,      # 2.5: rozmowy → fakty w nauce (Profil wiedzy, Bieżące sprawy)
+    "WA_WATCH_PEOPLE": True,           # 2.5: akta osób (co wiem o rozmowach z daną osobą)
 }
 SETTINGS_FILE = "whatsapp.json"
 
@@ -158,7 +164,8 @@ def now():
 # ================================================================ rozmówcy (2.3.1): właściciel + rodzina
 
 _USER = contextvars.ContextVar("wa_user", default=None)
-ROLE_PL = {"wlasciciel": "właściciel — wszystko", "rodzina": "rodzina — tylko sprawy prywatne"}
+ROLE_PL = {"wlasciciel": "właściciel — wszystko", "pelny": "pełny dostęp — jak właściciel",
+           "rodzina": "rodzina — tylko sprawy prywatne"}
 
 
 def owner_user():
@@ -172,7 +179,7 @@ def family():
     for u in C.WA_USERS or []:
         if isinstance(u, dict) and u.get("phone") and u["phone"] != C.WA_OWNER_PHONE:
             out.append({"phone": u["phone"], "name": u.get("name") or "", "call": u.get("call") or u.get("name") or "",
-                        "role": "rodzina", "desc": u.get("desc") or "", "brief": bool(u.get("brief")),
+                        "role": "pelny" if u.get("access") == "pelny" else "rodzina", "desc": u.get("desc") or "", "brief": bool(u.get("brief")),
                         "voice": bool(u.get("voice", True))})
     return out
 
@@ -189,6 +196,11 @@ def current():
     return _USER.get() or owner_user()
 
 
+def full(user=None):
+    """Pełny dostęp do danych: właściciel albo osoba dodana z dostępem „pełny” (2.5)."""
+    return (user or current())["role"] in ("wlasciciel", "pelny")
+
+
 def is_owner(user=None):
     return (user or current())["role"] == "wlasciciel"
 
@@ -203,7 +215,7 @@ def as_user(user):
 
 
 def allowed_scopes():
-    return list(C.WA_SCOPES) if is_owner() else ["private"]
+    return list(C.WA_SCOPES) if full() else ["private"]
 
 
 def self_mode():
@@ -419,7 +431,7 @@ def calendar_day(c, day):
 
 def learner_bits():
     bits = {"biezace": "", "dokumenty": [], "nauka": ""}
-    if not is_owner():          # Bieżące sprawy i dokumenty mieszają sprawy firmowe — rodzina ich nie widzi
+    if not full():          # Bieżące sprawy i dokumenty mieszają sprawy firmowe — rodzina ich nie widzi
         return bits
     with contextlib.suppress(Exception):
         import learner
@@ -445,7 +457,7 @@ def gather(kind="rano", day=None):
     """Wszystko, co Sebastian wie o dniu — wyłącznie odczyt."""
     day = day or now().date()
     data = {"kind": kind, "date": day.isoformat(), "date_pl": date_pl(day), "name": current()["call"], "new": [], "urgent": [],
-            "owner": is_owner(),
+            "owner": full(),
             "tasks": [], "overdue": [], "calendar": [], "calendar_next": [], "done_today": [], "decided_today": 0,
             "morning": "", "undecided": 0}
     with contextlib.closing(S.db()) as c:
@@ -473,7 +485,7 @@ def gather(kind="rano", day=None):
             data["decided_today"] = c.execute("SELECT COUNT(*) FROM messages WHERE substr(decided_at,1,10)>=?", (since,)).fetchone()[0]
     data.update(learner_bits())
     data["whatsapp"] = None
-    if is_owner() and C.WA_WATCH and C.WA_WATCH_IN_BRIEF and kind in ("rano", "wieczor"):
+    if full() and C.WA_WATCH and C.WA_WATCH_IN_BRIEF and kind in ("rano", "wieczor"):
         with contextlib.suppress(Exception):
             import whatsapp_watch as WW
             start = dt.datetime.combine(day - dt.timedelta(days=1 if kind == "rano" else 0), dt.time(), S.TZ)
@@ -575,6 +587,10 @@ def who_line():
     u = current()
     if is_owner():
         return f"Jesteś Sebastian — osobisty asystent {owner}."
+    if full():
+        rel = f" ({u['desc']} {owner})" if u["desc"] else ""
+        return (f"Jesteś Sebastian — asystent {owner}. Rozmawiasz z {u['name'] or 'osobą z pełnym dostępem'}{rel}, która ma "
+                f"pełny dostęp do spraw {owner} (także firmowych). Mów o sprawach jako o sprawach {owner}, nie przypisuj ich rozmówcy.")
     rel = f" ({u['desc']} {owner})" if u["desc"] else f" (rodzina {owner})"
     return (f"Jesteś Sebastian — asystent {owner}. Rozmawiasz z {u['name'] or 'członkiem rodziny'}{rel}. Widzisz tylko "
             f"prywatne sprawy {owner} (prywatna poczta, zadania, kalendarz, notatki) — mów o nich jako o sprawach {owner} "
@@ -587,7 +603,7 @@ def compose(kind="rano", data=None):
     data = data or gather(kind)
     name = data["name"] or ""
     raw = ask(BRIEF_PROMPT.format(who=who_line(), name=name or "właściciela", what=WHAT[kind], context=context_text(data),
-                                  panel_line=", na końcu jedna linijka o tym, co czeka w panelu" if is_owner() else "",
+                                  panel_line=", na końcu jedna linijka o tym, co czeka w panelu" if full() else "",
                                   words=C.WA_VOICE_MAX_WORDS, words_min=max(60, C.WA_VOICE_MAX_WORDS // 2)),
               as_json=True, max_tokens=1800)
     out = parse_json(raw) or {}
@@ -819,6 +835,7 @@ HELP = """*Co mogę zrobić* (pisz albo nagraj głosówkę):
 • *whatsapp* / *kto pisał* — kto pisał do Ciebie na WhatsAppie i o czym
 • *do kogo* — komu oddzwonić, odpisać, z kim porozmawiać
 • *rozmowa Jan* — streszczenie rozmowy z daną osobą
+• *kto to Jan* / *co wiem o Jan* — akta osoby z Twoich rozmów
 • *status* — czy wszystko działa
 Każde inne pytanie — odpowiem z tego, co wiem (poczta, zadania, Bieżące sprawy, dokumenty)."""
 
@@ -833,7 +850,7 @@ Każde inne pytanie o sprawy domowe — odpowiem z tego, co wiem. Sprawy firmowe
 
 FAMILY_ONLY_OWNER = ("zrobione", "zrobiony", "zrobiona", "gotowe", "wykonane", "done", "dokumenty", "dokument", "skany",
                      "status", "wieczor", "podsumowanie", "tydzien", "tygodniowe", "cisza", "wznow", "wlacz",
-                     "whatsapp", "wiadomosci", "kto", "oddzwon", "oddzwonic", "odpisac", "rozmowa", "czat")
+                     "whatsapp", "wiadomosci", "kto", "oddzwon", "oddzwonic", "odpisac", "rozmowa", "czat", "akta")
 
 ANSWER_PROMPT = """{who} Piszesz na WhatsApp. Odpowiadasz krótko (maks. 700 znaków),
 po polsku, ciepło i konkretnie. Korzystaj WYŁĄCZNIE z danych poniżej. Jeśli czegoś w nich nie ma, powiedz to
@@ -871,7 +888,7 @@ def search_context(question, limit=4000):
         L = learner.bind(S)
         with contextlib.closing(L.db()) as lc:
             q = " OR ".join("fact LIKE ?" for _ in words)
-            only_private = "" if is_owner() else \
+            only_private = "" if full() else \
                 " AND file_id IN (SELECT id FROM files WHERE COALESCE(scope,'drive')='private')"   # rodzina: bez Dysku i firmy
             for r in lc.execute(f"SELECT fact, source FROM facts WHERE ({q}){only_private} ORDER BY id DESC LIMIT 15",
                                 [f"%{w[:-1]}%" for w in words]):
@@ -905,13 +922,17 @@ def task_list(con):
     with contextlib.closing(S.db()) as c:
         tasks = sebastian_items(c, "is_task=1 AND status='open'")
     tasks.sort(key=lambda x: (due_of(x) or dt.date(2999, 1, 1), x["priority"]))
-    if is_owner():
-        meta_set(con, "task_numbers", json.dumps([t["id"] for t in tasks[:30]]))
+    if full():
+        meta_set(con, task_key(), json.dumps([t["id"] for t in tasks[:30]]))
     return tasks
 
 
+def task_key():
+    return "task_numbers" if is_owner() else f"task_numbers:{current()['phone']}"
+
+
 def mark_done(con, number):
-    ids = json.loads(meta_get(con, "task_numbers", "[]") or "[]")
+    ids = json.loads(meta_get(con, task_key(), "[]") or "[]")
     if not 1 <= number <= len(ids):
         return "Nie znam zadania o tym numerze. Napisz *zadania*, żeby zobaczyć aktualną listę."
     mid = ids[number - 1]
@@ -924,7 +945,8 @@ def mark_done(con, number):
             return "To zadanie jest już zamknięte albo zniknęło z listy. Napisz *zadania*."
         old = {k: r[k] for k in progress.DECISION_FIELDS}
         stamp = S.now()
-        updated = dict(old, status="done", decided_at=stamp, feedback_at=stamp, decision_kind="whatsapp_done", skip_reason="")
+        updated = dict(old, status="done", decided_at=stamp, feedback_at=stamp, skip_reason="",
+                       decision_kind="whatsapp_done" if is_owner() else f"whatsapp_done:{current()['name'] or current()['phone']}")
         c.execute("UPDATE messages SET " + ",".join(k + "=?" for k in updated) + " WHERE id=?", list(updated.values()) + [mid])
         event = c.execute("INSERT INTO events(time,message_id,action,value) VALUES(?,?,?,?)",
                           (stamp, mid, "whatsapp_done", json.dumps(updated, ensure_ascii=False))).lastrowid
@@ -984,8 +1006,8 @@ def _handle(con, text, voice_in=False):
     if not t:
         return "Nie zrozumiałem wiadomości. Napisz *pomoc*.", False, None
     if first in ("pomoc", "help", "komendy", "menu", "?"):
-        return (HELP if is_owner() else FAMILY_HELP.format(owner=owner_name() or "właściciela")), False, None
-    if not is_owner() and first in FAMILY_ONLY_OWNER:
+        return (HELP if full() else FAMILY_HELP.format(owner=owner_name() or "właściciela")), False, None
+    if not full() and first in FAMILY_ONLY_OWNER:
         return f"To może zrobić tylko {owner_name() or 'właściciel'}. Napisz *pomoc*, żeby zobaczyć, w czym pomogę.", False, None
     if first in ("przeglad", "dzien", "dzisiaj", "dzis") or t in ("co dzis", "co dzisiaj", "co mam dzis", "co mam dzisiaj"):
         return None, False, "rano"
@@ -996,10 +1018,10 @@ def _handle(con, text, voice_in=False):
     if first in ("zadania", "lista"):
         tasks = task_list(con)
         if not tasks:
-            return ("Nie masz otwartych zadań. 🎉" if is_owner() else "Nie ma otwartych prywatnych zadań."), voice_in, None
+            return ("Nie masz otwartych zadań. 🎉" if full() else "Nie ma otwartych prywatnych zadań."), voice_in, None
         today = now().date()
         lines = [f"*Otwarte zadania* ({len(tasks)}):"] + [f"{i}. {item_line(x, today)[:160]}" for i, x in enumerate(tasks[:30], 1)]
-        return "\n".join(lines) + ("\n\nZamkniesz: *zrobione 2*" if is_owner() else ""), False, None
+        return "\n".join(lines) + ("\n\nZamkniesz: *zrobione 2*" if full() else ""), False, None
     m = re.match(r"(zrobione|zrobiony|zrobiona|gotowe|wykonane|done)\s*(?:nr\.?\s*)?(\d+)", t)
     if m:
         return mark_done(con, int(m.group(2))), False, None
@@ -1019,7 +1041,10 @@ def _handle(con, text, voice_in=False):
         return "🔔 Powiadomienia włączone.", False, None
     if first == "status":
         return status_text(), False, None
-    if first in ("whatsapp", "wiadomosci", "oddzwon", "oddzwonic", "odpisac", "rozmowa", "czat") or t.startswith(("kto pisal", "do kogo")):
+    if not full() and t.startswith("co wiem o"):
+        return f"To może zrobić tylko {owner_name() or 'właściciel'}.", False, None
+    if first in ("whatsapp", "wiadomosci", "oddzwon", "oddzwonic", "odpisac", "rozmowa", "czat", "akta") \
+            or t.startswith(("kto pisal", "do kogo", "kto to ", "co wiem o ")):
         return watch_answer(t, text), voice_in, None
     if first in ("pilne", "pilny", "wazne"):
         data = gather("rano")
@@ -1051,6 +1076,12 @@ def _handle(con, text, voice_in=False):
         return "Rozmowa jest wyłączona (WA_CHAT). Napisz *pomoc*, żeby zobaczyć komendy.", False, None
     context = context_text(gather("rano"), limit=6000)
     extra = search_context(text)
+    if full() and C.WA_WATCH and C.WA_WATCH_PEOPLE:
+        with contextlib.suppress(Exception):
+            import whatsapp_watch as WW
+            people = WW.people_context(text)
+            if people:
+                extra = (extra + "\n\n" if extra else "") + "Akta osób z WhatsAppa:\n" + people
     if extra:
         context += "\n\nPasujące informacje:\n" + extra
     answer = ask(ANSWER_PROMPT.format(who=who_line(), context=context, history=history_text(con),
@@ -1066,6 +1097,9 @@ def watch_answer(t, text):
         return ("Nie mam wglądu w Twojego WhatsAppa. Włączysz go na Macu: python sebastian.py wa-watch login "
                 "(tylko odczyt — niczego nie wysyłam z Twojego konta).")
     import whatsapp_watch as WW
+    m = re.match(r"(?:kto to|co wiem o|akta)\s+(.+?)[?!.]*$", text.strip(), re.I)
+    if m:
+        return WW.person_text(m.group(1).strip())
     m = re.match(r"(rozmowa|czat)\s+(?:z\s+)?(.+)", text.strip(), re.I)
     if m:
         return WW.chat_summary(m.group(2).strip())
@@ -1250,11 +1284,14 @@ def tick(con, transport, incoming, state):
                 if not meta_get(con, f"welcomed:{u['phone']}"):
                     meta_set(con, f"welcomed:{u['phone']}", now().isoformat(timespec="seconds"))
                     owner = owner_name() or "właściciela"
+                    scope_txt = (f"Masz taki sam dostęp jak {owner}: poczta, zadania, kalendarz, dokumenty."
+                                 if u["role"] == "pelny" else
+                                 f"Widzę prywatne sprawy {owner}: kalendarz, prywatną pocztę i zadania — spraw firmowych nie znam.")
                     enqueue(con, "text", f"Cześć{', ' + u['call'] if u['call'] else ''}! 👋 Tu Sebastian, asystent {owner}. "
-                            f"Możesz do mnie pisać albo nagrywać głosówki. Widzę prywatne sprawy {owner}: kalendarz, prywatną "
-                            f"pocztę i zadania — spraw firmowych nie znam. Nasze rozmowy widzi też {owner} w swoim panelu."
+                            f"Możesz do mnie pisać albo nagrywać głosówki. {scope_txt} Nasze rozmowy widzi też {owner} w swoim panelu."
                             + (f" Codziennie około {C.WA_BRIEF_TIME} wyślę Ci krótki przegląd dnia." if u["brief"] else "")
-                            + "\n\n" + FAMILY_HELP.format(owner=owner), purpose="welcome", to=u["phone"])
+                            + "\n\n" + (HELP if u["role"] == "pelny" else FAMILY_HELP.format(owner=owner)),
+                            purpose="welcome", to=u["phone"])
         while not incoming.empty():
             handle_incoming(con, transport, incoming.get())
         kind = due_kind(con)
@@ -1293,6 +1330,19 @@ def watch_tick(con, watcher):
         if meta_get(con, "watch_cleanup") != now().date().isoformat():
             meta_set(con, "watch_cleanup", now().date().isoformat())
             WW.cleanup(wc)
+    if watcher.queue.empty():                  # nauka i akta — gdy nie ma zaległych wiadomości do zapisu
+        if time.time() - float(meta_get(con, "watch_learn_sync", "0") or 0) > 1800:
+            meta_set(con, "watch_learn_sync", str(time.time()))
+            with contextlib.suppress(Exception):
+                n = WW.sync_learning()
+                if n:
+                    log.info(f"Obserwacja: {n} rozmów-miesięcy dopisanych do nauki.")
+        if C.WA_WATCH_PEOPLE and time.time() - float(meta_get(con, "watch_people", "0") or 0) > 1200:
+            meta_set(con, "watch_people", str(time.time()))
+            with contextlib.suppress(Exception):
+                n = WW.update_people(limit=2)
+                if n:
+                    log.info(f"Obserwacja: zaktualizowano akta osób: {n}.")
     meta_set(con, "watch_connected", "1" if watcher.connected else "0")
     if (watcher.logged_out or watcher.needs_login) and not meta_get(con, "watch_logged_out"):
         meta_set(con, "watch_logged_out", now().isoformat(timespec="seconds"))
@@ -1547,14 +1597,14 @@ def yes(value, default=True):
     return coerce("WA_VOICE", value)
 
 
-def cmd_user(action="lista", phone=None, name=None, call=None, desc=None, brief=None, voice=None):
+def cmd_user(action="lista", phone=None, name=None, call=None, desc=None, brief=None, voice=None, access=None):
     """Dodatkowe osoby, które mogą pisać do Sebastiana (rodzina — tylko sprawy prywatne)."""
     users = [dict(u) for u in (C.WA_USERS or []) if isinstance(u, dict)]
     if action in ("lista", ""):
         print(f"Właściciel: +{C.WA_OWNER_PHONE or '—'} {owner_name()} — {ROLE_PL['wlasciciel']}")
         for u in family():
-            print(f"Rodzina:    +{u['phone']} {u['name']}" + (f" ({u['desc']})" if u["desc"] else "")
-                  + f" — {ROLE_PL['rodzina']} · przegląd: {'tak' if u['brief'] else 'nie'}"
+            print(f"Osoba:      +{u['phone']} {u['name']}" + (f" ({u['desc']})" if u["desc"] else "")
+                  + f" — {ROLE_PL[u['role']]} · przegląd: {'tak' if u['brief'] else 'nie'}"
                   + (" z głosówką" if u["brief"] and u["voice"] else ""))
         if not family():
             print("Brak dodatkowych osób. Dodasz: python sebastian.py wa-user dodaj")
@@ -1562,21 +1612,26 @@ def cmd_user(action="lista", phone=None, name=None, call=None, desc=None, brief=
             print("⚠ Sebastian jest połączony z Twoim numerem (czat „Ty”) — rodzina może pisać tylko do osobnego numeru Sebastiana.")
         return
     if action == "dodaj":
-        print("Nowa osoba dla Sebastiana. Zobaczy TYLKO sprawy prywatne: prywatną pocztę, prywatne zadania, kalendarz")
-        print("i notatki prywatne. Poczty firmowej, klientów, dokumentów i Bieżących spraw nie zobaczy. Nie może")
-        print("zamykać zadań. Jej rozmowy z Sebastianem zobaczysz w panelu (zakładka WhatsApp).\n")
+        print("Nowa osoba, która może pisać do Sebastiana. Wszystkie inne numery Sebastian ignoruje.")
+        print("Dostęp: „prywatny” — tylko sprawy prywatne (prywatna poczta, zadania, kalendarz, notatki), bez zamykania zadań;")
+        print("        „pelny”    — wszystko jak Ty (także poczta firmowa i klienci, Twój WhatsApp, zamykanie zadań).")
+        print("Jej rozmowy z Sebastianem zobaczysz w panelu (zakładka WhatsApp).\n")
         phone = coerce("WA_OWNER_PHONE", phone or ask_input("Numer WhatsApp tej osoby (np. 48500111222)"))
         if phone == C.WA_OWNER_PHONE:
             raise RuntimeError("To Twój numer — właściciel ma już pełny dostęp.")
         name = (name or ask_input("Imię")).strip()
         call = (call or ask_input("Jak Sebastian ma się zwracać w powitaniu (np. Kasiu)", name)).strip()
         desc = (desc if desc is not None else ask_input("Kim jest dla Ciebie (np. żona) — Sebastian będzie to wiedział", "")).strip()
+        access = (access or ask_input("Dostęp: prywatny / pelny", "prywatny")).strip().lower().replace("ł", "l")
+        if access not in ("prywatny", "pelny"):
+            raise RuntimeError("Dostęp: prywatny albo pelny.")
         brief_v = yes(brief if brief is not None else ask_input("Poranny przegląd (tak/nie)", "tak"))
         voice_v = yes(voice if voice is not None else (ask_input("Z głosówką (tak/nie)", "tak") if brief_v else "tak"))
         users = [u for u in users if u.get("phone") != phone]
-        users.append({"phone": phone, "name": name, "call": call, "desc": desc, "brief": brief_v, "voice": voice_v})
+        users.append({"phone": phone, "name": name, "call": call, "desc": desc, "brief": brief_v, "voice": voice_v,
+                      "access": access})
         save_settings({"WA_USERS": users})
-        print(f"\n✓ Dodano: +{phone} {name}" + (f" ({desc})" if desc else "") + ".")
+        print(f"\n✓ Dodano: +{phone} {name}" + (f" ({desc})" if desc else "") + f" — {ROLE_PL['pelny' if access == 'pelny' else 'rodzina']}.")
         print("  Sebastian przywita się z nią po przeładowaniu usługi i wyśle listę tego, w czym pomoże.")
         if self_mode():
             print("⚠ Sebastian jest połączony z Twoim własnym numerem — rodzina nie może z nim pisać. Potrzebny osobny numer "
@@ -1606,7 +1661,12 @@ def cmd_watch(action="status", code=False, hours=24):
                   + (" · połączona" if meta_get(con, "watch_connected") == "1" else ""))
             if meta_get(con, "watch_logged_out"):
                 print(f"⚠ wylogowano {meta_get(con, 'watch_logged_out')[:16]} — python sebastian.py wa-watch login")
-        print(f"Zapisane:     {n} wiadomości · ostatnia: {last} · trzymane {C.WA_WATCH_KEEP_DAYS} dni")
+        with contextlib.closing(WW.db()) as wc:
+            people = wc.execute("SELECT COUNT(*) FROM people WHERE summary<>''").fetchone()[0]
+            files = wc.execute("SELECT COUNT(*) FROM wattach WHERE text<>''").fetchone()[0]
+        keep = "na stałe" if not C.WA_WATCH_KEEP_DAYS else f"{C.WA_WATCH_KEEP_DAYS} dni"
+        print(f"Zapisane:     {n} wiadomości · ostatnia: {last} · przechowywane {keep}")
+        print(f"Wiedza:       akta osób: {people} · odczytane załączniki: {files} · nauka z rozmów: {'tak' if C.WA_WATCH_TO_LEARNING else 'nie'}")
         print(f"Grupy:        {'tak' if C.WA_WATCH_GROUPS else 'nie'} · głosówki → tekst: {'tak' if C.WA_WATCH_TRANSCRIBE else 'nie'}")
         return
     if action == "login":
@@ -1633,6 +1693,13 @@ def cmd_watch(action="status", code=False, hours=24):
     if action in ("off", "on"):
         save_settings({"WA_WATCH": action == "on"})
         print("✓ Obserwacja " + ("włączona." if action == "on" else "wyłączona (zapisane wiadomości zostają; usuniesz: wa-watch usun)."))
+    elif action == "ludzie":
+        with contextlib.closing(WW.db()) as wc:
+            rows = wc.execute("SELECT name, updated FROM people WHERE summary<>'' ORDER BY updated DESC").fetchall()
+        for r in rows:
+            print(f"  {r['name']:<40} {r['updated'][:16].replace('T', ' ')}")
+        print(f"\nAkt: {len(rows)}. Pliki: {home() / 'ludzie'}" if rows else "Akt jeszcze nie ma — powstają w tle, po kilku wiadomościach z daną osobą.")
+        return
     elif action == "podsumowanie":
         setup_logging(console=False)
         print(WW.digest_text(WW.digest(since=int(time.time() - hours * 3600), cache=False,
