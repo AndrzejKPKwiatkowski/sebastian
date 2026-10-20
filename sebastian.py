@@ -479,6 +479,8 @@ def wa_command(args):
     elif cmd=='wa-set': W.cmd_set(args.key,args.value)
     elif cmd=='wa-settings': W.cmd_settings()
     elif cmd=='wa-voice': W.cmd_voice(args.name)
+    elif cmd=='wa-watch': W.cmd_watch(args.action,args.kod,args.godzin)
+    elif cmd=='wa-user': W.cmd_user(args.action,args.phone,args.imie,args.wolacz,args.kto,args.przeglad,args.glos)
 
 def learn_command(args):
     """Polecenia modułu nauki (Dysk Google + poczta). Nie blokują pozostałych zadań Sebastiana."""
@@ -554,6 +556,9 @@ def main():
     a=sp.add_parser('wa-send'); a.add_argument('text')
     a=sp.add_parser('wa-set'); a.add_argument('key'); a.add_argument('value')
     a=sp.add_parser('wa-voice'); a.add_argument('name',nargs='?',default=None)
+    a=sp.add_parser('wa-watch'); a.add_argument('action',nargs='?',default='status',choices=['status','login','podsumowanie','off','on','usun']); a.add_argument('--kod',action='store_true'); a.add_argument('--godzin',type=int,default=24)
+    a=sp.add_parser('wa-user'); a.add_argument('action',nargs='?',default='lista',choices=['lista','dodaj','usun']); a.add_argument('phone',nargs='?')
+    a.add_argument('--imie'); a.add_argument('--wolacz'); a.add_argument('--kto'); a.add_argument('--przeglad'); a.add_argument('--glos')
     a=sp.add_parser('learn-drive'); a.add_argument('action',nargs='?',default='',choices=['','login','off','on','status'])
     a=sp.add_parser('learn-test'); a.add_argument('id')
     a=sp.add_parser('learn-mail-test'); a.add_argument('--account',default='')

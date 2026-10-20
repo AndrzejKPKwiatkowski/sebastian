@@ -1,5 +1,5 @@
 """Testy modułu WhatsApp (Sebastian 2.3). Bez WhatsAppa, bez Ollamy — model i połączenie są udawane."""
-import contextlib, datetime as dt, json, os, pathlib, queue, shutil, tempfile, time, unittest
+import contextlib, datetime as dt, json, os, pathlib, queue, re, shutil, tempfile, time, unittest
 from unittest.mock import patch
 
 import sebastian as s
@@ -7,6 +7,7 @@ import whatsapp as W
 
 BASE = "http://127.0.0.1:8765"
 OWNER = "48600111222"
+WIFE = "48500999888"
 
 
 def fake_ask(prompt, as_json=False, max_tokens=1200, temperature=0.4):
@@ -20,7 +21,7 @@ def fake_ask(prompt, as_json=False, max_tokens=1200, temperature=0.4):
     raise AssertionError(prompt[:80])
 
 
-class WhatsAppTests(unittest.TestCase):
+class Base(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.old = s.DATA
@@ -55,6 +56,9 @@ class WhatsAppTests(unittest.TestCase):
 
     def con(self):
         return contextlib.closing(W.db())
+
+
+class WhatsAppTests(Base):
 
     # ---------------------------------------------------------------- przegląd
 
@@ -282,6 +286,178 @@ class WhatsAppTests(unittest.TestCase):
             W.coerce("WA_OWNER_PHONE", "123")
 
 
+class FamilyTests(Base):
+    """2.3.1: żona może pisać do Sebastiana — widzi tylko sprawy prywatne."""
+    def setUp(self):
+        super().setUp()
+        with patch.object(W, "agent_loaded", lambda: False):
+            W.cmd_user("dodaj", WIFE, "Kasia", "Kasiu", "żona", "tak", "tak")
+        self.wife = W.user_by_phone(WIFE)
+        with contextlib.closing(s.db()) as c:       # prywatne zadanie (demo: Gmail = private)
+            r = c.execute("SELECT id FROM messages WHERE scope='private' LIMIT 1").fetchone()
+            c.execute("UPDATE messages SET is_task=1, status='open', decided_at=?, task_title='Opłacić przedszkole' WHERE id=?",
+                      (s.now(), r["id"]))
+            c.commit()
+
+    def test_family_sees_only_private(self):
+        self.assertEqual((self.wife["role"], self.wife["call"], self.wife["brief"]), ("rodzina", "Kasiu", True))
+        prompts = []
+
+        def spy(prompt, **k):
+            prompts.append(prompt)
+            return fake_ask(prompt, **k) if "Przygotuj" in prompt else "Według kalendarza dziś nic."
+        with self.con() as con, patch.object(W, "ask", spy):
+            text = W.handle(con, "zadania", user=self.wife)[0]
+            self.assertIn("Opłacić przedszkole", text)
+            self.assertNotIn("Potwierdzić dokumenty", text)         # zadanie firmowe
+            self.assertNotIn("zrobione", text)
+            self.assertIn("tylko", W.handle(con, "zrobione 1", user=self.wife)[0])
+            self.assertIn("tylko", W.handle(con, "dokumenty", user=self.wife)[0])
+            self.assertIn("Sprawy firmowe są poza", W.handle(con, "pomoc", user=self.wife)[0])
+            W.handle(con, "Co z dokumentami do spotkania?", user=self.wife)
+            self.assertIn("Rozmawiasz z Kasia (żona Andrzej)", prompts[-1])
+            self.assertNotIn("Dokumenty do spotkania", prompts[-1])
+            W.handle(con, "zapamiętaj: kupić prezent dla mamy", user=self.wife)
+            # właściciel dalej widzi wszystko
+            self.assertIn("Potwierdzić dokumenty", W.handle(con, "zadania")[0])
+        with contextlib.closing(s.db()) as c:
+            self.assertTrue(c.execute("SELECT 1 FROM knowledge_notes WHERE body='Od Kasia: kupić prezent dla mamy'").fetchone())
+
+    def test_family_brief_welcome_and_routing(self):
+        tz = s.TZ
+        at = dt.datetime.combine(dt.date(2026, 10, 20), dt.time(7, 5), tz)
+        t = W.FileTransport()
+        t.start()
+        with self.con() as con, patch.object(W, "morning_running", lambda: False):
+            self.assertEqual([u["phone"] for u in W.due_family(con, at)], [WIFE])
+            W.make_brief(con, "rano", send=True, user=self.wife)
+            r = con.execute("SELECT * FROM outbox").fetchone()
+            self.assertEqual((r["to_phone"], r["purpose"]), (WIFE, f"brief:rano:{WIFE}"))
+            W.flush(con, t)
+            self.assertEqual(W.meta_get(con, f"sent:rano:{WIFE}"), W.now().date().isoformat())
+            self.assertIsNone(W.meta_get(con, "sent:rano"))            # przegląd właściciela osobno
+            self.assertEqual(W.due_family(con, at), [])
+            b = con.execute("SELECT * FROM briefs").fetchone()
+            self.assertEqual(b["for_phone"], WIFE)
+        self.assertTrue(any(p.name.startswith(WIFE) for p in (W.home() / "wyslane").iterdir()))
+        with self.con() as con, patch.object(W, "due_kind", lambda con: None), patch.object(W, "due_family", lambda con: []):
+            W.tick(con, t, queue.Queue(), {"beat": 0})
+            welcomes = {r["to_phone"]: r["body"] for r in con.execute("SELECT * FROM outbox WHERE purpose='welcome'")}
+            self.assertIn("Cześć, Kasiu!", welcomes[WIFE])
+            self.assertIn("spraw firmowych nie znam", welcomes[WIFE])
+            W.handle_incoming(con, t, {"id": "K1", "kind": "text", "text": "kalendarz", "ts": time.time(), "from": WIFE})
+            self.assertEqual(con.execute("SELECT to_phone FROM outbox WHERE purpose='reply'").fetchone()[0], WIFE)
+            self.assertEqual(con.execute("SELECT from_phone FROM inbox WHERE wa_id='K1'").fetchone()[0], WIFE)
+            W.handle_incoming(con, t, {"id": "X1", "kind": "text", "text": "pomoc", "ts": time.time(), "from": "48111"})
+            self.assertFalse(con.execute("SELECT 1 FROM inbox WHERE wa_id='X1'").fetchone())
+        with patch.object(W, "agent_loaded", lambda: False):
+            W.cmd_user("usun", WIFE)
+        self.assertIsNone(W.user_by_phone(WIFE))
+
+
+class WatchTests(Base):
+    """2.4: Sebastian czyta Twojego WhatsAppa (tylko odczyt) i podpowiada, komu odpisać / do kogo oddzwonić."""
+    def setUp(self):
+        super().setUp()
+        import whatsapp_watch as WW
+        self.WW = WW
+        W.save_settings({"WA_WATCH": True, "WA_WATCH_IGNORE": ["kurier"]})
+        h = 3600
+        nowt = int(time.time())
+        msgs = [
+            ("a1", "48111", "Jan Nowak", False, nowt - 20 * h, "text", "Cześć, potwierdzisz termin spotkania w piątek?"),
+            ("b1", "48222", "Ola", False, nowt - 10 * h, "call", "połączenie przychodzące"),
+            ("c1", "48333", "Marek", False, nowt - 9 * h, "text", "Wysłałem umowę"),
+            ("c2", "48333", "Marek", True, nowt - 8 * h, "text", "Dzięki, przeczytam"),
+            ("k1", "48999", "Kurier DPD", False, nowt - 5 * h, "text", "Paczka dziś"),
+        ] + [(f"q{i}", "48444", "Tomek", i % 2 == 0, nowt - (30 + i) * 86400, "text", "hej") for i in range(12)]
+        with contextlib.closing(WW.db()) as con:
+            for mid, chat, name, me, ts, kind, text in msgs:
+                WW.store(con, {"id": mid, "chat": chat, "chat_name": name, "sender": "48999000" if me else chat,
+                               "sender_name": "" if me else name, "from_me": me, "is_group": False, "ts": ts,
+                               "kind": kind, "text": text})
+
+    def fake_digest_ask(self, prompt, **k):
+        if "rozmowy z WhatsAppa" in prompt:
+            ids = re.findall(r"\[(R\d+)\] ([^\n\[]+)", prompt)
+            out = []
+            for rid, name in ids:
+                if "Jan" in name:
+                    out.append({"id": rid, "o_czym": "Jan pyta o termin spotkania w piątek.", "co_zrobic": "odpisz",
+                                "dlaczego": "czeka na potwierdzenie"})
+                if "Marek" in name:
+                    out.append({"id": rid, "o_czym": "Marek wysłał umowę.", "co_zrobic": "nic", "dlaczego": ""})
+            return json.dumps({"rozmowy": out}, ensure_ascii=False)
+        if "Oto rozmowa" in prompt:
+            assert "potwierdzisz termin" in prompt
+            return "Rozmawialiście o terminie spotkania — warto odpisać."
+        return fake_ask(prompt, **k)
+
+    def test_flags_without_model(self):
+        with contextlib.closing(self.WW.db()) as con:
+            cs = {c["name"]: c for c in self.WW.chats(con, int(time.time()) - 86400)}
+            self.assertTrue(cs["Jan Nowak"]["waiting"])
+            self.assertFalse(cs["Marek"]["waiting"])                     # odpisałeś
+            self.assertEqual(len(cs["Ola"]["callback"]), 1)               # nieodebrane, brak kontaktu potem
+            self.assertNotIn("Kurier DPD", cs)                            # na liście pomijanych
+            quiet = self.WW.quiet_friends(con)
+        self.assertEqual([q["name"] for q in quiet], ["Tomek"])
+        with patch.object(W, "ask", lambda *a, **k: None):
+            d = self.WW.digest(since=int(time.time()) - 86400, cache=False)
+        acts = {it["name"]: it["co_zrobic"] for it in d["items"]}
+        self.assertEqual(acts, {"Ola": "oddzwoń", "Jan Nowak": "odpisz", "Marek": "nic"})
+
+    def test_digest_text_brief_and_commands(self):
+        with patch.object(W, "ask", self.fake_digest_ask):
+            d = self.WW.digest(since=int(time.time()) - 86400, cache=False)
+            text = self.WW.digest_text(d)
+            self.assertIn("Jan Nowak — Jan pyta o termin", text)
+            self.assertIn("📞 *Oddzwoń:* Ola", text)
+            self.assertIn("✉️ *Odpisz:* Jan Nowak", text)
+            self.assertIn("Tomek (cisza od", text)
+            data = W.gather("rano")
+            self.assertIn("Jan pyta o termin", W.context_text(data))
+            with self.con() as con:
+                W.make_brief(con, "rano", send=True)
+                purposes = [r[0] for r in con.execute("SELECT purpose FROM outbox ORDER BY id")]
+                self.assertEqual(purposes, ["brief:rano", "digest"])
+                self.assertIn("Oddzwoń", W.handle(con, "do kogo?")[0])
+                self.assertIn("Jan Nowak", W.handle(con, "kto pisał")[0])
+                self.assertIn("Jan Nowak", W.handle(con, "rozmowa jan")[0])
+                self.assertIn("Nie widzę rozmowy", W.handle(con, "rozmowa Zenon")[0])
+        with patch.object(W, "agent_loaded", lambda: False):
+            W.cmd_user("dodaj", WIFE, "Kasia", "Kasiu", "żona", "tak", "tak")
+        with self.con() as con:
+            self.assertIn("tylko", W.handle(con, "kto pisał", user=W.user_by_phone(WIFE))[0])
+            self.assertIn("tylko", W.handle(con, "whatsapp", user=W.user_by_phone(WIFE))[0])
+        with patch.object(W, "ask", self.fake_digest_ask), W.as_user(W.user_by_phone(WIFE)):
+            self.assertIsNone(W.gather("rano")["whatsapp"])                 # żona nie widzi Twojego WhatsAppa
+
+    def test_watch_off_and_cleanup(self):
+        W.save_settings({"WA_WATCH": False})
+        with self.con() as con:
+            self.assertIn("wa-watch login", W.handle(con, "whatsapp")[0])
+        W.save_settings({"WA_WATCH_KEEP_DAYS": 7})
+        with contextlib.closing(self.WW.db()) as con:
+            self.assertEqual(self.WW.cleanup(con), 12)                     # wiadomości z Tomkiem sprzed 30+ dni
+
+    def test_watch_tick_stores_queue(self):
+        class FakeWatcher:
+            connected, logged_out, needs_login = True, False, False
+            queue = queue.Queue()
+        w = FakeWatcher()
+        w.queue.put({"id": "n1", "chat": "48555", "chat_name": "Ewa", "sender": "48555", "from_me": False,
+                     "is_group": False, "ts": int(time.time()), "kind": "text", "text": "Zadzwoń proszę"})
+        with self.con() as con:
+            W.watch_tick(con, w)
+            self.assertEqual(W.meta_get(con, "watch_connected"), "1")
+            w.logged_out = True
+            W.watch_tick(con, w)
+            self.assertTrue(con.execute("SELECT 1 FROM outbox WHERE body LIKE '%Straciłem wgląd%'").fetchone())
+        with contextlib.closing(self.WW.db()) as con:
+            self.assertEqual(con.execute("SELECT text FROM wmsg WHERE id='n1'").fetchone()[0], "Zadzwoń proszę")
+
+
 # ---------------------------------------------------------------- filtr nadawcy na prawdziwych strukturach neonize
 
 try:
@@ -301,7 +477,7 @@ class FakeClient:
         return b"OGGDATA"
 
     def mark_read(self, *a, **k):
-        pass
+        self.marked = True
 
     def get_pn_from_lid(self, jid):
         return N.JID(User=OWNER if jid.User == "999" else "1", Server="s.whatsapp.net")
@@ -315,10 +491,52 @@ class FakeClient:
 
 
 @unittest.skipUnless(HAVE_NEONIZE, "brak biblioteki neonize")
+class WatcherParseTests(unittest.TestCase):
+    """Obserwacja: odczyt prawdziwych struktur neonize — bez wysyłania czegokolwiek."""
+    def watcher(self):
+        import whatsapp_watch as WW
+        w = WW.Watcher.__new__(WW.Watcher)
+        client = FakeClient()
+        client.contact = type("CS", (), {"get_contact": lambda self, jid: N.ContactInfo(FullName="Jan Nowak" if jid.User == "48111" else "")})()
+        client.get_group_info = lambda jid: N.GroupInfo(GroupName=N.GroupName(Name="Rodzina"))
+        w.client, w.groups, w.names, w.me = client, False, {}, OWNER
+        return w
+
+    def ev(self, sender, msg, chat=None, from_me=False, group=False, server="s.whatsapp.net", push="Janek"):
+        src = N.MessageSource(Chat=N.JID(User=chat or sender, Server="g.us" if group else server),
+                              Sender=N.JID(User=sender, Server=server), IsFromMe=from_me, IsGroup=group)
+        return N.Message(Info=N.MessageInfo(MessageSource=src, ID="W1", Timestamp=int(time.time()), Pushname=push), Message=msg)
+
+    def test_parse(self):
+        w = self.watcher()
+        m = w.parse(self.ev("48111", E.Message(conversation="Hej")))
+        self.assertEqual((m["chat"], m["chat_name"], m["kind"], m["from_me"]), ("48111", "Jan Nowak", "text", False))
+        m = w.parse(self.ev("48777", E.Message(conversation="Hej")))
+        self.assertEqual(m["chat_name"], "Janek")                         # brak w kontaktach → nazwa z profilu
+        v = w.parse(self.ev("48111", E.Message(audioMessage=E.AudioMessage(PTT=True))))
+        self.assertEqual((v["kind"], v["audio_bytes"]), ("voice", b"OGGDATA"))
+        i = w.parse(self.ev("48111", E.Message(imageMessage=E.ImageMessage(caption="faktura"))))
+        self.assertEqual((i["kind"], i["text"]), ("image", "faktura"))
+        mine = w.parse(self.ev(OWNER, E.Message(conversation="Jasne"), chat="48111", from_me=True))
+        self.assertTrue(mine["from_me"])
+        self.assertEqual(mine["chat"], "48111")
+        lid = w.parse(self.ev("999", E.Message(conversation="x"), server="lid"))
+        self.assertEqual(lid["chat"], OWNER)                              # LID przeliczony na numer
+        self.assertIsNone(w.parse(self.ev("48111", E.Message(conversation="x"), chat="120363", group=True)))
+        self.assertIsNone(w.parse(self.ev("48111", E.Message(conversation="x"), chat="status", server="broadcast")))
+        self.assertIsNone(w.parse(self.ev("48111", E.Message(reactionMessage=E.ReactionMessage(text="👍")))))
+        w.groups = True
+        g = w.parse(self.ev("48111", E.Message(conversation="x"), chat="120363", group=True))
+        self.assertEqual((g["chat_name"], g["is_group"]), ("Rodzina", True))
+        self.assertFalse(hasattr(w.client, "marked"))                     # nic nie jest oznaczane jako przeczytane
+
+
+@unittest.skipUnless(HAVE_NEONIZE, "brak biblioteki neonize")
 class LinkFilterTests(unittest.TestCase):
     def transport(self, me):
         t = whatsapp_link.LinkedTransport.__new__(whatsapp_link.LinkedTransport)
-        t.client, t.owner, t.me, t.me_lid, t.owner_lid, t.sent_ids = FakeClient(), OWNER, me, "555", None, set()
+        t.client, t.owner, t.me, t.me_lid, t.sent_ids = FakeClient(), OWNER, me, "555", set()
+        t.phones, t.lids = [OWNER, WIFE], {}
         t.log = None
         return t
 
@@ -337,12 +555,24 @@ class LinkFilterTests(unittest.TestCase):
         self.assertIsNone(t.parse(self.ev(OWNER, group=True)))                   # grupa
         self.assertIsNone(t.parse(self.ev(OWNER, from_me=True)))                 # wysłane przez Sebastiana
         self.assertEqual(t.parse(self.ev("777", sender_server="lid", alt=OWNER))["kind"], "text")   # LID + numer
-        self.assertEqual(t.owner_lid, "777")
+        self.assertEqual(t.lids["777"], OWNER)
         self.assertIsNotNone(t.parse(self.ev("777", sender_server="lid")))         # zapamiętany LID
         self.assertIsNotNone(t.parse(self.ev("999", sender_server="lid")))         # LID rozpoznany przez bibliotekę
         self.assertIsNone(t.parse(self.ev("888", sender_server="lid")))
         v = t.parse(self.ev(OWNER, audio=True))
         self.assertEqual((v["kind"], v["audio_bytes"]), ("voice", b"OGGDATA"))
+
+    def test_family_number_accepted_with_sender(self):
+        t = self.transport(me="48700000000")
+        self.assertEqual(t.parse(self.ev(WIFE))["from"], WIFE)
+        self.assertEqual(t.parse(self.ev(OWNER))["from"], OWNER)
+        t.send_text("x", WIFE)
+        self.assertEqual(t.client.sent[-1][0], WIFE)
+        t.me = OWNER                                                   # Sebastian na numerze właściciela
+        self.assertIsNone(t.parse(self.ev(WIFE, chat=WIFE)))
+        self.assertFalse(t.family_ok)
+        with self.assertRaises(RuntimeError):
+            t.send_text("x", WIFE)
 
     def test_self_chat_mode(self):
         t = self.transport(me=OWNER)

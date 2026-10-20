@@ -135,3 +135,16 @@ Bez prawdziwego WhatsAppa i bez Ollamy (model udawany, połączenie „plik” a
 - Dodatkowo, ręcznie: prawdziwy klient neonize tworzy się, rejestruje zdarzenia i przy braku sieci ponawia połączenie bez zawieszania usługi. Zatrzymanie działa.
 
 Nie sprawdzono tu: **parowania i wysyłki na prawdziwym WhatsAppie** (sieć WhatsApp jest tu niedostępna), brzmienia polskiego głosu Piper (głosu nie da się tu pobrać), rozpoznawania mowy mlx-whisper (tylko Mac z Apple Silicon) ani jakości przeglądów pisanych przez prawdziwy model. Sprawdzisz to na Macu: `wa-test` (głos), `wa-brief --podglad`, `wa-login`, a potem „pomoc” na WhatsAppie.
+
+
+# Weryfikacja 2.4 — rodzina i obserwacja Twojego WhatsAppa
+
+Data: 2026-10-20. Wynik: 67 testów zaliczonych (8 nowych).
+
+- **Rodzina:** żona widzi tylko prywatne zadania i maile (zadanie firmowe niewidoczne; w prompcie modelu brak treści firmowych, jest „Rozmawiasz z Kasia (żona …)”). `zrobione`, `dokumenty`, `whatsapp` → „to może zrobić tylko …”. `zapamiętaj:` → notatka „Od Kasia: …”. Osobny przegląd (adresat, cel `brief:rano:<numer>`, znacznik wysłania osobno od Twojego), powitanie z informacją, że rozmowy widzi właściciel, odpowiedzi idą do niej, a obcy numer jest ignorowany. Usunięcie osoby działa.
+- **Filtr połączenia (struktury neonize):** numer żony przyjęty z polem „od kogo”. Gdy Sebastian jest na numerze właściciela — wiadomości żony ignorowane, wysyłka do niej zablokowana.
+- **Obserwacja:** „czeka na odpowiedź”, „nieodebrane”, „warto się odezwać” liczone bez modelu, lista pomijanych działa. Sugestie bez modelu z reguł, z modelem — streszczenia. Tekst podsumowania z listami Oddzwoń/Odpisz/Warto się odezwać. Przegląd poranny zawiera WhatsApp i osobną wiadomość „📱”. Komendy `do kogo`, `kto pisał`, `rozmowa jan`. Żona nie widzi Twojego WhatsAppa. Sprzątanie starych wiadomości. Zapis z kolejki i powiadomienie o wylogowaniu.
+- **Odczyt struktur neonize w obserwacji:** tekst, nazwa z kontaktów albo profilu, głosówka, zdjęcie z podpisem, Twoje wiadomości, LID → numer, grupy pominięte (lub z nazwą grupy po włączeniu), statusy i reakcje pominięte, **brak oznaczania jako przeczytane**.
+- Ręcznie: prawdziwy klient obserwacji tworzy się z obsługą połączeń przychodzących, przy braku sieci ponawia bez zawieszania.
+
+Nie sprawdzono tu: połączenia z prawdziwym WhatsAppem (sieć niedostępna) — w szczególności tego, jak WhatsApp przekazuje połączonemu urządzeniu informacje o połączeniach i nazwy kontaktów na Twoim koncie. Sprawdzisz po `wa-watch login`: następnego dnia `python sebastian.py wa-watch podsumowanie`.

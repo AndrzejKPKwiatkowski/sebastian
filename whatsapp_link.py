@@ -1,11 +1,11 @@
-"""Sebastian 2.3 — połączenie z WhatsAppem jako „połączone urządzenie” (biblioteka neonize / whatsmeow).
+"""Sebastian 2.3.1 — połączenie z WhatsAppem jako „połączone urządzenie” (biblioteka neonize / whatsmeow).
 
 Osobny moduł, bo biblioteka jest potrzebna tylko na Macu z włączonym WhatsAppem (testy i reszta Sebastiana
 działają bez niej). Sesja (klucze szyfrowania) leży w data/whatsapp/sesja.sqlite3 — jak hasło: 🔒.
 
-Filtr bezpieczeństwa: do Sebastiana trafiają WYŁĄCZNIE wiadomości właściciela —
-  • osobny numer Sebastiana: wiadomości przychodzące od numeru właściciela (także w adresacji „LID”),
-  • ten sam numer (czat „Ty”): tylko wiadomości, które właściciel wysłał sam do siebie.
+Filtr bezpieczeństwa: do Sebastiana trafiają WYŁĄCZNIE wiadomości właściciela i osób dodanych przez wa-user —
+  • osobny numer Sebastiana: wiadomości przychodzące z tych numerów (także w adresacji „LID”),
+  • ten sam numer (czat „Ty”): tylko wiadomości, które właściciel wysłał sam do siebie (rodzina — wyłączona).
 Grupy, inni ludzie i statusy są ignorowane (nie są nawet zapisywane).
 """
 import contextlib, threading, time
@@ -29,14 +29,16 @@ def _jid(number):
 
 
 class LinkedTransport:
-    def __init__(self, on_message, session, owner, log):
+    def __init__(self, on_message, session, owner, log, others=()):
         ensure_library()
         from neonize.client import NewClient
         from neonize.events import ConnectedEv, DisconnectedEv, LoggedOutEv, MessageEv
         self.log, self.owner, self.on_message = log, owner, on_message
         self.client = NewClient(str(session))
         self.connected = self.logged_out = self.needs_login = self.stopping = False
-        self.me = self.me_lid = self.owner_lid = None
+        self.me = self.me_lid = None
+        self.phones = [owner] + [p for p in others if p and p != owner]     # kto może pisać do Sebastiana
+        self.lids = {}                                                    # identyfikator LID → numer
         self.sent_ids = set()
         self.thread = None
         c = self.client
@@ -82,20 +84,32 @@ class LinkedTransport:
             me = self.client.get_me()
             self.me = me.JID.User or None
             self.me_lid = me.LID.User or None
-        with contextlib.suppress(Exception):     # nowa adresacja WhatsAppa (LID) — ten sam człowiek, inny identyfikator
-            self.owner_lid = self.client.get_lid_from_pn(_jid(self.owner)).User or self.owner_lid
+        for phone in self.phones:                # nowa adresacja WhatsAppa (LID) — ten sam człowiek, inny identyfikator
+            with contextlib.suppress(Exception):
+                lid = self.client.get_lid_from_pn(_jid(phone)).User
+                if lid:
+                    self.lids[lid] = phone
 
     @property
     def self_mode(self):
         return bool(self.me) and self.me == self.owner
 
-    def target(self):
-        return _jid(self.me if self.self_mode else self.owner)
+    @property
+    def family_ok(self):
+        """Rodzina może pisać tylko wtedy, gdy Sebastian ma własny numer."""
+        return not self.self_mode
+
+    def target(self, to=None):
+        if self.self_mode:
+            if to and to != self.owner:
+                raise RuntimeError("rozmowy z rodziną działają tylko, gdy Sebastian ma osobny numer")
+            return _jid(self.me)
+        return _jid(to or self.owner)
 
     # ---------------------------------------------------------------- odbiór
 
     def parse(self, ev):
-        """MessageEv → dict albo None (gdy to nie wiadomość od właściciela)."""
+        """MessageEv → dict (z polem „from” = numer nadawcy z listy) albo None (gdy to obcy)."""
         info = ev.Info
         src = info.MessageSource
         if src.IsGroup or info.ID in self.sent_ids:
@@ -107,17 +121,21 @@ class LinkedTransport:
         if self.self_mode:
             if not src.IsFromMe or src.Chat.User not in {self.me, self.me_lid} - {None}:
                 return None
+            who = self.owner
         else:
             if src.IsFromMe:
                 return None
-            users = {src.Sender.User, src.SenderAlt.User}
-            if self.owner not in users and not (self.owner_lid and self.owner_lid in users) and src.Sender.Server == "lid":
+            cands = {src.Sender.User, src.SenderAlt.User} - {""}
+            who = next((p for p in self.phones if p in cands), None) or \
+                next((self.lids[x] for x in cands if x in self.lids), None)
+            if who is None and src.Sender.Server == "lid":
                 with contextlib.suppress(Exception):
-                    users.add(self.client.get_pn_from_lid(src.Sender).User)
-            if self.owner not in users and not (self.owner_lid and self.owner_lid in users):
+                    pn = self.client.get_pn_from_lid(src.Sender).User
+                    who = pn if pn in self.phones else None
+            if who is None:
                 return None
             if src.Sender.Server == "lid":
-                self.owner_lid = src.Sender.User
+                self.lids[src.Sender.User] = who
         ts = info.Timestamp or 0
         ts = ts / 1000 if ts > 10_000_000_000 else ts
         m = ev.Message
@@ -125,30 +143,30 @@ class LinkedTransport:
             from neonize.utils.enum import ReceiptType
             self.client.mark_read(info.ID, chat=src.Chat, sender=src.Sender, receipt=ReceiptType.READ)
         if m.HasField("audioMessage"):
-            return {"id": info.ID, "kind": "voice", "text": "", "audio_bytes": self.client.download_any(m), "ts": ts}
+            return {"id": info.ID, "kind": "voice", "text": "", "audio_bytes": self.client.download_any(m), "ts": ts, "from": who}
         text = m.conversation or (m.extendedTextMessage.text if m.HasField("extendedTextMessage") else "")
         if not text.strip():
             return None
-        return {"id": info.ID, "kind": "text", "text": text, "ts": ts}
+        return {"id": info.ID, "kind": "text", "text": text, "ts": ts, "from": who}
 
     # ---------------------------------------------------------------- wysyłka
 
-    def send_text(self, text):
-        resp = self.client.send_message(self.target(), text)
+    def send_text(self, text, to=None):
+        resp = self.client.send_message(self.target(to), text)
         self.sent_ids.add(resp.ID)
         return resp.ID
 
-    def send_voice(self, ogg):
+    def send_voice(self, ogg, to=None):
         msg = self.client.build_audio_message(Path(ogg).read_bytes(), ptt=True)
         msg.audioMessage.mimetype = "audio/ogg; codecs=opus"      # tak WhatsApp rozpoznaje głosówkę (PTT)
-        resp = self.client.send_message(self.target(), msg)
+        resp = self.client.send_message(self.target(to), msg)
         self.sent_ids.add(resp.ID)
         return resp.ID
 
-    def typing(self, on):
+    def typing(self, on, to=None):
         from neonize.utils.enum import ChatPresence, ChatPresenceMedia
         state = ChatPresence.CHAT_PRESENCE_COMPOSING if on else ChatPresence.CHAT_PRESENCE_PAUSED
-        self.client.send_chat_presence(self.target(), state, ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT)
+        self.client.send_chat_presence(self.target(to), state, ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT)
 
     # ---------------------------------------------------------------- praca w tle
 

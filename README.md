@@ -1,8 +1,8 @@
 # Sebastian — lokalne centrum spraw, które uczy się o Tobie
 
-Sebastian działa na Macu właściciela. Codziennie pobiera pocztę z trzech skrzynek (tylko odczyt), lokalny model AI (Ollama) ją streszcza i porządkuje, a Ty w panelu decydujesz, co pominąć, co zrobić i na co odpowiedzieć. Moduł **Nauka** czyta w tle Dysk Google, całą pocztę i załączniki, a potem buduje **Bieżące sprawy** i **Profil wiedzy**. Wiedza trafia też do Open WebUI, żeby czat z lokalnym modelem znał kontekst. Moduł **Dokumenty** zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w mały PDF ze spisem treści i klikalnymi odnośnikami. Na **WhatsAppie** Sebastian co rano wysyła przegląd dnia z głosówką i odpowiada na pytania w ciągu dnia.
+Sebastian działa na Macu właściciela. Codziennie pobiera pocztę z trzech skrzynek (tylko odczyt), lokalny model AI (Ollama) ją streszcza i porządkuje, a Ty w panelu decydujesz, co pominąć, co zrobić i na co odpowiedzieć. Moduł **Nauka** czyta w tle Dysk Google, całą pocztę i załączniki, a potem buduje **Bieżące sprawy** i **Profil wiedzy**. Wiedza trafia też do Open WebUI, żeby czat z lokalnym modelem znał kontekst. Moduł **Dokumenty** zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w mały PDF ze spisem treści i klikalnymi odnośnikami. Na **WhatsAppie** Sebastian co rano wysyła przegląd dnia z głosówką, odpowiada na pytania (także rodzinie — tylko sprawy prywatne) i podsumowuje Twojego WhatsAppa: kto pisał, komu odpisać, do kogo oddzwonić.
 
-**Wersja: 2.3**
+**Wersja: 2.4**
 
 ## Od czego zacząć
 
@@ -24,6 +24,7 @@ python sebastian.py doc-add ~/Downloads/KW.pdf   # skan do opracowania (albo pan
 python sebastian.py doc-list        # postęp opracowania dokumentów
 python sebastian.py wa-status       # Sebastian na WhatsAppie: połączenie, ostatni przegląd
 python sebastian.py wa-chat         # rozmowa z Sebastianem w Terminalu (jak na WhatsAppie)
+python sebastian.py wa-watch podsumowanie   # kto pisał na Twoim WhatsAppie i do kogo oddzwonić
 python sebastian.py backup          # kopia bazy panelu
 ```
 
