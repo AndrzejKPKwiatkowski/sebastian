@@ -1,6 +1,7 @@
 """Testy modułu WhatsApp (Sebastian 2.3). Bez WhatsAppa, bez Ollamy — model i połączenie są udawane."""
 import contextlib, datetime as dt, json, os, pathlib, queue, re, shutil, tempfile, time, unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import sebastian as s
 import whatsapp as W
@@ -546,7 +547,8 @@ class MemoryTests(WatchTests):
         text = self.WW.learning_text(fid)
         self.assertIn("WYSŁANE PRZEZE MNIE: Tak, podpiszę w czwartek", text)
         facts = json.dumps({"fakty": [{"kategoria": L.CURRENT_CAT, "fakt": "Andrzej podpisze umowę z Janem Nowakiem w czwartek."}]})
-        with patch.object(L, "ask", lambda *a, **k: facts), contextlib.closing(L.db()) as lc:
+        # 2.5.1: w osobnym procesie nauki moduł WhatsAppa nie jest podłączony (W.S = None) — nauka podłącza go sama
+        with patch.object(L, "ask", lambda *a, **k: facts), patch.object(W, "S", None), contextlib.closing(L.db()) as lc:
             L.process_file(lc, None, lc.execute("SELECT * FROM files WHERE id=?", (fid,)).fetchone())
             self.assertEqual(lc.execute("SELECT status FROM files WHERE id=?", (fid,)).fetchone()[0], "done")
             st = L.stats(lc)
@@ -694,6 +696,7 @@ class LinkFilterTests(unittest.TestCase):
         t.client, t.owner, t.me, t.me_lid, t.sent_ids = FakeClient(), OWNER, me, "555", set()
         t.phones, t.lids = [OWNER, WIFE], {}
         t.log = None
+        t.on_skip, t.skipped = None, {}
         return t
 
     def ev(self, sender, chat=None, from_me=False, group=False, text="pomoc", sender_server="s.whatsapp.net", alt="",
@@ -729,6 +732,29 @@ class LinkFilterTests(unittest.TestCase):
         self.assertFalse(t.family_ok)
         with self.assertRaises(RuntimeError):
             t.send_text("x", WIFE)
+
+    def test_skipped_sender_is_logged_once(self):
+        """2.5.1: obcy numer — bez odpowiedzi, ale w logu i w wa-status widać, kto pisał (bez treści)."""
+        t = self.transport(me="48700000000")
+        logs, seen = [], []
+        t.log = SimpleNamespace(info=logs.append, warning=logs.append)
+        t.on_skip = seen.append
+        self.assertIsNone(t.parse(self.ev("48123456789", text="tajne")))
+        self.assertIsNone(t.parse(self.ev("48123456789")))                      # drugi raz w ciągu godziny — cisza
+        self.assertEqual(len(logs), 1)
+        self.assertIn("+48123***789", logs[0])
+        self.assertNotIn("tajne", logs[0])
+        self.assertIsNone(t.parse(self.ev("4321", sender_server="lid")))
+        self.assertIn("numer ukryty", logs[-1])
+        self.assertEqual(seen[0]["number"], "48123456789")
+        tmp = tempfile.mkdtemp()
+        with patch.object(W.S, "DATA", tmp):
+            for item in seen + seen:
+                W.remember_skip(item)
+            with contextlib.closing(W.db()) as con:
+                lines = W.skipped_lines(con)
+        self.assertEqual(len(lines), 2)
+        self.assertIn("+48123***789", lines[0] + lines[1])
 
     def test_self_chat_mode(self):
         t = self.transport(me=OWNER)

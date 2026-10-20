@@ -1173,7 +1173,23 @@ def make_transport(on_message):
         return FileTransport(on_message)
     import whatsapp_link
     return whatsapp_link.LinkedTransport(on_message, session_path(), C.WA_OWNER_PHONE, log,
-                                         others=[u["phone"] for u in family()])
+                                         others=[u["phone"] for u in family()], on_skip=remember_skip)
+
+
+def remember_skip(item):
+    """2.5.1: ostatnie odrzucone numery (bez treści) — pokazuje je wa-status i check."""
+    with contextlib.closing(db()) as con:
+        items = json.loads(meta_get(con, "skipped", "[]") or "[]")
+        items = [i for i in items if (i.get("number") or i.get("name")) != (item.get("number") or item.get("name"))]
+        meta_set(con, "skipped", json.dumps(([item] + items)[:8], ensure_ascii=False))
+
+
+def skipped_lines(con):
+    out = []
+    for i in json.loads(meta_get(con, "skipped", "[]") or "[]"):
+        when = dt.datetime.fromtimestamp(i.get("ts", 0)).strftime("%d.%m %H:%M")
+        out.append((f"„{i['name']}” " if i.get("name") else "") + f"{i.get('shown', '?')} · {when}")
+    return out
 
 
 def session_path():
@@ -1576,8 +1592,15 @@ def cmd_status():
         print(f"Połączenie:      {C.WA_TRANSPORT}" + (f" · konto: +{meta_get(con, 'linked_as')}" if meta_get(con, "linked_as") else ""))
         print(f"Właściciel:      +{C.WA_OWNER_PHONE or '—'} ({owner_name() or 'bez imienia'})")
         for u in family():
-            print(f"Rodzina:         +{u['phone']} {u['name']}" + (f" ({u['desc']})" if u["desc"] else "")
+            print(f"Może pisać:      +{u['phone']} {u['name']}" + (f" ({u['desc']})" if u["desc"] else "")
+                  + f" · {ROLE_PL[u['role']]} · przywitana: {'tak' if meta_get(con, 'welcomed:' + u['phone']) else 'jeszcze nie'}"
                   + f" · przegląd: {'tak' if u['brief'] else 'nie'} · ostatni: {meta_get(con, 'sent:rano:' + u['phone'], '—')}")
+        if family() and self_mode():
+            print("⚠ UWAGA:         Sebastian jest połączony z Twoim numerem (czat „Ty”) — osoby z listy NIE mogą do niego pisać.")
+            print("                 Potrzebny osobny numer Sebastiana: python sebastian.py wa-login")
+        for i, line in enumerate(skipped_lines(con)):
+            print(("Odrzucone:       " if i == 0 else "                 ") + line
+                  + ("  ← spoza listy; jeśli to ktoś bliski, dodaj: wa-user dodaj NUMER" if i == 0 else ""))
         print(f"Usługa w tle:    {'działa' if agent_loaded() else 'wyłączona (python sebastian.py wa-start)'}"
               + (f" · ostatni znak życia {meta_get(con, 'heartbeat', '')[:16].replace('T', ' ')}" if meta_get(con, "heartbeat") else "")
               + (" · połączona z WhatsAppem" if meta_get(con, "connected") == "1" else ""))

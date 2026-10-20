@@ -162,3 +162,21 @@ Data: 2026-10-20. Wynik: 77 testów zaliczonych (10 nowych; `test_whatsapp.py`: 
 - **Dostęp pełny:** osoba dodana z `--dostep pelny` widzi zadania firmowe, dokumenty, może zamykać zadania (własna numeracja), ma zakresy jak właściciel, a model dostaje informację, że rozmawia z osobą z pełnym dostępem. Powitanie mówi o pełnym dostępie. Numer spoza listy jest ignorowany. Nieznany poziom dostępu → błąd.
 
 Nie sprawdzono tu: jak dużo historii przekaże prawdziwy telefon przy połączeniu, pobierania plików z serwerów WhatsAppa (sieć niedostępna) ani jakości akt pisanych przez prawdziwy model. Sprawdzisz na Macu: `python sebastian.py wa-watch` (liczba akt i załączników), potem `kto to <imię>` na WhatsAppie.
+
+
+# Weryfikacja 2.5.1 — diagnostyka odrzuconych numerów
+
+Data: 2026-10-20. Wynik: 78 testów zaliczonych (1 nowy).
+
+- Wiadomość z numeru spoza listy: brak odpowiedzi, jeden wpis w logu na godzinę z zamaskowanym numerem (`+48123***789`) i **bez treści**; nadawca w adresacji LID bez numeru opisany jako „numer ukryty przez WhatsApp”. Lista „Odrzucone” w `wa-status` bez duplikatów, najwyżej 8 pozycji.
+- Wszystkie testy 2.5 (lista dozwolonych, dostęp pełny i prywatny, filtr nadawcy) bez zmian.
+
+
+# Weryfikacja 2.5.2 — nauka z rozmów WhatsApp w procesie nauki
+
+Data: 2026-10-20. Wynik: 78 testów zaliczonych.
+
+- Odtworzony błąd z Maca: przetwarzanie pozycji `wa:…` przy niepodłączonym module WhatsAppa (tak jest w osobnym procesie nauki) kończyło się `AttributeError: … 'TZ'` — test na wersji 2.5/2.5.1 nie przechodzi, na 2.5.2 przechodzi (pozycja „przeczytana”, fakty zapisane).
+- Pętla nauki: pozycja z trzema błędami z rzędu dostaje status „błąd” zamiast blokować kolejkę (sprawdzone przeglądem kodu; `learn-retry` przywraca pozycje z błędem).
+
+Lekcja: test nauki z rozmów uruchamiał się w procesie, w którym WhatsApp był już podłączony — dlatego nie wykrył błędu. Test odtwarza teraz warunki osobnego procesu.

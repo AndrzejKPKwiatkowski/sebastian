@@ -805,7 +805,9 @@ def process_file(con, service, f):
         return mark(con, f, "skip", reason)
     origin = ""
     if f["id"].startswith("wa:"):
-        import whatsapp_watch
+        import whatsapp, whatsapp_watch
+        if getattr(whatsapp, "S", None) is None:      # 2.5.1: w procesie nauki moduł WhatsAppa nie był podłączony
+            whatsapp.bind(S)
         log.info(f"→ {f['path']}")
         text, origin = whatsapp_watch.learning_text(f["id"]), "WhatsApp (data/whatsapp/obserwacja.sqlite3)"
     elif is_mail_item(f):
@@ -1280,7 +1282,9 @@ def run():
     log.info(f"Start nauki. Model: {C.MODEL}. Dysk: {'tak' if drive.service else 'nie'}. "
              f"Poczta: {'tak' if C.MAIL_ENABLED else 'nie'}.")
     busy_logged = False
+    failures = {}                                   # 2.5.1: ta sama pozycja nie może blokować nauki w nieskończoność
     while not STOP:
+        f = None
         try:
             if sebastian_busy() or docs_busy():
                 if not busy_logged:
@@ -1327,6 +1331,13 @@ def run():
             drive.expired()
         except Exception as e:   # nieoczekiwany błąd — zapisz i pracuj dalej
             log.warning(f"Błąd w pętli nauki: {type(e).__name__}: {str(e)[:200]}")
+            if f is not None:
+                failures[f["id"]] = failures.get(f["id"], 0) + 1
+                if failures[f["id"]] >= 3:
+                    with contextlib.suppress(Exception):
+                        mark(con, f, "error", f"{type(e).__name__}: {str(e)[:200]}")
+                        log.warning(f"  Pomijam „{f['path']}” po 3 nieudanych próbach — nauka idzie dalej "
+                                    f"(ponowisz: python sebastian.py learn-retry).")
             sleep(120)
     log.info("Zatrzymano. Postęp jest zapisany — następne uruchomienie zacznie w tym samym miejscu.")
 

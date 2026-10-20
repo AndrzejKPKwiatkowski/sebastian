@@ -1,6 +1,6 @@
 # Sebastian — pełna dokumentacja projektu
 
-**Wersja opisana w dokumencie: 2.5** (październik 2026)
+**Wersja opisana w dokumencie: 2.5.2** (październik 2026)
 Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników, modułem Dokumenty, który zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w uporządkowany PDF ze spisem treści, oraz Sebastianem na WhatsAppie: poranny przegląd z głosówką, rozmowa w ciągu dnia (także z wybranymi numerami z listy dozwolonych — z dostępem prywatnym albo pełnym), podsumowania Twojego własnego WhatsAppa (kto pisał, komu odpisać, do kogo oddzwonić) oraz trwała pamięć rozmów: załączniki, akta osób i nauka z rozmów.
 
 > **Dla kogo jest ten dokument.** Dla osoby, która przejmuje projekt albo musi coś w nim zrobić ręcznie: zainstalować od zera, przenieść na inny komputer, naprawić, zaktualizować albo rozwinąć kod. Nie trzeba być programistą, żeby korzystać z rozdziałów 1–14. Rozdział 15 jest dla osoby, która zmienia kod.
@@ -176,7 +176,7 @@ Nauka **czyta** bazę Sebastiana, ale do niej nie pisze. Archiwum skrzynek, któ
 
 ---
 
-## 5. Instalacja od zera (wersja 2.5)
+## 5. Instalacja od zera (wersja 2.5.2)
 
 > Każde polecenie wklejaj do **Terminala** (Cmd + Spacja → „Terminal”) i zatwierdzaj Enterem. Nie przepisuj znaku `%` z końca linii poleceń. Hasła wpisywane w Terminalu są niewidoczne. To normalne.
 
@@ -796,6 +796,8 @@ python sebastian.py wa-user usun 48500111222
 
 Bez pytań: `python sebastian.py wa-user dodaj 48500111222 --imie Kasia --wolacz Kasiu --kto żona --dostep pelny --przeglad tak --glos tak`. Po zmianie usługa przeładowuje się sama. Zmiana dostępu: `wa-user usun NUMER`, potem `wa-user dodaj` z nowym `--dostep`.
 
+**Osoba z listy pisze, a Sebastian nie odpowiada (2.5.1):** `python sebastian.py wa-status`. Pokazuje osoby z listy (z dostępem i tym, czy Sebastian już się z nimi przywitał), ostrzega, gdy Sebastian jest połączony z Twoim numerem, a w linii „Odrzucone” wypisuje ostatnie wiadomości spoza listy — nazwę z profilu WhatsApp i zamaskowany numer, bez treści. Jeśli widzisz tam np. „Aga” z innym numerem niż na liście — dodaj właściwy numer. Napis „numer ukryty przez WhatsApp (LID)” oznacza, że WhatsApp nie podał numeru: niech Sebastian pierwszy napisze do tej osoby (dodanie przez `wa-user dodaj` + `wa-start` wysyła powitanie), potem WhatsApp zwykle podaje numer.
+
 Numery wpisujesz tylko na Macu (zapisują się w `data/whatsapp/whatsapp.json`) — **nie wpisuj ich do kodu ani do repozytorium**. Dostęp `pelny` oznacza, że na telefon tej osoby trafiają także sprawy klientów — zastanów się nad tym, tak jak przy własnym telefonie (8b.6).
 
 ### 8b.9. Twój WhatsApp — kto pisał, komu odpisać, do kogo oddzwonić (od 2.4)
@@ -852,8 +854,9 @@ python sebastian.py wa-watch off         # wstrzymaj (dane zostają) · wa-watch
 | `brak libmagic` / `neonize` | `brew install libmagic` / `python -m pip install -r requirements-whatsapp.txt`, potem `wa-start` |
 | Odpowiedzi trwają długo | Ollama jest zajęta (np. analiza dokumentu). Odpowiedź przyjdzie, gdy model się zwolni |
 | Za dużo powiadomień | `cisza` na WhatsAppie albo `python sebastian.py wa-set WA_NOTICES nie` |
-| Żona nie dostaje odpowiedzi | `wa-user` (czy jest na liście i z jakim dostępem), `check` — Sebastian musi mieć osobny numer (8b.8) |
-| Ktoś spoza listy pisze do Sebastiana | Nic się nie dzieje — numery spoza `wa-user` są ignorowane (8b.8) |
+| Żona nie dostaje odpowiedzi | `python sebastian.py wa-status`: czy jest w linii „Może pisać” (i „przywitana: tak”), czy nie ma ostrzeżenia „połączony z Twoim numerem”, czy nie widnieje w „Odrzucone” (wtedy numer na liście się nie zgadza — porównaj z tym w „Odrzucone” albo zapytaj ją o numer i dodaj ponownie). Po zmianie listy: `wa-start`. Szczegóły niżej |
+| Ktoś spoza listy pisze do Sebastiana | Nic się nie dzieje — numery spoza `wa-user` są ignorowane (8b.8). Od 2.5.1 w logu i w `wa-status` („Odrzucone”) widać, kto próbował (nazwa profilu i zamaskowany numer, bez treści) |
+| W logu nauki co 2 minuty ten sam błąd przy jednej pozycji | Od 2.5.2 po 3 próbach pozycja jest pomijana (status „błąd”), nauka idzie dalej. Po usunięciu przyczyny: `python sebastian.py learn-retry` |
 | Brak akt osoby | Akta powstają w tle po kilku wiadomościach; `python sebastian.py wa-watch ludzie` |
 | Brak „📱 WhatsApp od wczoraj” | `python sebastian.py wa-watch` — połączone? Zbieranie działa od chwili połączenia; `WA_WATCH_IN_BRIEF` |
 | „Straciłem wgląd w Twojego WhatsAppa” | Usunięte z Połączonych urządzeń albo telefon długo offline: `python sebastian.py wa-watch login` |
@@ -1515,6 +1518,8 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2, 2.3):
 | 2.1.3 | 19.10.2026 | Wygaśnięcie logowania do Dysku: jeden komunikat zamiast wpisu przy każdym wątku, baner w panelu, polecenie `learn-drive` z wyborem (zaloguj ponownie / wyłącz Dysk) |
 | 2.2 | 19.10.2026 | **Dokumenty**: duże skany (druk, maszynopis, pismo ręczne, Grundbuch) → mały PDF ze spisem treści i linkami; model wizyjny z podwójnym czytaniem pisma, wpisy KW wg działów z weryfikacją cytatów, sprawdzanie i poprawki stron w panelu, praca wznawialna w tle (1–2 dni), przekazanie do nauki; polecenia `doc-*`, sekcja „6. Dokumenty” w `check` |
 | 2.3 | 20.10.2026 | **WhatsApp**: poranny przegląd z głosówką („Hej Andrzej!”, polski głos Piper, lokalnie), rozmowa i komendy (zadania, zrobione N, pilne, poczta, kalendarz, dokumenty, zapamiętaj, cisza), rozumienie głosówek (mlx-whisper), powiadomienia z ciszą nocną, opcjonalnie wieczór i tydzień; zakładka WhatsApp, polecenia `wa-*`, sekcja „7. WhatsApp” w `check` |
+| 2.5.2 | 20.10.2026 | Poprawka nauki z rozmów WhatsApp: w procesie nauki moduł WhatsAppa nie był podłączony (`AttributeError: 'NoneType' object has no attribute 'TZ'` co 2 minuty i zablokowana kolejka). Dodatkowo: pozycja, która 3 razy z rzędu kończy się błędem, dostaje status „błąd” i nauka idzie dalej (`learn-retry` przywraca) |
+| 2.5.1 | 20.10.2026 | Diagnostyka „żona pisze, a Sebastian milczy”: odrzucone numery w logu i w `wa-status` (nazwa profilu, zamaskowany numer, bez treści, raz na godzinę), ostrzeżenie, gdy Sebastian jest na numerze właściciela, a lista zawiera inne osoby; w `wa-status` poziom dostępu i czy osoba została przywitana |
 | 2.5 | 20.10.2026 | **WhatsApp — pamięć rozmów i dostęp pełny**: rozmowy przechowywane na stałe, czytanie załączników (PDF, Office, OCR zdjęć — także wysłanych przez Ciebie), zapis historii przesłanej przy połączeniu, akta osób (`kto to Jan`, `wa-watch ludzie`, panel), nauka z rozmów (zakres `whatsapp`, bez Open WebUI); lista dozwolonych numerów z poziomem dostępu `prywatny`/`pelny` (`wa-user dodaj --dostep pelny`) |
 | 2.4 | 20.10.2026 | **WhatsApp — rodzina i Twoje konto**: żona (i inne osoby z `wa-user`) pisze do Sebastiana i dostaje własny przegląd — tylko sprawy prywatne; obserwacja Twojego WhatsAppa (tylko odczyt): kto pisał, o czym, komu odpisać, do kogo oddzwonić, z kim dawno nie rozmawiałeś — w przeglądzie i na żądanie (`whatsapp`, `do kogo`, `rozmowa Jan`) |
 

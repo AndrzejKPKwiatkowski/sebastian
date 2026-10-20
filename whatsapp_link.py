@@ -29,7 +29,7 @@ def _jid(number):
 
 
 class LinkedTransport:
-    def __init__(self, on_message, session, owner, log, others=()):
+    def __init__(self, on_message, session, owner, log, others=(), on_skip=None):
         ensure_library()
         from neonize.client import NewClient
         from neonize.events import ConnectedEv, DisconnectedEv, LoggedOutEv, MessageEv
@@ -41,6 +41,7 @@ class LinkedTransport:
         self.lids = {}                                                    # identyfikator LID → numer
         self.sent_ids = set()
         self.thread = None
+        self.on_skip, self.skipped = on_skip, {}                             # 2.5.1: kogo odrzucono (diagnostyka)
         c = self.client
 
         @c.event(ConnectedEv)
@@ -48,6 +49,9 @@ class LinkedTransport:
             self.connected = True
             self.identify()
             self.log.info("WhatsApp: połączono" + (f" (konto +{self.me})" if self.me else ""))
+            if self.self_mode and len(self.phones) > 1:
+                self.log.warning("WhatsApp: Sebastian jest połączony z numerem właściciela (czat „Ty”) — osoby z listy "
+                                 "wa-user NIE mogą do niego pisać. Potrzebny osobny numer: python sebastian.py wa-login")
 
         @c.event(DisconnectedEv)
         def _disconnected(client, ev):
@@ -133,6 +137,7 @@ class LinkedTransport:
                     pn = self.client.get_pn_from_lid(src.Sender).User
                     who = pn if pn in self.phones else None
             if who is None:
+                self.skip(src, info)
                 return None
             if src.Sender.Server == "lid":
                 self.lids[src.Sender.User] = who
@@ -148,6 +153,26 @@ class LinkedTransport:
         if not text.strip():
             return None
         return {"id": info.ID, "kind": "text", "text": text, "ts": ts, "from": who}
+
+    def skip(self, src, info):
+        """2.5.1: wiadomość spoza listy — nie odpowiadamy, ale zapisujemy w logu KTO pisał (raz na godzinę na osobę),
+        żeby dało się sprawdzić, czemu np. żona nie dostaje odpowiedzi. Treść wiadomości nie jest zapisywana."""
+        lid = src.Sender.Server == "lid"
+        alt = src.SenderAlt.User if src.SenderAlt.Server != "lid" else ""
+        number = alt or ("" if lid else src.Sender.User)
+        shown = f"+{mask(number)}" if number else "numer ukryty przez WhatsApp (LID)"
+        name = getattr(info, "Pushname", "") or ""
+        key = number or src.Sender.User
+        now = time.time()
+        if now - self.skipped.get(key, 0) < 3600:
+            return
+        self.skipped[key] = now
+        who = (f"„{name}” " if name else "") + f"({shown})"
+        with contextlib.suppress(Exception):
+            self.log.info(f"WhatsApp: pominięto wiadomość od {who} — tego numeru nie ma na liście (python sebastian.py wa-user).")
+        if self.on_skip:
+            with contextlib.suppress(Exception):
+                self.on_skip({"name": name, "number": number, "shown": shown, "ts": int(now)})
 
     # ---------------------------------------------------------------- wysyłka
 
@@ -189,6 +214,12 @@ class LinkedTransport:
         self.stopping = True
         with contextlib.suppress(Exception):
             self.client.stop()
+
+
+def mask(number):
+    """48500111222 → 48500***222 (do logów)."""
+    n = str(number or "")
+    return n if len(n) < 8 else n[:5] + "***" + n[-3:]
 
 
 def pair(session, qr_png, phone=None, timeout=300):
