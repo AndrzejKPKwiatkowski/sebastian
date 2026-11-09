@@ -481,6 +481,11 @@ def wa_command(args):
     elif cmd=='wa-voice': W.cmd_voice(args.name)
     elif cmd=='wa-watch': W.cmd_watch(args.action,args.kod,args.godzin)
     elif cmd=='wa-user': W.cmd_user(args.action,args.phone,args.imie,args.wolacz,args.kto,args.przeglad,args.glos,args.dostep)
+    elif cmd=='wa-pomysly': W.cmd_ideas()
+    elif cmd in ('dodatki','dodatek'):
+        import dodatki_host as DH
+        DH.bind(W)
+        sys.exit(DH.cmd_list(args.akcja,args.id) if cmd=='dodatki' else DH.cmd_run(args.id,args.polecenie,args.reszta))
 
 def learn_command(args):
     """Polecenia modułu nauki (Dysk Google + poczta). Nie blokują pozostałych zadań Sebastiana."""
@@ -557,8 +562,11 @@ def main():
     a=sp.add_parser('wa-set'); a.add_argument('key'); a.add_argument('value')
     a=sp.add_parser('wa-voice'); a.add_argument('name',nargs='?',default=None)
     a=sp.add_parser('wa-watch'); a.add_argument('action',nargs='?',default='status',choices=['status','login','podsumowanie','ludzie','off','on','usun']); a.add_argument('--kod',action='store_true'); a.add_argument('--godzin',type=int,default=24)
+    sp.add_parser('wa-pomysly')
+    a=sp.add_parser('dodatki'); a.add_argument('akcja',nargs='?',default='lista',choices=['lista','wlacz','wylacz']); a.add_argument('id',nargs='?')
+    a=sp.add_parser('dodatek'); a.add_argument('id'); a.add_argument('polecenie',nargs='?',default=''); a.add_argument('reszta',nargs=argparse.REMAINDER)
     a=sp.add_parser('wa-user'); a.add_argument('action',nargs='?',default='lista',choices=['lista','dodaj','usun']); a.add_argument('phone',nargs='?')
-    a.add_argument('--imie'); a.add_argument('--wolacz'); a.add_argument('--kto'); a.add_argument('--przeglad'); a.add_argument('--glos'); a.add_argument('--dostep',choices=['prywatny','pelny'])
+    a.add_argument('--imie'); a.add_argument('--wolacz'); a.add_argument('--kto'); a.add_argument('--przeglad'); a.add_argument('--glos'); a.add_argument('--dostep',choices=['prywatny','asystent','pelny'])
     a=sp.add_parser('learn-drive'); a.add_argument('action',nargs='?',default='',choices=['','login','off','on','status'])
     a=sp.add_parser('learn-test'); a.add_argument('id')
     a=sp.add_parser('learn-mail-test'); a.add_argument('--account',default='')
@@ -578,7 +586,7 @@ def main():
     a=sp.add_parser('schedule'); a.add_argument('action',choices=['install','remove'])
     a=sp.add_parser('morning-run'); a.add_argument('--force',action='store_true')
     args=p.parse_args()
-    if args.cmd.startswith('wa-'):
+    if args.cmd.startswith('wa-') or args.cmd in ('dodatki','dodatek'):
         if not (DATA/'config.json').exists(): raise RuntimeError('Najpierw python sebastian.py init')
         wa_command(args); return
     if args.cmd.startswith('learn') or args.cmd.startswith('doc-') or args.cmd=='check':

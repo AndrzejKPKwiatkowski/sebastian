@@ -22,6 +22,9 @@ def register(app, s):
 
             info = {k: W.meta_get(con, k, '') for k in ('heartbeat', 'connected', 'linked_as', 'sent:rano', 'mute_until', 'logged_out')}
             info['watch_linked'] = W.meta_get(con, 'watch_linked', '')
+            W._relay_db(con)                 # 2.6: pytania do Ciebie i pomysły
+            questions = [dict(r) for r in con.execute("SELECT * FROM relay ORDER BY id DESC LIMIT 30")]
+            ideas = [dict(r) for r in con.execute("SELECT * FROM ideas ORDER BY id DESC LIMIT 100")]
             pending = con.execute("SELECT COUNT(*) FROM outbox WHERE status='pending'").fetchone()[0]
             errors = con.execute("SELECT COUNT(*) FROM outbox WHERE status='error'").fetchone()[0]
         watch = None
@@ -36,7 +39,7 @@ def register(app, s):
                          'digest_at': row['created'][:16].replace('T', ' ') if row else ''}
         return render_template('whatsapp.html', watch=watch, c=W.C, checks=W.checks(), briefs=briefs, talk=talk, info=info, family=W.family(),
                                pending=pending, errors=errors, running=W.agent_loaded(), name=W.owner_name(),
-                               engine=W.voice_engine(), csrf=session['csrf'])
+                               engine=W.voice_engine(), csrf=session['csrf'], questions=questions, ideas=ideas)
 
     @app.route('/whatsapp/akcja', methods=['POST'])
     def whatsapp_action():

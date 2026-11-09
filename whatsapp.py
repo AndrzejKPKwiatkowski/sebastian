@@ -1,4 +1,4 @@
-"""Sebastian 2.5 — WhatsApp: poranny przegląd (tekst + głosówka) i rozmowa z Sebastianem.
+"""Sebastian 2.7 — WhatsApp: poranny przegląd (tekst + głosówka) i rozmowa z Sebastianem.
 
 Jak to działa:
   • Usługa w tle (`wa-run`, launchd: pl.sebastian.whatsapp) jest połączona z WhatsAppem jako „połączone
@@ -165,7 +165,9 @@ def now():
 
 _USER = contextvars.ContextVar("wa_user", default=None)
 ROLE_PL = {"wlasciciel": "właściciel — wszystko", "pelny": "pełny dostęp — jak właściciel",
+           "asystent": "asystent — sprawy firmowe: zadania, kalendarz, poczta firmowa",
            "rodzina": "rodzina — tylko sprawy prywatne"}
+ACCESS_ROLE = {"pelny": "pelny", "asystent": "asystent", "prywatny": "rodzina"}
 
 
 def owner_user():
@@ -179,7 +181,7 @@ def family():
     for u in C.WA_USERS or []:
         if isinstance(u, dict) and u.get("phone") and u["phone"] != C.WA_OWNER_PHONE:
             out.append({"phone": u["phone"], "name": u.get("name") or "", "call": u.get("call") or u.get("name") or "",
-                        "role": "pelny" if u.get("access") == "pelny" else "rodzina", "desc": u.get("desc") or "", "brief": bool(u.get("brief")),
+                        "role": ACCESS_ROLE.get(u.get("access"), "rodzina"), "desc": u.get("desc") or "", "brief": bool(u.get("brief")),
                         "voice": bool(u.get("voice", True))})
     return out
 
@@ -205,6 +207,15 @@ def is_owner(user=None):
     return (user or current())["role"] == "wlasciciel"
 
 
+def is_assistant(user=None):
+    """2.6: asystent — sprawy firmowe (zadania, kalendarz, poczta firmowa), dodaje i zamyka zadania."""
+    return (user or current())["role"] == "asystent"
+
+
+def can_manage_tasks(user=None):
+    return full(user) or is_assistant(user)
+
+
 @contextlib.contextmanager
 def as_user(user):
     token = _USER.set(user or owner_user())
@@ -215,7 +226,9 @@ def as_user(user):
 
 
 def allowed_scopes():
-    return list(C.WA_SCOPES) if full() else ["private"]
+    if full():
+        return list(C.WA_SCOPES)
+    return ["work"] if is_assistant() else ["private"]
 
 
 def self_mode():
@@ -496,7 +509,10 @@ def gather(kind="rano", day=None):
 def context_text(data, limit=9000):
     today = dt.date.fromisoformat(data["date"])
     lines = [f"Dziś: {data['date_pl']} ({data['date']})."]
-    if not data.get("owner", True):
+    if not data.get("owner", True) and is_assistant():
+        lines.append(f"Dane pochodzą wyłącznie z FIRMOWEJ poczty, firmowych zadań i kalendarza {owner_name()} "
+                     "(sprawy prywatne są niedostępne).")
+    elif not data.get("owner", True):
         lines.append(f"Dane pochodzą wyłącznie z PRYWATNEJ poczty, prywatnych zadań i kalendarza {owner_name()} "
                      "(sprawy firmowe są niedostępne).")
     if data["calendar"]:
@@ -591,6 +607,12 @@ def who_line():
         rel = f" ({u['desc']} {owner})" if u["desc"] else ""
         return (f"Jesteś Sebastian — asystent {owner}. Rozmawiasz z {u['name'] or 'osobą z pełnym dostępem'}{rel}, która ma "
                 f"pełny dostęp do spraw {owner} (także firmowych). Mów o sprawach jako o sprawach {owner}, nie przypisuj ich rozmówcy.")
+    if is_assistant():
+        rel = f" ({u['desc']} {owner})" if u["desc"] else f" (asystent {owner})"
+        return (f"Jesteś Sebastian — asystent {owner}. Rozmawiasz z {u['name'] or 'asystentem'}{rel}, który pomaga {owner} "
+                f"w sprawach firmowych. Widzisz tylko sprawy firmowe {owner}: zadania, kalendarz i pocztę firmową — mów o nich "
+                f"jako o sprawach {owner}. Spraw prywatnych nie znasz: jeśli pytanie ich dotyczy, powiedz, że nie masz do nich "
+                f"dostępu. Jeśli trzeba zapytać {owner} o szczegóły, podpowiedz komendę *pytanie: …*.")
     rel = f" ({u['desc']} {owner})" if u["desc"] else f" (rodzina {owner})"
     return (f"Jesteś Sebastian — asystent {owner}. Rozmawiasz z {u['name'] or 'członkiem rodziny'}{rel}. Widzisz tylko "
             f"prywatne sprawy {owner} (prywatna poczta, zadania, kalendarz, notatki) — mów o nich jako o sprawach {owner} "
@@ -848,6 +870,25 @@ FAMILY_HELP = """*Co mogę zrobić* (pisz albo nagraj głosówkę):
 • *zapamiętaj: …* — przekażę notatkę {owner}
 Każde inne pytanie o sprawy domowe — odpowiem z tego, co wiem. Sprawy firmowe są poza moim zasięgiem."""
 
+ASSISTANT_HELP = """*Co mogę zrobić* (pisz albo nagraj głosówkę):
+• *zadania* — otwarte zadania firmowe {owner} z numerami
+• *szczegóły 3* — skąd jest zadanie nr 3 i co wiadomo
+• *dodaj zadanie: …* — nowe zadanie (termin: *do 15.11*, *do jutra*, *do piątku*)
+• *zrobione 3* — zamyka zadanie nr 3 ({owner} dostanie informację)
+• *pytanie: …* — przekażę pytanie {owner}, a jego odpowiedź prześlę Tobie
+• *pomysł: …* — zgłoszenie nowej funkcji albo usprawnienia Sebastiana
+• *pilne* · *poczta* · *kalendarz* / *jutro* · *przegląd*
+• *zapamiętaj: …* — notatka firmowa w Pamięci bota
+Każde inne pytanie o sprawy firmowe — odpowiem z tego, co wiem. Sprawy prywatne są poza moim zasięgiem."""
+
+OWNER_HELP_26 = """
+• *dodaj zadanie: …* — nowe zadanie (*do 15.11*, *do jutra*; *prywatne* — do spraw prywatnych)
+• *szczegóły 3* — skąd jest zadanie nr 3
+• *pytania* — otwarte pytania od Twoich ludzi · *odpowiedz 3: …* — odpowiedź na pytanie nr 3
+• *pomysły* — zgłoszone pomysły i prośby o nowe funkcje · *pomysł: …* — dopisz własny"""
+
+ASSISTANT_ALLOWED = {"zrobione", "zrobiony", "zrobiona", "gotowe", "wykonane", "done"}
+
 FAMILY_ONLY_OWNER = ("zrobione", "zrobiony", "zrobiona", "gotowe", "wykonane", "done", "dokumenty", "dokument", "skany",
                      "status", "wieczor", "podsumowanie", "tydzien", "tygodniowe", "cisza", "wznow", "wlacz",
                      "whatsapp", "wiadomosci", "kto", "oddzwon", "oddzwonic", "odpisac", "rozmowa", "czat", "akta")
@@ -889,7 +930,8 @@ def search_context(question, limit=4000):
         with contextlib.closing(L.db()) as lc:
             q = " OR ".join("fact LIKE ?" for _ in words)
             only_private = "" if full() else \
-                " AND file_id IN (SELECT id FROM files WHERE COALESCE(scope,'drive')='private')"   # rodzina: bez Dysku i firmy
+                (" AND file_id IN (SELECT id FROM files WHERE COALESCE(scope,'drive')='work')" if is_assistant() else
+                 " AND file_id IN (SELECT id FROM files WHERE COALESCE(scope,'drive')='private')")   # rodzina: bez Dysku i firmy
             for r in lc.execute(f"SELECT fact, source FROM facts WHERE ({q}){only_private} ORDER BY id DESC LIMIT 15",
                                 [f"%{w[:-1]}%" for w in words]):
                 out.append(f"- (nauka) {r['fact']}")
@@ -922,7 +964,7 @@ def task_list(con):
     with contextlib.closing(S.db()) as c:
         tasks = sebastian_items(c, "is_task=1 AND status='open'")
     tasks.sort(key=lambda x: (due_of(x) or dt.date(2999, 1, 1), x["priority"]))
-    if full():
+    if can_manage_tasks():
         meta_set(con, task_key(), json.dumps([t["id"] for t in tasks[:30]]))
     return tasks
 
@@ -954,7 +996,10 @@ def mark_done(con, number):
         c.commit()
     with contextlib.suppress(Exception):
         S.build_report()
-    return f"✓ Zrobione: {(r['task_title'] or r['subject'])[:120]}\n(Cofniesz w panelu: Podsumowanie i postęp.)"
+    title = (r['task_title'] or r['subject'])[:120]
+    if not is_owner():
+        tell_owner(con, f"✅ {current()['name'] or current()['phone']} zamknął zadanie: {title}", "zadanie")
+    return f"✓ Zrobione: {title}\n(Cofniesz w panelu: Podsumowanie i postęp.)"
 
 
 def remember(text):
@@ -963,13 +1008,202 @@ def remember(text):
         body = f"Od {current()['name'] or current()['phone']}: {body}"[:1500]
     if len(body) < 3:
         return "Napisz, co mam zapamiętać, np. *zapamiętaj: klient X woli kontakt telefoniczny*."
+    scope = "work" if is_assistant() else "private"
     with contextlib.closing(S.db()) as c:
         nid = c.execute("INSERT INTO knowledge_notes(scope,kind,title,body,active,updated) VALUES(?,?,?,?,?,?)",
-                        ("private", "fact", body[:60] + ("…" if len(body) > 60 else ""), body, 1, S.now())).lastrowid
+                        (scope, "fact", body[:60] + ("…" if len(body) > 60 else ""), body, 1, S.now())).lastrowid
         c.execute("INSERT INTO events(time,action,value) VALUES(?,?,?)",
-                  (S.now(), "knowledge_note", json.dumps({"id": nid, "active": 1, "scope": "private", "source": "whatsapp"})))
+                  (S.now(), "knowledge_note", json.dumps({"id": nid, "active": 1, "scope": scope, "source": "whatsapp"})))
         c.commit()
-    return f"✓ Zapamiętane w Pamięci bota (prywatne): „{body[:150]}”. Zmienisz to w panelu → Pamięć bota."
+    label = "firmowe" if scope == "work" else "prywatne"
+    return f"✓ Zapamiętane w Pamięci bota ({label}): „{body[:150]}”." + (" Zmienisz to w panelu → Pamięć bota." if is_owner() else "")
+
+
+# ================================================================ 2.6: zadania z WhatsAppa, pytania do właściciela, pomysły
+
+WEEKDAYS = {"poniedzialek": 0, "poniedzialku": 0, "wtorek": 1, "wtorku": 1, "sroda": 2, "srode": 2, "srody": 2,
+            "czwartek": 3, "czwartku": 3, "piatek": 4, "piatku": 4, "sobota": 5, "sobote": 5, "soboty": 5,
+            "niedziela": 6, "niedziele": 6, "niedzieli": 6}
+
+
+def parse_due(text, today=None):
+    """„… do 15.11” / „do 15.11.2026” / „do jutra” / „na piątek” → (tytuł bez terminu, data albo None)."""
+    today = today or now().date()
+    t = text.strip()
+    m = re.search(r"\s*,?\s*(?:do|na|termin:?|deadline:?)\s+(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\s*\.?\s*$", t, re.I)
+    if m:
+        day, month = int(m.group(1)), int(m.group(2))
+        year = int(m.group(3)) if m.group(3) else today.year
+        year += 2000 if year < 100 else 0
+        with contextlib.suppress(ValueError):
+            due = dt.date(year, month, day)
+            if not m.group(3) and due < today - dt.timedelta(days=30):
+                due = dt.date(year + 1, month, day)
+            return t[:m.start()].strip(" ,.-"), due
+    m = re.search(r"\s*,?\s*(?:do|na)\s+(\S+)\s*\.?\s*$", t, re.I)
+    if m:
+        w = norm(m.group(1))
+        rel = {"dzis": 0, "dzisiaj": 0, "jutra": 1, "jutro": 1, "pojutrza": 2, "pojutrze": 2}
+        if w in rel:
+            return t[:m.start()].strip(" ,.-"), today + dt.timedelta(days=rel[w])
+        if w in WEEKDAYS:
+            ahead = (WEEKDAYS[w] - today.weekday()) % 7 or 7
+            return t[:m.start()].strip(" ,.-"), today + dt.timedelta(days=ahead)
+    return t, None
+
+
+def tell_owner(con, text, purpose="info"):
+    """Wiadomość do właściciela od Sebastiana (np. „Jan dodał zadanie”) — niezależnie od ciszy powiadomień."""
+    return enqueue(con, "text", text, purpose=f"relay:{purpose}", to=C.WA_OWNER_PHONE)
+
+
+def add_task(con, text):
+    """Nowe zadanie z WhatsAppa — od razu na liście zadań w panelu (tabela messages, jak zadania z maili)."""
+    if not can_manage_tasks():
+        return f"Zadania może dodawać {owner_name() or 'właściciel'} i jego asystent."
+    raw = re.sub(r"^\s*(dodaj\s+zadanie|nowe\s+zadanie|zadanie)\s*:?\s*", "", text.strip(), flags=re.I)
+    private = False
+    if full() and re.match(r"^prywatn\w*\s*:?\s*", raw, re.I):
+        private, raw = True, re.sub(r"^prywatn\w*\s*:?\s*", "", raw, flags=re.I)
+    title, due = parse_due(raw)
+    title = title.strip()[:200]
+    if len(title) < 3:
+        return "Napisz, co trzeba zrobić, np. *dodaj zadanie: oddzwonić do pani Kowalskiej do piątku*."
+    who = current()["name"] or current()["phone"] or owner_name()
+    scope = "private" if private else "work"
+    stamp = S.now()
+    analysis = {"summary": f"Zadanie dodane na WhatsAppie przez {who}: {title}", "category": "termin" if due else "sprawdz",
+                "action": title, "due": due.isoformat() if due else "", "evidence": text.strip()[:500],
+                "model": "WhatsApp", "analyzed_at": stamp}
+    values = {"source": "whatsapp", "scope": scope, "account": "whatsapp", "folder": "zadania", "validity": "wa",
+              "mid": "", "refs": "", "sender": who, "sender_name": who, "subject": title, "date": stamp,
+              "body": f"{title}\n\nDodane na WhatsAppie przez: {who}" + (f"\nTermin: {due:%d.%m.%Y}" if due else ""),
+              "flags": "", "attachments": "[]", "imported": stamp, "analysis": json.dumps(analysis, ensure_ascii=False),
+              "status": "open", "is_task": 1, "task_title": title, "decided_at": stamp, "category_confirmed": 1,
+              "feedback_at": stamp, "arrival": "archive", "comment": f"dodane przez {who} (WhatsApp)",
+              "decision_kind": "whatsapp_task"}
+    with contextlib.closing(S.db()) as c:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(messages)")}
+        values = {k: v for k, v in values.items() if k in cols}
+        c.execute("BEGIN IMMEDIATE")
+        values["uid"] = (c.execute("SELECT MAX(uid) FROM messages WHERE account='whatsapp' AND folder='zadania'").fetchone()[0] or 0) + 1
+        mid = c.execute(f"INSERT INTO messages({','.join(values)}) VALUES({','.join('?' * len(values))})",
+                        list(values.values())).lastrowid
+        with contextlib.suppress(Exception):
+            c.execute("INSERT INTO events(time,message_id,action,value) VALUES(?,?,?,?)",
+                      (stamp, mid, "whatsapp_task", json.dumps({"by": who, "title": title, "scope": scope}, ensure_ascii=False)))
+        c.commit()
+    with contextlib.suppress(Exception):
+        S.build_report()
+    when = f" — termin {date_pl(due)}" if due else ""
+    if not is_owner():
+        tell_owner(con, f"🆕 {who} dodał zadanie: *{title}*{when}", "zadanie")
+    return f"✓ Dodane do zadań{' prywatnych' if private else ''}: {title}{when}. Zobaczysz je w *zadania*."
+
+
+def task_details(con, number):
+    ids = json.loads(meta_get(con, task_key(), "[]") or "[]")
+    if not 1 <= number <= len(ids):
+        return "Nie znam zadania o tym numerze. Napisz najpierw *zadania*."
+    with contextlib.closing(S.db()) as c:
+        r = c.execute("SELECT * FROM messages WHERE id=?", (ids[number - 1],)).fetchone()
+    if not r or r["scope"] not in allowed_scopes():
+        return "Tego zadania nie mogę pokazać."
+    ai = json.loads(r["analysis"] or "{}")
+    keys = r.keys()
+    lines = [f"*{number}. {(r['task_title'] or r['subject'])[:150]}*"]
+    if r["source"] == "whatsapp":
+        lines.append(f"Dodane na WhatsAppie przez: {r['sender']} ({r['date'][:10]})")
+    else:
+        lines.append(f"Z maila: „{(r['subject'] or '')[:120]}” od {(r['sender_name'] if 'sender_name' in keys and r['sender_name'] else r['sender'])[:80]} ({(r['date'] or '')[:10]})")
+    if ai.get("summary"):
+        lines.append(f"O co chodzi: {ai['summary'][:400]}")
+    if ai.get("action"):
+        lines.append(f"Do zrobienia: {ai['action'][:300]}")
+    if ai.get("due"):
+        lines.append(f"Termin: {ai['due']}")
+    if "comment" in keys and r["comment"]:
+        lines.append(f"Komentarz: {r['comment'][:300]}")
+    lines.append("Brakuje szczegółów? Napisz *pytanie: …* — przekażę.")
+    return "\n".join(lines)
+
+
+def _relay_db(con):
+    con.executescript("""
+    CREATE TABLE IF NOT EXISTS relay(id INTEGER PRIMARY KEY AUTOINCREMENT, from_phone TEXT, from_name TEXT, question TEXT,
+        asked TEXT, answer TEXT DEFAULT '', answered TEXT DEFAULT '');
+    CREATE TABLE IF NOT EXISTS ideas(id INTEGER PRIMARY KEY AUTOINCREMENT, from_phone TEXT, from_name TEXT, text TEXT,
+        created TEXT, status TEXT DEFAULT 'nowy');""")
+
+
+def ask_owner(con, text):
+    """Pytanie od asystenta/rodziny do właściciela — Sebastian przekazuje i odsyła odpowiedź."""
+    q = re.sub(r"^\s*(pytanie(\s+do\s+\S+)?|zapytaj(\s+\S+)?)\s*:?\s*", "", text.strip(), flags=re.I)[:1500]
+    if len(q) < 3:
+        return "Napisz pytanie, np. *pytanie: czy klient X ma dostać ofertę w PDF?*"
+    _relay_db(con)
+    who = current()["name"] or current()["phone"]
+    qid = con.execute("INSERT INTO relay(from_phone, from_name, question, asked) VALUES(?,?,?,?)",
+                      (current()["phone"], who, q, now().isoformat(timespec="seconds"))).lastrowid
+    con.commit()
+    tell_owner(con, f"❓ *{who} pyta* (pytanie nr {qid}):\n{q}\n\nOdpowiesz: *odpowiedz {qid}: …*", "pytanie")
+    return f"✓ Przekazałem {owner_name() or 'właścicielowi'} (pytanie nr {qid}). Jego odpowiedź prześlę Ci tutaj."
+
+
+def answer_question(con, text):
+    _relay_db(con)
+    m = re.match(r"^\s*(?:odpowiedz|odpowiedź|odp)\.?\s*(?:nr\.?\s*)?(\d+)?\s*[:\-–]?\s*(.*)$", text.strip(), re.I | re.S)
+    if not m or not m.group(2).strip():
+        return "Napisz: *odpowiedz 3: treść odpowiedzi* (numer z pytania)."
+    qid, answer = m.group(1), m.group(2).strip()[:1500]
+    open_q = con.execute("SELECT * FROM relay WHERE answered='' ORDER BY id").fetchall()
+    if qid:
+        row = con.execute("SELECT * FROM relay WHERE id=?", (int(qid),)).fetchone()
+    elif len(open_q) == 1:
+        row = open_q[0]
+    else:
+        return f"Otwartych pytań jest {len(open_q)} — podaj numer: *odpowiedz 3: …* (lista: *pytania*)."
+    if row is None:
+        return "Nie ma pytania o takim numerze. Lista: *pytania*."
+    con.execute("UPDATE relay SET answer=?, answered=? WHERE id=?", (answer, now().isoformat(timespec="seconds"), row["id"]))
+    con.commit()
+    enqueue(con, "text", f"💬 *{owner_name() or 'Odpowiedź'} odpowiada* na Twoje pytanie nr {row['id']} "
+                         f"(„{row['question'][:120]}”):\n\n{answer}", purpose="relay:odpowiedz", to=row["from_phone"])
+    return f"✓ Wysłane do {row['from_name']}."
+
+
+def open_questions(con):
+    _relay_db(con)
+    rows = con.execute("SELECT * FROM relay WHERE answered='' ORDER BY id").fetchall()
+    if not rows:
+        return "Nie ma pytań czekających na Twoją odpowiedź. 👍"
+    return "*Pytania do Ciebie:*\n" + "\n".join(f"{r['id']}. {r['from_name']}: {r['question'][:200]}" for r in rows) + \
+        "\n\nOdpowiesz: *odpowiedz 3: …*"
+
+
+def add_idea(con, text):
+    idea = re.sub(r"^\s*(pomysl|pomysł|zgloszenie|zgłoszenie|funkcja|propozycja|prosba|prośba)\w*\s*:?\s*", "",
+                  text.strip(), flags=re.I)[:2000]
+    if len(idea) < 5:
+        return "Opisz pomysł, np. *pomysł: Sebastian mógłby przypominać o urodzinach klientów*."
+    _relay_db(con)
+    who = current()["name"] or current()["phone"] or owner_name()
+    iid = con.execute("INSERT INTO ideas(from_phone, from_name, text, created) VALUES(?,?,?,?)",
+                      (current()["phone"], who, idea, now().isoformat(timespec="seconds"))).lastrowid
+    con.commit()
+    if not is_owner():
+        tell_owner(con, f"💡 *{who} zgłasza pomysł* (nr {iid}):\n{idea}", "pomysl")
+    return f"✓ Zapisałem pomysł nr {iid}. {'' if is_owner() else (owner_name() or 'Właściciel') + ' dostał go na WhatsAppie. '}" \
+           "Lista pomysłów jest w panelu (zakładka WhatsApp)."
+
+
+def ideas_text(con, limit=20):
+    _relay_db(con)
+    rows = con.execute("SELECT * FROM ideas ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    if not rows:
+        return "Nie ma jeszcze zgłoszonych pomysłów."
+    return "*Pomysły i prośby o nowe funkcje:*\n" + "\n".join(
+        f"{r['id']}. [{r['created'][:10]}] {r['from_name']}: {r['text'][:250]}" for r in rows)
 
 
 def status_text():
@@ -1006,8 +1240,31 @@ def _handle(con, text, voice_in=False):
     if not t:
         return "Nie zrozumiałem wiadomości. Napisz *pomoc*.", False, None
     if first in ("pomoc", "help", "komendy", "menu", "?"):
-        return (HELP if full() else FAMILY_HELP.format(owner=owner_name() or "właściciela")), False, None
-    if not full() and first in FAMILY_ONLY_OWNER:
+        owner = owner_name() or "właściciela"
+        if is_assistant():
+            return ASSISTANT_HELP.format(owner=owner), False, None
+        return (HELP + OWNER_HELP_26 + (addons_help() if is_owner() else "") if full() else FAMILY_HELP.format(owner=owner)), False, None
+    # 2.6: zadania, pytania, pomysły
+    if re.match(r"^(dodaj zadanie|nowe zadanie|zadanie\s*:)", t):
+        return add_task(con, text), False, None
+    m = re.match(r"^(szczegoly|szczegol|zadanie)\s*(?:nr\.?\s*)?(\d+)\s*$", t)
+    if m:
+        if not can_manage_tasks():
+            return f"To może zrobić tylko {owner_name() or 'właściciel'}.", False, None
+        return task_details(con, int(m.group(2))), False, None
+    if re.match(r"^(pytanie|zapytaj)\b", t) and not is_owner():
+        return ask_owner(con, text), False, None
+    if re.match(r"^(odpowiedz|odp)\b", t) and is_owner():
+        return answer_question(con, text), False, None
+    if first == "pytania" and is_owner():
+        return open_questions(con), False, None
+    if first in ("pomysly", "zgloszenia"):
+        if not full():
+            return f"Listę pomysłów widzi {owner_name() or 'właściciel'}. Nowy pomysł zgłosisz: *pomysł: …*", False, None
+        return ideas_text(con), False, None
+    if re.match(r"^(pomysl|zgloszenie|propozycja|prosba o funkcj)", t):
+        return add_idea(con, text), False, None
+    if not full() and first in FAMILY_ONLY_OWNER and not (is_assistant() and first in ASSISTANT_ALLOWED):
         return f"To może zrobić tylko {owner_name() or 'właściciel'}. Napisz *pomoc*, żeby zobaczyć, w czym pomogę.", False, None
     if first in ("przeglad", "dzien", "dzisiaj", "dzis") or t in ("co dzis", "co dzisiaj", "co mam dzis", "co mam dzisiaj"):
         return None, False, "rano"
@@ -1018,10 +1275,11 @@ def _handle(con, text, voice_in=False):
     if first in ("zadania", "lista"):
         tasks = task_list(con)
         if not tasks:
-            return ("Nie masz otwartych zadań. 🎉" if full() else "Nie ma otwartych prywatnych zadań."), voice_in, None
+            return ("Nie masz otwartych zadań. 🎉" if full() else
+                    "Nie ma otwartych zadań firmowych." if is_assistant() else "Nie ma otwartych prywatnych zadań."), voice_in, None
         today = now().date()
         lines = [f"*Otwarte zadania* ({len(tasks)}):"] + [f"{i}. {item_line(x, today)[:160]}" for i, x in enumerate(tasks[:30], 1)]
-        return "\n".join(lines) + ("\n\nZamkniesz: *zrobione 2*" if full() else ""), False, None
+        return "\n".join(lines) + ("\n\nZamkniesz: *zrobione 2* · szczegóły: *szczegóły 2*" if can_manage_tasks() else ""), False, None
     m = re.match(r"(zrobione|zrobiony|zrobiona|gotowe|wykonane|done)\s*(?:nr\.?\s*)?(\d+)", t)
     if m:
         return mark_done(con, int(m.group(2))), False, None
@@ -1302,14 +1560,18 @@ def tick(con, transport, incoming, state):
                     owner = owner_name() or "właściciela"
                     scope_txt = (f"Masz taki sam dostęp jak {owner}: poczta, zadania, kalendarz, dokumenty."
                                  if u["role"] == "pelny" else
+                                 f"Pomagam Ci w sprawach firmowych {owner}: zadania, kalendarz i poczta firmowa. Możesz dodawać "
+                                 f"zadania, pytać {owner} o szczegóły i zgłaszać pomysły." if u["role"] == "asystent" else
                                  f"Widzę prywatne sprawy {owner}: kalendarz, prywatną pocztę i zadania — spraw firmowych nie znam.")
                     enqueue(con, "text", f"Cześć{', ' + u['call'] if u['call'] else ''}! 👋 Tu Sebastian, asystent {owner}. "
                             f"Możesz do mnie pisać albo nagrywać głosówki. {scope_txt} Nasze rozmowy widzi też {owner} w swoim panelu."
                             + (f" Codziennie około {C.WA_BRIEF_TIME} wyślę Ci krótki przegląd dnia." if u["brief"] else "")
-                            + "\n\n" + (HELP if u["role"] == "pelny" else FAMILY_HELP.format(owner=owner)),
+                            + "\n\n" + (HELP if u["role"] == "pelny" else ASSISTANT_HELP.format(owner=owner)
+                                          if u["role"] == "asystent" else FAMILY_HELP.format(owner=owner)),
                             purpose="welcome", to=u["phone"])
         while not incoming.empty():
             handle_incoming(con, transport, incoming.get())
+        addons_tick(con)
         kind = due_kind(con)
         if kind:
             meta_set(con, "sent:" + kind, now().date().isoformat())    # nie powtarzaj, nawet gdy coś się wysypie
@@ -1366,6 +1628,31 @@ def watch_tick(con, watcher):
                              "python sebastian.py wa-watch login", purpose="notice", to="")
 
 
+def addons_message(con, kind, text, user):
+    """2.7: dodatki (np. Przypominacz) dostają wiadomość właściciela jako pierwsze. True = obsłużona."""
+    try:
+        import dodatki_host
+        return dodatki_host.bind(sys.modules[__name__]).on_message(con, kind, text, user)
+    except Exception as e:
+        log.warning(f"Dodatki: {type(e).__name__}: {str(e)[:150]}")
+        return False
+
+
+def addons_tick(con):
+    try:
+        import dodatki_host
+        dodatki_host.bind(sys.modules[__name__]).tick(con)
+    except Exception as e:
+        log.warning(f"Dodatki: {type(e).__name__}: {str(e)[:150]}")
+
+
+def addons_help():
+    with contextlib.suppress(Exception):
+        import dodatki_host
+        return dodatki_host.bind(sys.modules[__name__]).help_text()
+    return ""
+
+
 def handle_incoming(con, transport, msg):
     """msg: dict(id, kind 'text'|'voice', text, audio_bytes, ts, from). Transport sam odfiltrował obcych."""
     user = user_by_phone(msg.get("from") or C.WA_OWNER_PHONE)
@@ -1398,7 +1685,8 @@ def handle_incoming(con, transport, msg):
             transport.typing(True, to or None)
         log.info(f"Wiadomość od: {'właściciel' if is_owner(user) else (user['name'] or 'rodzina')} "
                  f"({'głos' if msg['kind'] == 'voice' else 'tekst'}, {len(text)} znaków).")
-        reply(con, text, voice_in=msg["kind"] == "voice", user=user)
+        if not (is_owner(user) and addons_message(con, msg["kind"], text, user)):
+            reply(con, text, voice_in=msg["kind"] == "voice", user=user)
         with contextlib.suppress(Exception):
             transport.typing(False, to or None)
     con.execute("UPDATE inbox SET answered=? WHERE wa_id=?", (now().isoformat(timespec="seconds"), msg["id"]))
@@ -1612,12 +1900,24 @@ def cmd_status():
         print(f"Kolejka:         {pending} do wysłania · {errors} nieudanych")
         if muted(con):
             print(f"Wyciszone do:    {meta_get(con, 'mute_until')[:16].replace('T', ' ')}")
+        with contextlib.suppress(Exception):
+            import dodatki_host
+            for i, line in enumerate(dodatki_host.bind(sys.modules[__name__]).status_lines()):
+                print(("Dodatki:         " if i == 0 else "                 ") + line)
 
 
 def yes(value, default=True):
     if value is None or str(value).strip() == "":
         return default
     return coerce("WA_VOICE", value)
+
+
+def cmd_ideas():
+    """2.6: python sebastian.py wa-pomysly — pomysły i pytania z WhatsAppa (do skopiowania)."""
+    with contextlib.closing(db()) as con:
+        print(ideas_text(con, limit=200).replace("*", ""))
+        print()
+        print(open_questions(con).replace("*", ""))
 
 
 def cmd_user(action="lista", phone=None, name=None, call=None, desc=None, brief=None, voice=None, access=None):
@@ -1637,6 +1937,7 @@ def cmd_user(action="lista", phone=None, name=None, call=None, desc=None, brief=
     if action == "dodaj":
         print("Nowa osoba, która może pisać do Sebastiana. Wszystkie inne numery Sebastian ignoruje.")
         print("Dostęp: „prywatny” — tylko sprawy prywatne (prywatna poczta, zadania, kalendarz, notatki), bez zamykania zadań;")
+        print("        „asystent” — sprawy firmowe: zadania (dodaje i zamyka), kalendarz, poczta firmowa; pytania do Ciebie;")
         print("        „pelny”    — wszystko jak Ty (także poczta firmowa i klienci, Twój WhatsApp, zamykanie zadań).")
         print("Jej rozmowy z Sebastianem zobaczysz w panelu (zakładka WhatsApp).\n")
         phone = coerce("WA_OWNER_PHONE", phone or ask_input("Numer WhatsApp tej osoby (np. 48500111222)"))
@@ -1645,17 +1946,17 @@ def cmd_user(action="lista", phone=None, name=None, call=None, desc=None, brief=
         name = (name or ask_input("Imię")).strip()
         call = (call or ask_input("Jak Sebastian ma się zwracać w powitaniu (np. Kasiu)", name)).strip()
         desc = (desc if desc is not None else ask_input("Kim jest dla Ciebie (np. żona) — Sebastian będzie to wiedział", "")).strip()
-        access = (access or ask_input("Dostęp: prywatny / pelny", "prywatny")).strip().lower().replace("ł", "l")
-        if access not in ("prywatny", "pelny"):
-            raise RuntimeError("Dostęp: prywatny albo pelny.")
+        access = (access or ask_input("Dostęp: prywatny / asystent / pelny", "prywatny")).strip().lower().replace("ł", "l")
+        if access not in ("prywatny", "asystent", "pelny"):
+            raise RuntimeError("Dostęp: prywatny, asystent albo pelny.")
         brief_v = yes(brief if brief is not None else ask_input("Poranny przegląd (tak/nie)", "tak"))
         voice_v = yes(voice if voice is not None else (ask_input("Z głosówką (tak/nie)", "tak") if brief_v else "tak"))
         users = [u for u in users if u.get("phone") != phone]
         users.append({"phone": phone, "name": name, "call": call, "desc": desc, "brief": brief_v, "voice": voice_v,
                       "access": access})
         save_settings({"WA_USERS": users})
-        print(f"\n✓ Dodano: +{phone} {name}" + (f" ({desc})" if desc else "") + f" — {ROLE_PL['pelny' if access == 'pelny' else 'rodzina']}.")
-        print("  Sebastian przywita się z nią po przeładowaniu usługi i wyśle listę tego, w czym pomoże.")
+        print(f"\n✓ Dodano: +{phone} {name}" + (f" ({desc})" if desc else "") + f" — {ROLE_PL[ACCESS_ROLE[access]]}.")
+        print("  Sebastian przywita się po przeładowaniu usługi i wyśle listę tego, w czym pomoże.")
         if self_mode():
             print("⚠ Sebastian jest połączony z Twoim własnym numerem — rodzina nie może z nim pisać. Potrzebny osobny numer "
                   "(DOKUMENTACJA.md, rozdział 8b.1).")
@@ -1666,7 +1967,7 @@ def cmd_user(action="lista", phone=None, name=None, call=None, desc=None, brief=
         save_settings({"WA_USERS": [u for u in users if u.get("phone") != phone]})
         with contextlib.closing(db()) as con:
             meta_set(con, f"welcomed:{phone}", "")
-        print(f"✓ Usunięto +{phone}. Sebastian przestanie jej odpowiadać po przeładowaniu usługi.")
+        print(f"✓ Usunięto +{phone}. Sebastian przestanie odpowiadać na ten numer po przeładowaniu usługi.")
     else:
         raise RuntimeError("Użycie: python sebastian.py wa-user [lista|dodaj|usun] [NUMER]")
     if agent_loaded():

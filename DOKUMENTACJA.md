@@ -1,7 +1,7 @@
 # Sebastian — pełna dokumentacja projektu
 
-**Wersja opisana w dokumencie: 2.5.2** (październik 2026)
-Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników, modułem Dokumenty, który zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w uporządkowany PDF ze spisem treści, oraz Sebastianem na WhatsAppie: poranny przegląd z głosówką, rozmowa w ciągu dnia (także z wybranymi numerami z listy dozwolonych — z dostępem prywatnym albo pełnym), podsumowania Twojego własnego WhatsAppa (kto pisał, komu odpisać, do kogo oddzwonić) oraz trwała pamięć rozmów: załączniki, akta osób i nauka z rozmów.
+**Wersja opisana w dokumencie: 2.7** (listopad 2026)
+Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę o właścicielu z Dysku Google, poczty i załączników, modułem Dokumenty, który zamienia duże skany (także pisane ręcznie, np. księgi wieczyste) w uporządkowany PDF ze spisem treści, oraz Sebastianem na WhatsAppie: poranny przegląd z głosówką, rozmowa w ciągu dnia (także z wybranymi numerami z listy dozwolonych — z dostępem prywatnym albo pełnym), podsumowania Twojego własnego WhatsAppa (kto pisał, komu odpisać, do kogo oddzwonić), trwała pamięć rozmów: załączniki, akta osób i nauka z rozmów, a od 2.7 — dodatki, w tym Przypominacz (sprawy nagrane w ciągu dnia wracają wieczorem po ostatnim spotkaniu).
 
 > **Dla kogo jest ten dokument.** Dla osoby, która przejmuje projekt albo musi coś w nim zrobić ręcznie: zainstalować od zera, przenieść na inny komputer, naprawić, zaktualizować albo rozwinąć kod. Nie trzeba być programistą, żeby korzystać z rozdziałów 1–14. Rozdział 15 jest dla osoby, która zmienia kod.
 
@@ -13,13 +13,14 @@ Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę
 2. [Zasady, których projekt pilnuje](#2-zasady-których-projekt-pilnuje)
 3. [Jak to działa — architektura](#3-jak-to-działa--architektura)
 4. [Wymagania](#4-wymagania)
-5. [Instalacja od zera (wersja 2.4)](#5-instalacja-od-zera-wersja-24)
+5. [Instalacja od zera (wersja 2.6)](#5-instalacja-od-zera-wersja-26)
 6. [Codzienna praca w panelu](#6-codzienna-praca-w-panelu)
 7. [Praca w tle — harmonogramy macOS](#7-praca-w-tle--harmonogramy-macos)
 8. [Moduł Nauka — szczegóły](#8-moduł-nauka--szczegóły)
 8a. [Dokumenty — skany i księgi wieczyste (od 2.2)](#8a-dokumenty--skany-i-księgi-wieczyste-od-22)
 8b. [WhatsApp — Sebastian w telefonie (od 2.3)](#8b-whatsapp--sebastian-w-telefonie-od-23)
     - [8b.8. Lista dozwolonych numerów (od 2.4)](#8b8-lista-dozwolonych-numerów--kto-może-pisać-do-sebastiana-od-24-dostęp-pełny-od-25) · [8b.9. Twój WhatsApp (od 2.4)](#8b9-twój-whatsapp--kto-pisał-komu-odpisać-do-kogo-oddzwonić-od-24)
+8c. [Dodatki i Przypominacz (od 2.7)](#8c-dodatki-i-przypominacz-od-27)
 9. [Połączenie z Open WebUI](#9-połączenie-z-open-webui)
 10. [Mapa plików i danych](#10-mapa-plików-i-danych)
 11. [Wszystkie polecenia](#11-wszystkie-polecenia)
@@ -176,7 +177,7 @@ Nauka **czyta** bazę Sebastiana, ale do niej nie pisze. Archiwum skrzynek, któ
 
 ---
 
-## 5. Instalacja od zera (wersja 2.5.2)
+## 5. Instalacja od zera (wersja 2.6)
 
 > Każde polecenie wklejaj do **Terminala** (Cmd + Spacja → „Terminal”) i zatwierdzaj Enterem. Nie przepisuj znaku `%` z końca linii poleceń. Hasła wpisywane w Terminalu są niewidoczne. To normalne.
 
@@ -776,6 +777,7 @@ Każda dodana osoba ma jeden z dwóch poziomów dostępu:
 | --- | --- |
 | `prywatny` (domyślny) | tylko sprawy prywatne — tabela niżej; nie zamyka zadań |
 | `pelny` (od 2.5) | **wszystko jak Ty**: poczta firmowa i klienci, Bieżące sprawy, dokumenty, Twój WhatsApp i akta osób (8b.9), zamykanie zadań (`zrobione N`). Odpowiedzi idą na jej numer, z własnym porannym przeglądem i własną numeracją zadań. Powiadomienia systemowe (np. o błędach, wylogowaniu) trafiają tylko do Ciebie |
+| `asystent` (od 2.6) | **sprawy firmowe**: firmowe zadania (widzi, **dodaje**, zamyka, `szczegóły N`), kalendarz, poczta firmowa, notatki firmowe. Może **zadać Ci pytanie** (`pytanie: …` — dostajesz je na WhatsAppie, odpowiadasz `odpowiedz N: …`, a Sebastian odsyła odpowiedź) i **zgłaszać pomysły** na nowe funkcje (`pomysł: …`). Nie widzi spraw prywatnych, Twojego WhatsAppa, akt osób, dokumentów ani Bieżących spraw. O dodanych i zamkniętych zadaniach, pytaniach i pomysłach dostajesz wiadomość |
 
 Dostęp **prywatny** w szczegółach:
 
@@ -795,6 +797,18 @@ python sebastian.py wa-user usun 48500111222
 ```
 
 Bez pytań: `python sebastian.py wa-user dodaj 48500111222 --imie Kasia --wolacz Kasiu --kto żona --dostep pelny --przeglad tak --glos tak`. Po zmianie usługa przeładowuje się sama. Zmiana dostępu: `wa-user usun NUMER`, potem `wa-user dodaj` z nowym `--dostep`.
+
+**Asystent (2.6) — przykład:** `python sebastian.py wa-user dodaj 48XXXXXXXXX --imie "Jan Kisiel" --wolacz Janie --kto asystent --dostep asystent --przeglad nie --glos nie`
+
+Nowe komendy na WhatsAppie (2.6):
+
+| Komenda | Kto | Co robi |
+| --- | --- | --- |
+| `dodaj zadanie: … do 15.11` | Ty, pełny dostęp, asystent | zadanie od razu na liście w panelu (termin: `do 15.11`, `do jutra`, `do piątku`; Ty: `dodaj zadanie: prywatne: …`) |
+| `szczegóły 3` | Ty, pełny dostęp, asystent | skąd jest zadanie nr 3 (mail, nadawca, streszczenie, termin, komentarz) |
+| `pytanie: …` | asystent, rodzina, pełny dostęp | Sebastian przekazuje pytanie Tobie z numerem |
+| `pytania` · `odpowiedz 3: …` | Ty | lista otwartych pytań · odpowiedź wraca do pytającego (`odp: …` bez numeru, gdy pytanie jest jedno) |
+| `pomysł: …` | każdy z listy | zgłoszenie nowej funkcji / usprawnienia; lista: `pomysły` (Ty), panel → WhatsApp, `python sebastian.py wa-pomysly` |
 
 **Osoba z listy pisze, a Sebastian nie odpowiada (2.5.1):** `python sebastian.py wa-status`. Pokazuje osoby z listy (z dostępem i tym, czy Sebastian już się z nimi przywitał), ostrzega, gdy Sebastian jest połączony z Twoim numerem, a w linii „Odrzucone” wypisuje ostatnie wiadomości spoza listy — nazwę z profilu WhatsApp i zamaskowany numer, bez treści. Jeśli widzisz tam np. „Aga” z innym numerem niż na liście — dodaj właściwy numer. Napis „numer ukryty przez WhatsApp (LID)” oznacza, że WhatsApp nie podał numeru: niech Sebastian pierwszy napisze do tej osoby (dodanie przez `wa-user dodaj` + `wa-start` wysyła powitanie), potem WhatsApp zwykle podaje numer.
 
@@ -861,6 +875,73 @@ python sebastian.py wa-watch off         # wstrzymaj (dane zostają) · wa-watch
 | Brak „📱 WhatsApp od wczoraj” | `python sebastian.py wa-watch` — połączone? Zbieranie działa od chwili połączenia; `WA_WATCH_IN_BRIEF` |
 | „Straciłem wgląd w Twojego WhatsAppa” | Usunięte z Połączonych urządzeń albo telefon długo offline: `python sebastian.py wa-watch login` |
 | Inny głos | `python sebastian.py wa-voice pl_PL-gosia-medium` (kobiecy) albo `wa-set WA_VOICE_ENGINE say` i `wa-set WA_SAY_VOICE Zosia`; tempo: `wa-set WA_VOICE_SPEED 1.1` (wolniej) |
+
+---
+
+## 8c. Dodatki i Przypominacz (od 2.7)
+
+### 8c.1. Dodatki — po co i jak
+
+Nowe funkcje powstają jako **dodatki**, żeby nie rozbudowywać głównego kodu. Dodatek to folder:
+
+```
+dodatki/<id>/dodatek.json     opis (wbudowane, w repozytorium)
+dodatki/<id>/__init__.py      kod
+data/dodatki/<id>/            Twoje własne dodatki (tylko na Macu) oraz stan każdego dodatku: stan.sqlite3, ustawienia.json
+data/dodatki/wlaczone.json    co jest włączone
+```
+
+Układ jest ten sam co w Sebastianie 3, więc dodatki da się tam przenieść. Gniazdo (`dodatki_host.py`) woła trzy rzeczy:
+
+| Hak | Kiedy | Co zwraca dodatek |
+| --- | --- | --- |
+| `on_message(ctx, msg)` | wiadomość **od właściciela** (tekst albo przepisana głosówka), przed zwykłą odpowiedzią | tekst = odpowiedź zamiast zwykłej; `True` = obsłużone; `None` = nie moje |
+| `tick(ctx)` | w pętli usługi WhatsApp, najwyżej co `tik_co_sekund` sekund | — |
+| `COMMANDS = {"nazwa": funkcja}` | `python sebastian.py dodatek <id> <nazwa> …` | kod wyjścia |
+
+`msg` = `{"kind": "text"|"voice", "text", "voice": bool, "user"}`. `dodatek.json`: `id`, `nazwa`, `wersja`, `opis`,
+`uprawnienia`, `ustawienia` (wartości domyślne), `pomoc` (linie do „pomoc” na WhatsAppie), `polecenia`, `tik_co_sekund`,
+`domyslnie_wlaczony` (tylko wbudowane; Twoje są domyślnie wyłączone).
+
+Dodatek widzi Sebastiana wyłącznie przez `ctx`, a każda metoda sprawdza uprawnienie z manifestu:
+
+| Uprawnienie | Metody `ctx` |
+| --- | --- |
+| `whatsapp.wysylanie` | `send_text(tekst)`, `send_voice(tekst)` — tylko do właściciela |
+| `whatsapp.obserwacja` | `search_whatsapp(słowa, days)`, `people_context(tekst)` — tylko odczyt |
+| `poczta.odczyt` | `search_knowledge(pytanie)` — poczta, notatki, nauka (jak przy odpowiedziach) |
+| `kalendarz.odczyt` | `calendar(dzień)` — wydarzenia z początkiem i końcem |
+| `zadania.zapis` | `add_task(tekst)` — lista zadań w panelu |
+| `model` | `ask(prompt, as_json=True)` |
+| `telefon` | deklaracja, że dodatek dzwoni przez usługę zewnętrzną |
+| (zawsze) | `db()` własna baza, `settings()` / `set_setting()`, `secret()` / `set_secret()` (pęk kluczy macOS), `now()`, `in_quiet()`, `owner_name()`, `log` |
+
+Bezpieczeństwo: wyjątek w dodatku trafia do logu (`data/logs/whatsapp.log`, „Dodatek …”), a po 3 błędach z rzędu dodatek
+pauzuje 10 minut. Zepsuty manifest = dodatek wyłączony, z listą problemów w `python sebastian.py dodatki`.
+
+### 8c.2. Przypominacz
+
+Głosówka albo „przypomnij mi …” w ciągu dnia → potwierdzenie → kontekst w tle (poczta, notatki, nauka, Twój WhatsApp,
+kalendarz na tydzień) → **wieczorem po ostatnim spotkaniu** (koniec + `po_spotkaniu_minut`, w granicach `najwczesniej`–`najpozniej`
+i 15 minut przed ciszą nocną; bez spotkań `bez_spotkan`) wiadomość z listą i „telefon” (głosówka albo połączenie Twilio)
+→ odpowiedź (`1 zrobione`, `2 jutro`, `3 do zadań`, `4 usuń`, `1 o 21`, `wszystko jutro`, `ok`, albo swobodnie — model)
+→ bez odpowiedzi po `drugi_raz_po_minutach` drugi „telefon” → po `minka_po_minutach` „I co? Olewasz mnie :'(” → sprawy bez
+decyzji wracają następnego wieczoru. Sprawa nagrana już po spotkaniach wraca najwcześniej po `odstep_minut`, a gdy byłoby
+za późno — jutro. Termin powiedziany wprost („jutro”, „w piątek”, „o 16”, „za 2 godziny”) ma pierwszeństwo.
+
+Rozpoznawanie: słowa-klucze (przypomnij, pamiętaj, nie zapomnij, na później, na wieczór, odłóż, zanotuj…) albo — dla głosówek
+bez nich — lokalny model (`rozpoznawanie_modelem`). `zapamiętaj: …` zostaje zwykłą notatką Pamięci bota.
+
+Dane: `data/dodatki/przypominacz/stan.sqlite3` — `sprawy` (treść, nagranie, kontekst, termin, status: czeka /
+przypomniana / zrobione / zadanie / odrzucona), `sesje` (wieczorne przypomnienia i etapy), `historia` (każda zmiana — nic nie
+znika). Pełny opis, ustawienia i Twilio: `docs/aktualizacje/AKTUALIZACJA_2_7.md`.
+
+| Objaw | Działanie |
+| --- | --- |
+| Przypomnienie o złej godzinie | `python sebastian.py dodatek przypominacz dzis` — czy kalendarz w panelu jest aktualny (zakładka Kalendarze) |
+| Głosówka potraktowana jak przypomnienie (albo odwrotnie) | `… przypominacz sprawdz "treść"`; skreśl: `4 usuń`; mniej zgadywania: `ustaw rozpoznawanie_modelem nie` |
+| Nic nie przyszło wieczorem | `wa-status` (usługa, linia „Dodatki”), `… przypominacz lista`, log: `grep Dodatek data/logs/whatsapp.log` |
+| Twilio nie dzwoni | `… przypominacz telefon test`; konto próbne dzwoni tylko na zweryfikowany numer; przy błędzie idzie głosówka |
 
 ---
 
@@ -944,11 +1025,13 @@ sebastian-start/
 ├── whatsapp_link.py          WhatsApp: połączenie (neonize), filtr właściciela i rodziny
 ├── whatsapp_watch.py         WhatsApp: obserwacja Twojego konta — podsumowania, komu odpisać (od 2.4)
 ├── whatsapp_web.py           zakładka WhatsApp
+├── dodatki_host.py           gniazdo na dodatki (od 2.7)
+├── dodatki/przypominacz/     dodatek Przypominacz: dodatek.json, __init__.py, telefon.py (od 2.7)
 ├── openwebui_tool.py         narzędzie Open WebUI „moje sprawy”
 ├── openwebui_memory_tool.py  narzędzie Open WebUI „pamięć”
 ├── rollback.py               PRZESTARZAŁE (1.3) — nie używać, patrz 15.6
 ├── templates/  static/       panel (HTML, JS)
-├── test_sebastian.py  test_learner.py  test_docs.py  test_whatsapp.py
+├── test_sebastian.py  test_learner.py  test_docs.py  test_whatsapp.py  test_dodatki.py
 ├── requirements*.txt  install.command  start.command   (requirements-whatsapp.txt — od 2.3)
 ├── README.md  DOKUMENTACJA.md  ZACZNIJ_TUTAJ.txt
 └── docs/
@@ -986,6 +1069,7 @@ sebastian-start/
         ├── dokumenty.sqlite3       postęp i odczyt każdej strony 🔒
         ├── wrzuc-tutaj/            folder do wrzucania skanów z Findera
         └── 0001-<nazwa>/           oryginal.pdf, skan.pdf, …_opracowanie.pdf, odczyt.md (rozdział 8a.6)
+    ├── dodatki/                    (od 2.7) stan i ustawienia dodatków, Twoje dodatki 🔒
     └── whatsapp/                   (od 2.3) 🔒
         ├── whatsapp.json           ustawienia WA_*
         ├── whatsapp.sqlite3        kolejka, rozmowa, przeglądy 🔒
@@ -1135,9 +1219,23 @@ Każde polecenie uruchamiaj w folderze `sebastian-start` z aktywnym `.venv`: `py
 | `wa-voice [NAZWA]` | Pobierz głos Piper (domyślnie `pl_PL-darkman-medium`; np. `pl_PL-gosia-medium`) |
 | `wa-settings` / `wa-set KLUCZ WARTOŚĆ` | Ustawienia `WA_*` (12.3) |
 | `wa-logout` | Odłącz Sebastiana od WhatsAppa i usuń sesję |
-| `wa-user [lista\|dodaj\|usun] [NUMER]` | (2.4) Lista dozwolonych numerów: kto jeszcze może pisać do Sebastiana, z osobnym przeglądem; `--dostep prywatny\|pelny` (2.5) |
+| `wa-user [lista\|dodaj\|usun] [NUMER]` | (2.4) Lista dozwolonych numerów: kto jeszcze może pisać do Sebastiana, z osobnym przeglądem; `--dostep prywatny\|asystent\|pelny` (2.5, asystent 2.6) |
+| `wa-pomysly` | (2.6) Pomysły i otwarte pytania z WhatsAppa — do skopiowania |
 | `wa-watch [status\|login\|podsumowanie\|ludzie\|off\|on\|usun]` | (2.4) Obserwacja Twojego WhatsAppa: połączenie (QR / `--kod`), podsumowanie (`--godzin N`), odświeżenie akt osób (2.5), wstrzymanie, usunięcie danych |
 | `wa-run` | Pętla usługi na pierwszym planie (normalnie uruchamia ją launchd) |
+
+### 11.6. Dodatki (od 2.7)
+
+| Polecenie | Co robi |
+| --- | --- |
+| `dodatki [lista\|wlacz\|wylacz] [ID]` | Lista dodatków z uprawnieniami i poleceniami; włączenie / wyłączenie (potem `wa-start`) |
+| `dodatek przypominacz lista` | Co czeka na przypomnienie, ostatnie przypomnienia |
+| `dodatek przypominacz dzis` | Kalendarz na dziś i godzina wieczornego przypomnienia |
+| `dodatek przypominacz sprawdz "tekst"` | Próba bez zapisu: czy to prośba o przypomnienie i jakie sprawy |
+| `dodatek przypominacz dodaj "tekst"` | Dodaj sprawę z Terminala (potwierdzenie przychodzi na WhatsAppa) |
+| `dodatek przypominacz teraz` | Przypomnij od razu (próba całego wieczoru) |
+| `dodatek przypominacz telefon [test\|wylacz]` | Prawdziwe dzwonienie przez Twilio (token w pęku kluczy) |
+| `dodatek przypominacz ustawienia` / `ustaw KLUCZ WARTOŚĆ` / `historia` | Ustawienia i historia zmian |
 
 ---
 
@@ -1518,6 +1616,8 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2, 2.3):
 | 2.1.3 | 19.10.2026 | Wygaśnięcie logowania do Dysku: jeden komunikat zamiast wpisu przy każdym wątku, baner w panelu, polecenie `learn-drive` z wyborem (zaloguj ponownie / wyłącz Dysk) |
 | 2.2 | 19.10.2026 | **Dokumenty**: duże skany (druk, maszynopis, pismo ręczne, Grundbuch) → mały PDF ze spisem treści i linkami; model wizyjny z podwójnym czytaniem pisma, wpisy KW wg działów z weryfikacją cytatów, sprawdzanie i poprawki stron w panelu, praca wznawialna w tle (1–2 dni), przekazanie do nauki; polecenia `doc-*`, sekcja „6. Dokumenty” w `check` |
 | 2.3 | 20.10.2026 | **WhatsApp**: poranny przegląd z głosówką („Hej Andrzej!”, polski głos Piper, lokalnie), rozmowa i komendy (zadania, zrobione N, pilne, poczta, kalendarz, dokumenty, zapamiętaj, cisza), rozumienie głosówek (mlx-whisper), powiadomienia z ciszą nocną, opcjonalnie wieczór i tydzień; zakładka WhatsApp, polecenia `wa-*`, sekcja „7. WhatsApp” w `check` |
+| 2.6 | 3.11.2026 | **Asystent na WhatsAppie**: rola `asystent` (sprawy firmowe), dodawanie zadań z WhatsAppa (od razu w panelu, z terminem), `szczegóły N`, pytania do właściciela z odsyłaniem odpowiedzi, zgłaszanie pomysłów (panel, `wa-pomysly`), powiadomienia o działaniach asystenta |
+| 2.7 | 9.11.2026 | **Dodatki** (gniazdo `dodatki_host.py`, układ jak w Sebastianie 3) i pierwszy dodatek **Przypominacz**: głosówka „na później” → potwierdzenie → kontekst z poczty i WhatsAppa → wieczorem po ostatnim spotkaniu wiadomość i głos (albo połączenie Twilio) → drugi raz po godzinie → minka; odpowiedzi regułami i modelem; polecenia `dodatki`, `dodatek` |
 | 2.5.2 | 20.10.2026 | Poprawka nauki z rozmów WhatsApp: w procesie nauki moduł WhatsAppa nie był podłączony (`AttributeError: 'NoneType' object has no attribute 'TZ'` co 2 minuty i zablokowana kolejka). Dodatkowo: pozycja, która 3 razy z rzędu kończy się błędem, dostaje status „błąd” i nauka idzie dalej (`learn-retry` przywraca) |
 | 2.5.1 | 20.10.2026 | Diagnostyka „żona pisze, a Sebastian milczy”: odrzucone numery w logu i w `wa-status` (nazwa profilu, zamaskowany numer, bez treści, raz na godzinę), ostrzeżenie, gdy Sebastian jest na numerze właściciela, a lista zawiera inne osoby; w `wa-status` poziom dostępu i czy osoba została przywitana |
 | 2.5 | 20.10.2026 | **WhatsApp — pamięć rozmów i dostęp pełny**: rozmowy przechowywane na stałe, czytanie załączników (PDF, Office, OCR zdjęć — także wysłanych przez Ciebie), zapis historii przesłanej przy połączeniu, akta osób (`kto to Jan`, `wa-watch ludzie`, panel), nauka z rozmów (zakres `whatsapp`, bez Open WebUI); lista dozwolonych numerów z poziomem dostępu `prywatny`/`pelny` (`wa-user dodaj --dostep pelny`) |

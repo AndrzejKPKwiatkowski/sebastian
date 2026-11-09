@@ -1,0 +1,43 @@
+{
+  "id": "przypominacz",
+  "nazwa": "Przypominacz — odkładanie spraw na wieczór",
+  "wersja": "1.0.0",
+  "rdzen": "2.7",
+  "opis": "Nagrywasz głosówkę w trakcie innej pracy („przypomnij mi…”) — Sebastian potwierdza, szuka kontekstu w poczcie i na WhatsAppie, a wieczorem po ostatnim spotkaniu z kalendarza przypomina wiadomością i głosem. Bez odpowiedzi: po godzinie drugi raz, potem smutna minka.",
+  "domyslnie_wlaczony": true,
+  "tik_co_sekund": 20,
+  "uprawnienia": ["whatsapp.wysylanie", "whatsapp.obserwacja", "poczta.odczyt", "kalendarz.odczyt", "zadania.zapis", "model", "telefon"],
+  "pomoc": [
+    "*przypomnij mi …* (albo głosówka) — odkładam sprawę na wieczór, po Twoim ostatnim spotkaniu",
+    "*przypomnienia* — co czeka · *przypomnij teraz* — przypomnij od razu",
+    "po przypomnieniu: *1 zrobione* · *2 jutro* · *3 do zadań* · *4 usuń* · *1 o 21* · *wszystko jutro* — albo po prostu napisz lub nagraj, co postanowiłeś"
+  ],
+  "polecenia": [
+    {"nazwa": "lista", "opis": "Sprawy czekające na przypomnienie i ostatnie przypomnienia."},
+    {"nazwa": "dzis", "opis": "Dzisiejszy kalendarz i godzina wieczornego przypomnienia."},
+    {"nazwa": "sprawdz", "opis": "Próba bez zapisu: czy ten tekst to prośba o przypomnienie, np. sprawdz \"przypomnij mi o fakturze\"."},
+    {"nazwa": "dodaj", "opis": "Dodaje sprawę tak, jakby przyszła głosówką (z potwierdzeniem na WhatsAppie)."},
+    {"nazwa": "teraz", "opis": "Przypomnij od razu (próba całego wieczornego przebiegu)."},
+    {"nazwa": "telefon", "opis": "Ustawienie prawdziwego dzwonienia przez Twilio (opcjonalne)."},
+    {"nazwa": "ustawienia", "opis": "Pokazuje ustawienia dodatku."},
+    {"nazwa": "ustaw", "opis": "Zmienia ustawienie, np. ustaw bez_spotkan 18:30"},
+    {"nazwa": "historia", "opis": "Co się działo ze sprawami (nic nie znika)."}
+  ],
+  "ustawienia": {
+    "po_spotkaniu_minut": 15,
+    "najwczesniej": "17:00",
+    "bez_spotkan": "18:00",
+    "najpozniej": "21:30",
+    "odstep_minut": 60,
+    "drugi_raz_po_minutach": 60,
+    "minka_po_minutach": 15,
+    "minka": "I co? Olewasz mnie :'(",
+    "dzwonek": "glosowka",
+    "rozpoznawanie_modelem": true,
+    "kontekst_dni": 45,
+    "wolacz": "",
+    "twilio_sid": "",
+    "twilio_numer": "",
+    "twilio_glos": "Polly.Jacek"
+  }
+}

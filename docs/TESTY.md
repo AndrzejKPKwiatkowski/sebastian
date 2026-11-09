@@ -180,3 +180,51 @@ Data: 2026-10-20. Wynik: 78 testów zaliczonych.
 - Pętla nauki: pozycja z trzema błędami z rzędu dostaje status „błąd” zamiast blokować kolejkę (sprawdzone przeglądem kodu; `learn-retry` przywraca pozycje z błędem).
 
 Lekcja: test nauki z rozmów uruchamiał się w procesie, w którym WhatsApp był już podłączony — dlatego nie wykrył błędu. Test odtwarza teraz warunki osobnego procesu.
+
+
+# Weryfikacja 2.6 — asystent na WhatsAppie
+
+Data: 2026-11-03. Wynik: **84 testy zaliczone** (6 nowych w `test_whatsapp.py`).
+
+- **Zakres asystenta:** widzi zadania firmowe, nie widzi prywatnych; „whatsapp” i „dokumenty” odmówione; model dostaje
+  „dane wyłącznie z FIRMOWEJ poczty”; notatka `zapamiętaj:` trafia do Pamięci bota jako firmowa; powitanie „Cześć, Janie!”
+  z opisem roli. Numer podany ze spacjami i bez kierunkowego zapisany w pełnej postaci (48…).
+- **Zadania z WhatsAppa:** `dodaj zadanie: … do piątku` → wiersz w panelu (zakres firmowy, kategoria „termin”, termin
+  w najbliższy piątek), widoczny w `zadania`, `szczegóły N` pokazuje autora, `zrobione N` zamyka; właściciel dostaje
+  wiadomości „dodał zadanie” i „zamknął zadanie”. `dodaj zadanie: prywatne: …` (właściciel) → zadanie prywatne,
+  niewidoczne dla asystenta. Rodzina nie może dodawać zadań. Panel (funkcja `enriched`) czyta takie zadanie poprawnie.
+- **Terminy:** 15.11, 05.01.2027, 10.01 (→ przyszły rok), „do jutra”, „na piątek”; „do Kowalskiej” nie jest terminem.
+- **Pytania:** pytanie z numerem trafia do właściciela, `pytania` je pokazuje, `odpowiedz 1: …` wraca do pytającego,
+  `odp: …` bez numeru przy jednym otwartym pytaniu.
+- **Pomysły:** zgłoszenie od asystenta → wiadomość do właściciela; własny pomysł właściciela bez powiadomienia;
+  `pomysły` tylko dla właściciela; `wa-pomysly` w Terminalu; panel pokazuje pytania i pomysły.
+- Poprawiony test rodziny, który miał wpisaną na sztywno datę 20.10 i od 21.10 przestał przechodzić (błąd testu, nie programu).
+
+
+# Weryfikacja 2.7 — dodatki i Przypominacz
+
+Data: 2026-11-09. Wynik: **100 testów zaliczonych** (16 nowych w `test_dodatki.py`). Bez WhatsAppa, Ollamy i Twilio
+(udawane), z prawdziwym kalendarzem ICS w bazie i zegarem przesuwanym w teście.
+
+- **Gniazdo:** Przypominacz wykryty i domyślnie włączony; „pomoc” pokazuje dodatki; wyłączenie działa; zepsuty dodatek
+  (nieznane uprawnienie, błąd w kodzie) jest wyłączony z opisem problemu i nie psuje reszty; Twój dodatek domyślnie
+  wyłączony, po włączeniu odpowiada; brak uprawnienia → błąd, po 3 błędach pauza; kalendarz podaje początek i koniec spotkań.
+- **Godzina:** spotkania 10–11 i 16–17:30 → 17:45; bez spotkań 18:00; spotkanie rano → 17:00; spotkanie do 23 → 21:30;
+  nagrane o 18:30 → dziś (19:30), o 21:00 → jutro. Terminy wprost: jutro, „o 16”, „o 9:30” (→ jutro), „za 2 godziny”,
+  „za pół godziny”, „w piątek o 10”.
+- **Rozpoznanie:** „Sebastian, przypomnij mi, żeby oddzwonić…” bez modelu → „Oddzwonić do pani Kowalskiej w sprawie umowy”
+  i bez zwykłej odpowiedzi; głosówka bez słowa „przypomnij” → model dzieli na dwie sprawy; pytanie głosowe → zwykła
+  odpowiedź; zwykły tekst i „zapamiętaj:” nie są przypomnieniem.
+- **Cały wieczór:** kontekst z WhatsAppa w tle; o 17:40 nic, o 17:45 wiadomość z „↳ kontekstem” i głos „Hej Andrzeju!
+  … Masz jedną sprawę…”; po 61 min „Andrzej, przypominam”; po kolejnych 16 min minka — dokładnie raz; następnego dnia
+  sprawa wraca wieczorem z dopiskiem „czeka od wczoraj”.
+- **Odpowiedzi:** „1 zrobione, 2 jutro” (a 3 czeka — bez drugiego telefonu), „3 do zadań” → zadanie w panelu; swobodne
+  zdanie głosem → model: „po kolacji” = 20:30, „już ktoś kupił” = skreślone; pytanie z liczbą w trakcie przypomnienia →
+  zwykła odpowiedź; „ok” kończy dzwonienie; reguły dla 10 wariantów zapisu.
+- **Komendy:** `przypomnienia`, `przypomnij teraz`; drugi telefon w ciszy nocnej pominięty (bez minki).
+- **Twilio:** połączenie na numer właściciela z polskim głosem zamiast głosówki; drugie nieodebrane → od razu minka;
+  brak tokenu → głosówka; niezałatwione sprawy dołączają do kolejnego przypomnienia.
+- **Polecenia w Terminalu:** `dzis`, `sprawdz`, `dodaj`, `lista`, `ustaw`, `historia`.
+
+Nie sprawdzono tu: prawdziwego WhatsAppa i głosu na Macu, jakości rozpoznawania przez qwen2.5 na prawdziwych głosówkach,
+prawdziwego Twilio.

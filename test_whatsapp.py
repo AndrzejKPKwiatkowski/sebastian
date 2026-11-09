@@ -1,5 +1,5 @@
 """Testy modułu WhatsApp (Sebastian 2.3). Bez WhatsAppa, bez Ollamy — model i połączenie są udawane."""
-import contextlib, datetime as dt, json, os, pathlib, queue, re, shutil, tempfile, time, unittest
+import contextlib, io, datetime as dt, json, os, pathlib, queue, re, shutil, tempfile, time, unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -326,7 +326,7 @@ class FamilyTests(Base):
 
     def test_family_brief_welcome_and_routing(self):
         tz = s.TZ
-        at = dt.datetime.combine(dt.date(2026, 10, 20), dt.time(7, 5), tz)
+        at = dt.datetime.combine(W.now().date(), dt.time(7, 5), tz)          # dziś (wcześniej stała data — test „starzał się”)
         t = W.FileTransport()
         t.start()
         with self.con() as con, patch.object(W, "morning_running", lambda: False):
@@ -394,6 +394,143 @@ class FullAccessTests(Base):
             self.assertFalse(con.execute("SELECT 1 FROM inbox WHERE wa_id='X2'").fetchone())   # spoza listy — ignorowany
         with patch.object(W, "agent_loaded", lambda: False), self.assertRaises(RuntimeError):
             W.cmd_user("dodaj", "48555666777", "X", "X", "", "nie", "nie", "admin")
+
+
+ASSISTANT = "48777000111"
+
+
+class AssistantTests(Base):
+    """2.6: asystent (np. Jan Kisiel) — sprawy firmowe, dodaje i zamyka zadania, pyta właściciela, zgłasza pomysły."""
+    def setUp(self):
+        super().setUp()
+        with patch.object(W, "agent_loaded", lambda: False):
+            W.cmd_user("dodaj", "777 000 111", "Jan Kisiel", "Janie", "asystent", "nie", "nie", "asystent")
+        self.jan = W.user_by_phone(ASSISTANT)
+        with contextlib.closing(s.db()) as c:       # prywatne zadanie — asystent nie może go widzieć
+            r = c.execute("SELECT id FROM messages WHERE scope='private' LIMIT 1").fetchone()
+            c.execute("UPDATE messages SET is_task=1, status='open', decided_at=?, task_title='Opłacić przedszkole' WHERE id=?",
+                      (s.now(), r["id"]))
+            c.commit()
+
+    def outbox(self, con, purpose_like):
+        return [dict(r) for r in con.execute("SELECT * FROM outbox WHERE purpose LIKE ? ORDER BY id", (purpose_like,))]
+
+    def test_scope_and_help(self):
+        self.assertEqual((self.jan["role"], self.jan["name"]), ("asystent", "Jan Kisiel"))
+        self.assertFalse(W.full(self.jan))
+        prompts = []
+
+        def spy(prompt, **k):
+            prompts.append(prompt)
+            return "OK."
+        with self.con() as con, patch.object(W, "ask", spy):
+            tasks = W.handle(con, "zadania", user=self.jan)[0]
+            self.assertIn("Potwierdzić dokumenty", tasks)                 # firmowe — tak
+            self.assertNotIn("przedszkole", tasks)                        # prywatne — nie
+            self.assertIn("szczegóły 2", tasks)
+            self.assertIn("dodaj zadanie", W.handle(con, "pomoc", user=self.jan)[0])
+            self.assertIn("tylko", W.handle(con, "whatsapp", user=self.jan)[0])      # Twój WhatsApp — nie
+            self.assertIn("tylko", W.handle(con, "dokumenty", user=self.jan)[0])
+            W.handle(con, "Co z dokumentami do spotkania?", user=self.jan)
+            self.assertIn("FIRMOWEJ poczty", prompts[-1])
+            self.assertIn("Rozmawiasz z Jan Kisiel", prompts[-1])
+            self.assertIn("firmowe", W.handle(con, "zapamiętaj: klient X woli telefon", user=self.jan)[0])
+        with W.as_user(self.jan):
+            self.assertEqual(W.allowed_scopes(), ["work"])
+        with contextlib.closing(s.db()) as c:
+            self.assertEqual(c.execute("SELECT scope FROM knowledge_notes WHERE body LIKE 'Od Jan Kisiel%'").fetchone()[0], "work")
+        t = W.FileTransport()
+        t.start()
+        with self.con() as con, patch.object(W, "due_kind", lambda con: None), patch.object(W, "due_family", lambda con: []):
+            W.tick(con, t, queue.Queue(), {"beat": 0})
+            body = con.execute("SELECT body FROM outbox WHERE purpose='welcome' AND to_phone=?", (ASSISTANT,)).fetchone()[0]
+            self.assertIn("Cześć, Janie!", body)
+            self.assertIn("sprawach firmowych", body)
+
+    def test_add_details_and_close_tasks(self):
+        today = W.now().date()
+        with self.con() as con:
+            reply = W.handle(con, "Dodaj zadanie: wysłać ofertę Vienna do pani Kowalskiej do piątku", user=self.jan)[0]
+            self.assertIn("✓ Dodane do zadań: wysłać ofertę Vienna do pani Kowalskiej — termin", reply)
+            note = self.outbox(con, "relay:zadanie")[-1]
+            self.assertEqual(note["to_phone"], "")                      # do właściciela
+            self.assertIn("Jan Kisiel dodał zadanie", note["body"])
+            tasks = W.handle(con, "zadania", user=self.jan)[0]
+            self.assertIn("wysłać ofertę Vienna", tasks)
+            n = next(i for i, line in enumerate(tasks.splitlines()) if "Vienna" in line)
+            details = W.handle(con, f"szczegóły {n}", user=self.jan)[0]
+            self.assertIn("Dodane na WhatsAppie przez: Jan Kisiel", details)
+            self.assertIn("✓ Zrobione", W.handle(con, f"zrobione {n}", user=self.jan)[0])
+            self.assertIn("zamknął zadanie", self.outbox(con, "relay:zadanie")[-1]["body"])
+            self.assertIn("✓ Dodane do zadań prywatnych", W.handle(con, "dodaj zadanie: prywatne: kupić prezent do jutra")[0])
+        with contextlib.closing(s.db()) as c:
+            row = c.execute("SELECT * FROM messages WHERE source='whatsapp' AND task_title LIKE 'wysłać ofertę%'").fetchone()
+            self.assertEqual((row["scope"], row["status"], row["is_task"]), ("work", "done", 1))
+            due = json.loads(row["analysis"])["due"]
+            self.assertEqual(dt.date.fromisoformat(due).weekday(), 4)  # piątek
+            self.assertGreater(dt.date.fromisoformat(due), today)
+            private = c.execute("SELECT scope FROM messages WHERE task_title='kupić prezent'").fetchone()
+            self.assertEqual(private["scope"], "private")
+            rec = s.enriched(c, row)                                     # panel umie pokazać takie zadanie
+            self.assertEqual(rec["category"], "termin")
+        with self.con() as con:
+            self.assertNotIn("kupić prezent", W.handle(con, "zadania", user=self.jan)[0])   # prywatne — niewidoczne
+            with patch.object(W, "agent_loaded", lambda: False):
+                W.cmd_user("dodaj", "48500999888", "Kasia", "Kasiu", "żona", "nie", "nie", "prywatny")
+            self.assertIn("Zadania może dodawać", W.handle(con, "dodaj zadanie: coś", user=W.user_by_phone("48500999888"))[0])
+
+    def test_parse_due(self):
+        today = dt.date(2026, 11, 3)                                     # wtorek
+        self.assertEqual(W.parse_due("wysłać ofertę do 15.11", today), ("wysłać ofertę", dt.date(2026, 11, 15)))
+        self.assertEqual(W.parse_due("raport do 05.01.2027", today), ("raport", dt.date(2027, 1, 5)))
+        self.assertEqual(W.parse_due("raport do 10.01", today)[1], dt.date(2027, 1, 10))   # styczeń = przyszły rok
+        self.assertEqual(W.parse_due("zadzwonić do jutra", today)[1], dt.date(2026, 11, 4))
+        self.assertEqual(W.parse_due("spotkanie na piątek", today)[1], dt.date(2026, 11, 6))
+        self.assertEqual(W.parse_due("zadzwonić do Kowalskiej", today), ("zadzwonić do Kowalskiej", None))
+
+    def test_questions_relay(self):
+        with self.con() as con:
+            reply = W.handle(con, "Pytanie: czy pani Kowalska ma dostać ofertę w PDF?", user=self.jan)[0]
+            self.assertIn("pytanie nr 1", reply)
+            to_owner = self.outbox(con, "relay:pytanie")[-1]
+            self.assertEqual(to_owner["to_phone"], "")
+            self.assertIn("Jan Kisiel pyta", to_owner["body"])
+            self.assertIn("odpowiedz 1", to_owner["body"])
+            self.assertIn("Jan Kisiel: czy pani Kowalska", W.handle(con, "pytania")[0])
+            self.assertIn("✓ Wysłane do Jan Kisiel", W.handle(con, "odpowiedz 1: Tak, PDF i link do podpisu.")[0])
+            back = self.outbox(con, "relay:odpowiedz")[-1]
+            self.assertEqual(back["to_phone"], ASSISTANT)
+            self.assertIn("Tak, PDF i link do podpisu.", back["body"])
+            self.assertIn("Nie ma pytań", W.handle(con, "pytania")[0])
+            W.handle(con, "zapytaj Andrzeja: a termin?", user=self.jan)
+            self.assertIn("✓ Wysłane", W.handle(con, "odp: do piątku")[0])        # jedno otwarte — bez numeru
+            self.assertNotIn("Wysłane", W.handle(con, "pytanie: x y z")[0])       # właściciel nie pyta sam siebie
+
+    def test_ideas(self):
+        with self.con() as con:
+            self.assertIn("pomysł nr 1", W.handle(con, "Pomysł: przypominanie o urodzinach klientów", user=self.jan)[0])
+            self.assertIn("zgłasza pomysł", self.outbox(con, "relay:pomysl")[-1]["body"])
+            self.assertIn("pomysł nr 2", W.handle(con, "pomysł: raport tygodniowy dla zespołu")[0])
+            self.assertEqual(len(self.outbox(con, "relay:pomysl")), 1)            # własny pomysł — bez powiadomienia
+            listing = W.handle(con, "pomysły")[0]
+            self.assertIn("urodzinach klientów", listing)
+            self.assertIn("Listę pomysłów widzi", W.handle(con, "pomysły", user=self.jan)[0])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            W.cmd_ideas()
+        self.assertIn("raport tygodniowy", out.getvalue())
+
+    def test_panel_shows_questions_and_ideas(self):
+        with self.con() as con:
+            W.handle(con, "pytanie: czy dzwonić do klienta?", user=self.jan)
+            W.handle(con, "pomysł: eksport zadań do Excela", user=self.jan)
+        app = s.make_app()
+        c = app.test_client()
+        c.post("/login", data={"token": (s.DATA / "panel.token").read_text()}, base_url=BASE)
+        html = c.get("/whatsapp", base_url=BASE).get_data(as_text=True)
+        self.assertIn("eksport zadań do Excela", html)
+        self.assertIn("czy dzwonić do klienta?", html)
+        self.assertIn("asystent — sprawy firmowe", html)
 
 
 class WatchTests(Base):
