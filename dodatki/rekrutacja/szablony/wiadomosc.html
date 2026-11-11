@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="small"><a href="{{ url_for('replies') }}">‹ Wróć</a></p>
+<h1>{{ m.firma or m.od_nazwa or m.od }}</h1>
+<p class="soft">{{ KINDS.get(m.rodzaj, m.rodzaj) }} · {{ m.data|dzien }}{% if m.stanowisko %} · {{ m.stanowisko }}{% endif %}{% if m.aplikacja_id %} · <a href="{{ url_for('detail', aid=m.aplikacja_id) }}">aplikacja</a>{% endif %}</p>
+{% if m.streszczenie %}<div class="note info">{{ m.streszczenie }}{% if m.termin %}<br><b>Termin:</b> {{ m.termin }}{% endif %}</div>{% endif %}
+
+<div class="card"><h2>Wiadomość</h2>
+  <p class="small soft">Od: {{ m.od_nazwa }} &lt;{{ m.od }}&gt; · Temat: {{ m.temat }}</p>
+  <div style="white-space:pre-wrap">{{ m.tresc }}</div></div>
+
+{% set open_q = qs|selectattr('status', 'equalto', 'otwarte')|list %}
+{% if open_q %}
+<div class="card"><h2>Potrzebuję Twojej odpowiedzi</h2>
+  <p class="soft small">Nie znalazłem tego w Twoich danych, więc nie zgaduję. Odpisz krótko, a ja przygotuję wiadomość.</p>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="pytania">
+    {% for q in open_q %}<label>{{ q.pytanie }}</label><textarea name="q{{ q.id }}" rows="2" style="min-height:60px"></textarea>{% endfor %}
+    <label class="check"><input type="checkbox" name="zapamietaj" value="1" checked> Zapamiętaj odpowiedzi na przyszłość</label>
+    <div class="actions"><button class="btn">Przygotuj odpowiedź</button></div></form></div>
+{% endif %}
+
+{% if m.szkic and not open_q and not m.wyslano %}
+<div class="card"><h2>Twoja odpowiedź</h2>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    <textarea name="szkic" rows="12">{{ m.szkic }}</textarea>
+    <p class="small soft">Pójdzie z Twojej skrzynki, w tym samym wątku. Popraw, co chcesz.</p>
+    <div class="actions"><button class="btn big" name="co" value="wyslij">Wyślij odpowiedź</button>
+      <button class="btn plain" name="co" value="zalatwione">Odpowiem sama, oznacz jako załatwione</button></div></form></div>
+{% elif m.wyslano == 'wysylanie' %}<div class="note">Wysyłam albo wysyłka została przerwana — sprawdź w Gmailu (Wysłane).</div>
+{% elif m.wyslano %}<div class="note ok">Odpowiedź wysłana {{ m.wyslano|dzien }}.</div>
+{% elif m.status == 'nowa' %}
+<form method="post" class="actions"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="btn ghost" name="co" value="zalatwione">Oznacz jako załatwione</button></form>
+{% endif %}
+
+<details><summary>Źle rozpoznałem rodzaj wiadomości?</summary>
+  <form method="post" class="row" style="grid-template-columns:2fr 1fr;margin-top:10px"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="rodzaj">
+    <select name="rodzaj">{% for k, v in KINDS.items() %}<option value="{{ k }}" {{ 'selected' if m.rodzaj == k }}>{{ v }}</option>{% endfor %}</select>
+    <button class="btn ghost">Zmień</button></form></details>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block nav %}{% endblock %}
+{% block body %}
+<div class="hero">
+  <div class="dots">{% for s in STEPS %}<i class="{{ 'on' if loop.index == k else ('done' if loop.index < k) }}" title="{{ s }}"></i>{% endfor %}</div>
+  {% if error %}<div class="note err">{{ error }}</div>{% endif %}
+  <form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf() }}">
+
+  {% if k == 1 %}
+    <h1>Cześć, Ago</h1>
+    <p class="lead">Od dziś Sebastian pomaga Ci szukać pracy. Zanim zacznie, przejdziemy razem przez kilka krótkich kroków.</p>
+    <div class="card">
+      <h3>Co Sebastian będzie robił</h3>
+      <ol class="steps">
+        <li>Sam poszuka ofert w Krakowie, okolicy i zdalnie, a słabo pasujące odrzuci.</li>
+        <li>Do każdej oferty przygotuje CV i list przewodni dopasowane do ogłoszenia.</li>
+        <li>Napisze tylko to, co jest prawdą. Korzysta wyłącznie z danych, które za chwilę potwierdzisz.</li>
+        <li>Wyśle aplikację z Twojej skrzynki dopiero, gdy klikniesz „Zatwierdź”.</li>
+        <li>Przeczyta odpowiedzi pracodawców i da Ci znać tylko o tych ważnych. Zaproszenie na rozmowę zobaczysz od razu na WhatsAppie.</li>
+        <li>Każdego wieczora prześle Ci krótkie podsumowanie dnia.</li>
+      </ol>
+      <p class="small soft">Całość zajmie około 10 minut. Możesz przerwać w dowolnym momencie i wrócić później.</p>
+    </div>
+    <div class="actions" style="justify-content:center"><button class="btn big">Zaczynamy</button></div>
+
+  {% elif k == 2 %}
+    <h1>Twoja skrzynka</h1>
+    <p class="lead">Z niej pójdą aplikacje i na nią przyjdą odpowiedzi od pracodawców.</p>
+    <div class="card">
+      {% if me %}<div class="note ok">Podłączona: {{ me }}. Możesz przejść dalej albo podłączyć ją ponownie.</div>{% endif %}
+      {% set adres = me or f.osoba.email or 'pf.agnieszka.dolna@gmail.com' %}{% include "_skrzynka.html" %}
+    </div>
+    <div class="actions"><button class="btn plain" name="wstecz" value="1" formnovalidate>Wstecz</button><span style="flex:1"></span><button class="btn big">Sprawdź i dalej</button></div>
+
+  {% elif k == 3 %}
+    <h1>Skrzynka Sebastiana</h1>
+    <p class="lead">Z tego adresu Sebastian będzie wysyłał Ci raport wieczorny i pilne wiadomości, żeby nie mieszały się z Twoją pocztą.</p>
+    <div class="card">
+      {% if seb_ok %}<div class="note ok">Podłączona: {{ seb }}.</div>{% endif %}
+      {% set adres = seb %}{% include "_skrzynka.html" %}
+      <p class="small soft" style="margin-top:12px">Hasło aplikacji dla tej skrzynki zwykle ma Andrzej. Jeśli go teraz nie masz, pomiń ten krok. Raport przyjdzie wtedy z Twojej własnej skrzynki.</p>
+    </div>
+    <div class="actions"><button class="btn plain" name="wstecz" value="1" formnovalidate>Wstecz</button><span style="flex:1"></span>
+      <button class="btn ghost" name="pomin" value="1" formnovalidate>Pomiń na razie</button><button class="btn big">Sprawdź i dalej</button></div>
+
+  {% elif k == 4 %}
+    <h1>Twoje dane</h1>
+    <p class="lead">Przepisałem je z Twojego CV. Sprawdź, czy wszystko się zgadza. Tylko z tych danych będę korzystał.</p>
+    <div class="card">{% include "_dane.html" %}</div>
+    <div class="actions"><button class="btn plain" name="wstecz" value="1" formnovalidate>Wstecz</button><span style="flex:1"></span><button class="btn big">Zgadza się, dalej</button></div>
+
+  {% elif k == 5 %}
+    <h1>Narzędzia i umiejętności</h1>
+    <p class="lead">Pracodawcy często o to pytają. Zaznacz tylko to, czego naprawdę używasz.</p>
+    <div class="card">{% include "_narzedzia.html" %}</div>
+    <div class="actions"><button class="btn plain" name="wstecz" value="1" formnovalidate>Wstecz</button><span style="flex:1"></span><button class="btn big">Dalej</button></div>
+
+  {% elif k == 6 %}
+    <h1>Czego szukasz</h1>
+    <p class="lead">Na tej podstawie ocenię, które oferty do Ciebie pasują, i ostrzegę przed tymi, które tylko udają pracę biurową.</p>
+    <div class="card">{% include "_kryteria.html" %}</div>
+    <div class="actions"><button class="btn plain" name="wstecz" value="1" formnovalidate>Wstecz</button><span style="flex:1"></span><button class="btn big">Dalej</button></div>
+
+  {% elif k == 7 %}
+    <h1>Jak mam pracować</h1>
+    <p class="lead">Możesz to zmienić w każdej chwili w Ustawieniach.</p>
+    <div class="card">
+      <label class="check"><input type="checkbox" name="szukanie" value="1" {{ 'checked' if st.szukanie }}> Sam szukaj ofert w sprawdzonych źródłach</label>
+      <label class="check"><input type="checkbox" name="spontaniczne" value="1" {{ 'checked' if st.spontaniczne }}> Pisz też do firm z listy, które nie mają ogłoszenia</label>
+      <label class="check"><input type="checkbox" name="podziekowania" value="1" {{ 'checked' if st.podziekowania }}> Po odmowie wysyłaj krótkie, uprzejme podziękowanie</label>
+      <label class="check"><input type="checkbox" name="przypomnienia" value="1" {{ 'checked' if st.przypomnienia }}> Gdy firma milczy {{ st.przypomnienie_po_dniach }} dni, wyślij jedno przypomnienie</label>
+      <label class="check"><input type="checkbox" name="whatsapp" value="1" {{ 'checked' if st.whatsapp }}> Zaproszenia i pilne sprawy przysyłaj mi od razu na WhatsAppie</label>
+      <label>Ile aplikacji dziennie najwyżej</label><input type="number" name="limit_dzienny" value="{{ st.limit_dzienny }}" min="1" max="70">
+      <h3 style="margin-top:24px">Autopilot</h3>
+      <label class="check"><input type="checkbox" name="autopilot" value="1" {{ 'checked' if st.autopilot }}> Wysyłaj sam aplikacje z dopasowaniem od {{ st.prog_autopilota }}%, jeśli kontrola prawdy nic nie znalazła</label>
+      <p class="small soft">Radzę zacząć bez autopilota: przez pierwsze dni zobaczysz, co przygotowuję, i każdą aplikację zatwierdzisz jednym kliknięciem. Gdy będziesz zadowolona, włącz go w Ustawieniach.</p>
+    </div>
+    <div class="actions"><button class="btn plain" name="wstecz" value="1" formnovalidate>Wstecz</button><span style="flex:1"></span><button class="btn big">Dalej</button></div>
+
+  {% else %}
+    <h1>Wszystko gotowe</h1>
+    <p class="lead">Tak wygląda Twoje CV złożone z potwierdzonych danych. Pod każdą ofertę zmienię tylko kolejność i dobór punktów.</p>
+    <div class="card"><iframe class="pdf" src="{{ url_for('preview_cv') }}"></iframe>
+      <p class="small soft" style="margin-top:10px">Coś do poprawy? Wróć do poprzednich kroków. Później zrobisz to też w Ustawieniach.</p></div>
+    <div class="actions"><button class="btn plain" name="wstecz" value="1" formnovalidate>Wstecz</button><span style="flex:1"></span><button class="btn big">Przejdź do panelu</button></div>
+  {% endif %}
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block nav %}{% endblock %}
+{% block body %}
+<div class="hero" style="max-width:440px">
+  {% if mode == 'nowe' %}
+    <h1>Ustaw swoje hasło</h1>
+    <p class="lead">Będzie potrzebne tylko do tego panelu. Wybierz takie, którego nie używasz nigdzie indziej.</p>
+    <div class="card">
+      {% if error %}<div class="note err">{{ error }}</div>{% endif %}
+      <form method="post">
+        <label>Hasło (co najmniej 8 znaków)</label><input type="password" name="haslo" autocomplete="new-password" autofocus required minlength="8">
+        <label>Powtórz hasło</label><input type="password" name="haslo2" autocomplete="new-password" required minlength="8">
+        <div class="actions"><button class="btn big" style="width:100%">Dalej</button></div>
+      </form>
+    </div>
+  {% elif mode == 'zly_link' %}
+    <h1>Ten link już nie działa</h1>
+    <p class="lead">Link pierwszego wejścia jest jednorazowy. Poproś Andrzeja o nowy albo zaloguj się swoim hasłem.</p>
+    <p class="center"><a class="btn" href="{{ url_for('login') }}">Przejdź do logowania</a></p>
+  {% elif mode == 'brak' %}
+    <h1>Panel czeka na pierwsze wejście</h1>
+    <p class="lead">Hasło nie jest jeszcze ustawione. Otwórz link pierwszego wejścia, który dostałaś od Andrzeja.</p>
+  {% else %}
+    <h1>Dzień dobry</h1>
+    <p class="lead">Zaloguj się, żeby zobaczyć swoje aplikacje.</p>
+    <div class="card">
+      {% if error %}<div class="note err">{{ error }}</div>{% endif %}
+      <form method="post">
+        <label>Hasło</label><input type="password" name="haslo" autocomplete="current-password" autofocus required>
+        <div class="actions"><button class="btn big" style="width:100%">Zaloguj</button></div>
+      </form>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

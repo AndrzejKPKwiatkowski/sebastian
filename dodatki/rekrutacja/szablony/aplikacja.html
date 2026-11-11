@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+{% set uwagi = a.uwagi|loads %}{% set ostrz = a.ostrzezenia|loads %}
+<p class="small"><a href="{{ url_for('todo') if a.status in ('do_zatwierdzenia','do_sprawdzenia','do_uzupelnienia','blad') else url_for('all_apps') }}">‹ Wróć</a></p>
+<h1>{{ a.firma or 'Nowa aplikacja' }}</h1>
+<p class="soft">{{ a.stanowisko or ('zapytanie o współpracę' if a.zrodlo == 'spontaniczna' else '') }}{% if a.miasto %} · {{ a.miasto }}{% endif %}
+  · <span class="pill">{{ STATUS.get(a.status, a.status) }}</span>{% if a.ocena is not none %} · dopasowanie {{ a.ocena }}%{% endif %}</p>
+
+{% if a.status == 'wysylanie' %}
+  <div class="card center" style="padding:44px 24px"><div class="spinner"></div><h2>Wysyłam</h2><p class="soft">Za chwilę będzie gotowe.</p></div>
+  <script>setTimeout(()=>location.reload(),6000)</script>
+{% elif a.status in ('nowa', 'przygotowywanie') %}
+  <div class="card center" style="padding:44px 24px"><div class="spinner"></div><h2>Przygotowuję dokumenty</h2>
+    <p class="soft">Czytam ogłoszenie, dobieram fakty i piszę list. Strona odświeży się sama.</p></div>
+  <script>setTimeout(()=>location.reload(),8000)</script>
+{% else %}
+  {% if a.ocena_opis %}<p>{{ a.ocena_opis }}</p>{% endif %}
+  {% for w in ostrz %}<div class="note err">{{ w }}</div>{% endfor %}
+  {% if a.blad %}<div class="note err">{{ a.blad }}</div>{% endif %}
+  {% if a.notatka and a.status == 'duplikat' %}<div class="note info">{{ a.notatka }}</div>{% endif %}
+  {% if uwagi %}<div class="note"><b>Sprawdź przed wysłaniem:</b><ul>{% for u in uwagi %}<li>{{ u }}</li>{% endfor %}</ul></div>{% endif %}
+  {% if a.url and a.url.lower().startswith(('http://', 'https://')) %}<p class="small"><a href="{{ a.url }}" target="_blank" rel="noopener noreferrer">Otwórz ogłoszenie ↗</a></p>{% endif %}
+
+  {% if kit %}
+  <div class="card">
+    <h2>Wyślij przez formularz</h2>
+    <ol class="steps">
+      <li>{% if a.url.lower().startswith(('http://', 'https://')) %}<a href="{{ a.url }}" target="_blank" rel="noopener noreferrer">Otwórz ogłoszenie ↗</a>{% else %}Otwórz ogłoszenie{% endif %} i kliknij „Aplikuj”.</li>
+      <li>Pobierz <a href="{{ url_for('file', aid=a.id, which='cv', pobierz=1) }}">CV</a> i <a href="{{ url_for('file', aid=a.id, which='list', pobierz=1) }}">list przewodni</a>, a potem dołącz je w formularzu.</li>
+      <li>Pola przepisz stąd jednym kliknięciem.</li>
+      <li>Po wysłaniu wróć tutaj i kliknij „Wysłałam sama”.</li>
+    </ol>
+    {% for k, v in kit %}<div class="kit"><span>{{ k }}</span><code id="kit{{ loop.index }}">{{ v }}</code><button type="button" class="btn ghost small" data-copy="kit{{ loop.index }}">Kopiuj</button></div>{% endfor %}
+    <div class="kit"><span>List przewodni</span><code id="kitlist">{{ a.list }}</code><button type="button" class="btn ghost small" data-copy="kitlist">Kopiuj</button></div>
+  </div>
+  {% endif %}
+
+  {% for m in msgs %}
+  <div class="note {{ 'ok' if m.rodzaj in ('zaproszenie','oferta') else ('err' if m.rodzaj == 'odmowa' else 'info') }}">
+    <b>{{ KINDS.get(m.rodzaj, m.rodzaj) }}</b> · {{ m.data|dzien }} — {{ m.streszczenie or m.temat }} <a href="{{ url_for('message', wid=m.id) }}">Otwórz</a></div>
+  {% endfor %}
+
+  <form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf() }}">
+  <div class="card">
+    <h2>Adresat</h2>
+    <div class="row"><div><label>Firma</label><input type="text" name="firma" value="{{ a.firma }}" {{ 'readonly' if not editable }}></div>
+      <div><label>Stanowisko</label><input type="text" name="stanowisko" value="{{ a.stanowisko }}" {{ 'readonly' if not editable }}></div></div>
+    <div class="row"><div><label>E-mail do wysłania aplikacji</label><input type="email" name="email" value="{{ a.email }}" {{ 'readonly' if not editable }}></div>
+      <div><label>Miejsce pracy</label><input type="text" name="miasto" value="{{ a.miasto }}" {{ 'readonly' if not editable }}></div></div>
+    {% if a.status == 'do_uzupelnienia' and not a.tresc %}<label>Treść ogłoszenia</label><textarea name="tresc" rows="6" placeholder="Wklej treść, a przygotuję dokumenty ponownie"></textarea>{% endif %}
+  </div>
+
+  {% if a.cv_plik %}
+  <div class="card">
+    <h2>Dokumenty</h2>
+    <p><a href="{{ url_for('file', aid=a.id, which='cv') }}" target="_blank">CV (PDF)</a> · <a href="{{ url_for('file', aid=a.id, which='list') }}" target="_blank">List przewodni (PDF)</a></p>
+    <label>List przewodni</label><textarea name="list" rows="14" {{ 'readonly' if not editable }}>{{ a.list }}</textarea>
+    <p class="small soft">Po zmianie listu kliknij „Zapisz”, a PDF ułoży się na nowo.</p>
+    <label>Temat maila</label><input type="text" name="temat" value="{{ a.temat }}" {{ 'readonly' if not editable }}>
+    <label>Treść maila</label><textarea name="mail" rows="7" {{ 'readonly' if not editable }}>{{ a.mail }}</textarea>
+  </div>
+  {% endif %}
+
+  {% if editable %}
+  <div class="actions">
+    {% if a.status == 'zatwierdzona' %}
+      <span class="soft">Czeka w kolejce do wysyłki.</span><span style="flex:1"></span>
+      <button class="btn ghost" name="co" value="cofnij">Wstrzymaj tę aplikację</button>
+    {% else %}
+      {% if a.status != 'formularz' %}<button class="btn big" name="co" value="zatwierdz">Zatwierdź i wyślij</button>{% endif %}
+      <button class="btn ghost" name="co" value="zapisz">Zapisz</button>
+      <button class="btn plain" name="co" value="ponow">Przygotuj ponownie</button>
+      <span style="flex:1"></span>
+      <button class="btn plain" name="co" value="recznie" title="Gdy wysłałaś dokumenty sama, np. przez formularz">Wysłałam sama</button>
+      <button class="btn danger" name="co" value="odrzuc">Pomiń</button>
+    {% endif %}
+  </div>
+  {% endif %}
+  </form>
+
+  {% if a.status in ('wyslana','wyslana_recznie','pytanie','zaproszenie','rozmowa','oferta','odmowa') %}
+  <div class="card" style="margin-top:16px">
+    <h2>Co dalej</h2>
+    <p class="soft">Wysłano {{ a.wyslano|dzien }}{% if a.email %} na {{ a.email }}{% endif %}.{% if a.przypomnienie %} Przypomnienie: {{ a.przypomnienie|dzien }}.{% endif %}{% if a.podziekowanie %} Podziękowanie po odmowie: {{ a.podziekowanie|dzien }}.{% endif %} Odpowiedzi rozpoznaję sam. Jeśli ktoś zadzwonił, ustaw status tutaj.</p>
+    <form method="post" class="row" style="grid-template-columns:2fr 1fr">
+      <input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="status">
+      <select name="status">{% for s in ('wyslana','pytanie','zaproszenie','rozmowa','oferta','odmowa') %}<option value="{{ s }}" {{ 'selected' if a.status == s }}>{{ STATUS[s] }}</option>{% endfor %}</select>
+      <button class="btn ghost">Zmień status</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="card" style="margin-top:16px">
+    <h2>Notatka</h2>
+    <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="notatka">
+      <textarea name="notatka" rows="3" style="min-height:70px" placeholder="Np. kto dzwonił, termin rozmowy, co chcą wiedzieć">{{ a.notatka if a.status != 'duplikat' }}</textarea>
+      <div class="actions" style="margin-top:10px"><button class="btn ghost">Zapisz notatkę</button></div></form>
+    {% if hist %}<details><summary>Historia</summary><ul class="small soft">{% for h in hist %}<li>{{ h.kiedy|dzien }} — {{ h.co }}</li>{% endfor %}</ul></details>{% endif %}
+  </div>
+{% endif %}
+{% endblock %}

@@ -228,3 +228,38 @@ Data: 2026-11-09. Wynik: **100 testów zaliczonych** (16 nowych w `test_dodatki.
 
 Nie sprawdzono tu: prawdziwego WhatsAppa i głosu na Macu, jakości rozpoznawania przez qwen2.5 na prawdziwych głosówkach,
 prawdziwego Twilio.
+
+
+# Weryfikacja 2.8 — dodatek Rekrutacja
+
+Data: 2026-11-11. Środowisko: Linux, Python 3.13. Bez Gmaila, Ollamy, Tailscale, WhatsAppa i launchd — wszystko udawane.
+
+Wynik: 100 testów zaliczonych, 7 pominiętych (`test_sebastian`, `test_dodatki`, `test_whatsapp`, nowy `test_rekrutacja` — 35 testów).
+
+- **Fakty i dokumenty:** wybór faktów z modelu odrzuca nieistniejące numery i niczego nie gubi; CV ma jedną stronę i zawiera
+  wyłącznie dane z bazy (stanowiska, daty, punkty, narzędzia z poziomem, prawo jazdy, RODO); własna klauzula RODO pracodawcy trafia do CV;
+  kontroler prawdy łapie zmyśloną liczbę lat, SAP, język niemiecki i certyfikat, a nie zgłasza prawdziwych faktów.
+- **Duplikaty:** „ABC Sp. z o.o. / … (K/M)” = „abc / …”; ta sama oferta drugi raz → `duplikat`; ta sama firma bez ogłoszenia dwa razy → jedna aplikacja.
+- **Przebieg:** przygotowanie → nic nie wychodzi bez zatwierdzenia → wysyłka z dwoma PDF-ami i właściwym tematem; okno godzin,
+  sobota, pauza i limit blokują wysyłkę; błąd wysyłki → `blad` z opisem (nic nie ginie); raport raz dziennie ze skrzynki Sebastiana.
+- **Panel:** link pierwszego wejścia działa raz; bez CSRF → 400; obcy host → 403; 5 błędnych haseł → przerwa; całe powitanie (8 kroków)
+  zapisuje dane, narzędzia z poziomami i ustawienia pracy; dodanie oferty, przygotowanie w tle, zatwierdzenie, wysyłka; brak dostępu do
+  plików spoza folderu aplikacji; wszystkie strony renderują się bez błędów.
+- **Odpowiedzi:** zaproszenie → status, WhatsApp na numer Agi z listy, mail od Sebastiana, pytanie „czy termin pasuje”, odpowiedź Agi
+  zapamiętana, szkic w wątku (`Re:`); ta sama wiadomość drugi raz nie jest liczona; odmowa → podziękowanie; prywatna poczta nie jest
+  zapisywana; autoresponder nie zmienia statusu; przypomnienie po 10 dniach dokładnie raz.
+- **Źródła i formularze:** strona z listą → tylko pasujący link, drugi przegląd nic nie dubluje, Pracuj.pl wyłączony automatycznie; JSON-LD
+  JobPosting; oferta z Gdańska i oferta z niską oceną pominięte; autopilot; import firm i aplikacja bez ogłoszenia; kanał formularza z zestawem pól
+  (oczekiwania netto); Recruitee: poprawne pola, zgoda RODO zaznaczona, wymagane pytanie otwarte → bez wysyłki.
+- **Po niezależnym przeglądzie kodu (15 poprawek):** własne powiadomienia i raporty Sebastiana nie są czytane jako odpowiedzi
+  (znacznik `X-Sebastian-Rekrutacja` i adres nadawcy); adresy IOD/RODO z ogłoszenia nigdy nie są adresatem; „niestety … zapraszamy”
+  to zaproszenie, a podziękowanie wychodzi tylko przy odmowie potwierdzonej przez model, w oknie wysyłki i nie na adresy no-reply;
+  brak odpowiedzi kontrolera prawdy = „do sprawdzenia” (autopilot nie wyśle); stara poczta z domeny pracodawcy sprzed wysyłki jest
+  pomijana; aplikacja jest zajmowana przed wysyłką (`wysylanie`), po restarcie nie wychodzi drugi raz, błąd „nic nie wyszło” wraca do
+  kolejki, a „mogło wyjść” czeka na Agę; szkic odpowiedzi wychodzi raz; Recruitee da się zatwierdzić bez maila; pominiętą ofertę można
+  przygotować ponownie; oferty ponad limit przeglądu nie przepadają; „raport teraz” nie odwołuje wieczornego; linki tylko http(s);
+  przekierowania źródeł sprawdzane krok po kroku; skrzynka czytana od najstarszych, pozycja zapisywana po przetworzeniu wiadomości.
+
+Nie sprawdzono tu: prawdziwego Gmaila (logowanie hasłem aplikacji, IMAP), prawdziwych stron startowych źródeł (z tego środowiska
+nie ma do nich dostępu), formularza Recruitee na żywo, jakości listów z modelu na Macu, wyglądu w Safari, nasłuchu na adresie Tailscale
+i zapory macOS.

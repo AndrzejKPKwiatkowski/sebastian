@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Dziś</h1>
+<p class="soft">{% if st.wstrzymane %}Wysyłka jest wstrzymana.{% elif okno %}Trwa okno wysyłki ({{ st.godziny }}).{% else %}Wysyłam w dni robocze, {{ st.godziny }}.{% endif %}
+  Raport wieczorny o {{ st.raport }}.</p>
+
+<div class="grid" style="margin:22px 0">
+  <div class="stat"><b>{{ n.dzis }}<span style="font-size:20px;color:var(--soft);font-weight:500"> / {{ st.limit_dzienny }}</span></b><span>wysłane dziś</span></div>
+  <div class="stat"><b>{{ n.lacznie }}</b><span>wysłane łącznie</span></div>
+  <div class="stat"><b>{{ n.do_zrobienia }}</b><span>czeka na Ciebie</span></div>
+  <div class="stat"><b>{{ n.zaproszenia }}</b><span>zaproszenia</span></div>
+</div>
+
+{% if problem_poczty %}<div class="note err">{{ problem_poczty }} <a href="{{ url_for('settings') }}">Ustawienia</a></div>{% endif %}
+{% if n.odpowiedzi %}<div class="note ok">Masz {{ n.odpowiedzi }} {{ 'ważną sprawę' if n.odpowiedzi == 1 else 'ważne sprawy' }} od pracodawców. <a href="{{ url_for('replies') }}">Otwórz „Odpowiedzi”</a></div>{% endif %}
+{% if n.do_zrobienia %}<div class="note">Masz {{ n.do_zrobienia }} {{ 'aplikację' if n.do_zrobienia == 1 else 'aplikacje' }} do przejrzenia. <a href="{{ url_for('todo') }}">Otwórz „Do zrobienia”</a></div>{% endif %}
+{% if n.w_przygotowaniu %}<div class="note info">Przygotowuję dokumenty: {{ n.w_przygotowaniu }}. Zwykle trwa to od 1 do 3 minut na ofertę.</div>{% endif %}
+
+<div class="card">
+  <h2>Dodaj ofertę</h2>
+  <form method="post" action="{{ url_for('add') }}">
+    <input type="hidden" name="csrf" value="{{ csrf() }}">
+    <label class="check"><input type="radio" name="rodzaj" value="oferta" checked onclick="sw(0)"> Odpowiadam na ogłoszenie</label>
+    <label class="check"><input type="radio" name="rodzaj" value="spontaniczna" onclick="sw(1)"> Piszę do firmy bez ogłoszenia</label>
+    <div id="r0">
+      <label>Link do ogłoszenia</label><input type="text" name="url" placeholder="https://…" inputmode="url">
+      <details><summary>Strona się nie otwiera? Wklej treść ogłoszenia</summary><textarea name="tresc" rows="6" placeholder="Skopiuj całe ogłoszenie i wklej je tutaj"></textarea></details>
+      <details><summary>Znam adres e-mail do aplikacji</summary><input type="email" name="email" placeholder="rekrutacja@firma.pl"></details>
+    </div>
+    <div id="r1" hidden>
+      <div class="row"><div><label>Nazwa firmy</label><input type="text" name="firma" data-s></div>
+      <div><label>Adres e-mail</label><input type="email" name="email" data-s disabled></div></div>
+      <label>Kilka słów o firmie (opcjonalnie, pomaga napisać list)</label><textarea name="tresc" rows="3" style="min-height:70px" data-s disabled></textarea>
+    </div>
+    <div class="actions"><button class="btn">Przygotuj dokumenty</button></div>
+  </form>
+  <script>function sw(s){for(const[i,id]of[['0','r0'],['1','r1']].entries()){const b=document.getElementById(id[1]);b.hidden=(i!=s);b.querySelectorAll('input,textarea').forEach(e=>e.disabled=(i!=s))}}</script>
+</div>
+
+<div class="card">
+  <h2>Masz kilka linków naraz?</h2>
+  <p class="soft small">Wklej linki do ogłoszeń (np. z Pracuj.pl albo OLX), każdy w osobnej linii. Przygotuję je po kolei.</p>
+  <form method="post" action="{{ url_for('add_many') }}"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    <textarea name="linki" rows="4" placeholder="https://…&#10;https://…"></textarea>
+    <div class="actions"><button class="btn ghost">Dodaj wszystkie</button></div></form>
+</div>
+
+{% if rows %}
+<div class="card list"><h2>Ostatnio</h2>{% for r in rows %}{% include "_wiersz.html" %}{% endfor %}
+  <p class="small" style="margin:10px 0 0"><a href="{{ url_for('all_apps') }}">Wszystkie aplikacje</a></p></div>
+{% endif %}
+
+<form method="post" action="{{ url_for('settings') }}" class="center" style="margin-top:22px">
+  <input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="pauza"><input type="hidden" name="powrot" value="{{ url_for('home') }}">
+  <button class="btn ghost">{{ 'Wznów wysyłkę' if st.wstrzymane else 'Wstrzymaj wysyłkę' }}</button>
+</form>
+{% if n.w_przygotowaniu %}<script>setTimeout(()=>location.reload(),20000)</script>{% endif %}
+{% endblock %}

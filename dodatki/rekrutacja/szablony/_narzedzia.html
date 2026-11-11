@@ -1,0 +1,16 @@
+{% set have = {} %}{% for t in f.narzedzia %}{% set _ = have.update({t.nazwa: t.poziom}) %}{% endfor %}
+<h3>Programy i narzędzia</h3>
+<p class="small soft">Zaznacz to, z czym naprawdę pracujesz, i wybierz poziom. W CV i w formularzach pojawi się tylko to, co tutaj zaznaczysz.</p>
+{% for t in TOOLS %}
+<label class="check"><input type="checkbox" name="t{{ loop.index0 }}" value="1" {{ 'checked' if t in have }}> {{ t }}
+  <select name="t{{ loop.index0 }}_poziom">{% for l in LEVELS %}<option value="{{ l }}" {{ 'selected' if have.get(t) == l }}>{{ l or 'poziom' }}</option>{% endfor %}</select></label>
+{% endfor %}
+<label>Inne narzędzia i systemy (po jednym w linii, np. „Nazwa systemu – dobry”)</label>
+<textarea name="inne_narzedzia" rows="3">{% for t in f.narzedzia if t.nazwa not in TOOLS %}{{ t.nazwa }}{% if t.poziom %} – {{ t.poziom }}{% endif %}
+{% endfor %}</textarea>
+
+<h3 style="margin-top:28px">Umiejętności</h3>
+<p class="small soft">Po jednej w linii. Do każdego CV wybieram do sześciu najlepiej pasujących.</p>
+<textarea name="umiejetnosci" rows="7">{% for u in f.umiejetnosci %}{{ u.tekst }}
+{% endfor %}</textarea>
+<label class="check" style="margin-top:16px"><input type="checkbox" name="prawo_jazdy" value="1" {{ 'checked' if f.prawo_jazdy }}> Mam prawo jazdy kat. B</label>

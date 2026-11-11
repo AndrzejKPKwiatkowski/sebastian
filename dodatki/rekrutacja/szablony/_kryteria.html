@@ -1,0 +1,23 @@
+<h3>Szukam pracy przy…</h3>
+{% for x in WANT %}<label class="check"><input type="checkbox" name="c{{ loop.index0 }}" value="1" {{ 'checked' if x in f.kryteria.chce }}> {{ x }}</label>{% endfor %}
+<label>Coś jeszcze? (po jednym w linii)</label>
+<textarea name="chce_inne" rows="2" style="min-height:64px">{% for x in f.kryteria.chce if x not in WANT %}{{ x }}
+{% endfor %}</textarea>
+
+<h3 style="margin-top:28px">Nie chcę pracy, w której dużą część stanowi…</h3>
+{% for x in AVOID %}<label class="check"><input type="checkbox" name="n{{ loop.index0 }}" value="1" {{ 'checked' if x in f.kryteria.nie_chce }}> {{ x }}</label>{% endfor %}
+<label>Coś jeszcze? (po jednym w linii)</label>
+<textarea name="nie_chce_inne" rows="2" style="min-height:64px">{% for x in f.kryteria.nie_chce if x not in AVOID %}{{ x }}
+{% endfor %}</textarea>
+
+<h3 style="margin-top:28px">Warunki</h3>
+<div class="row"><div><label>Forma zatrudnienia</label><input type="text" name="w_umowa" value="{{ f.warunki.umowa }}"></div>
+<div><label>Wymiar</label><input type="text" name="w_etat" value="{{ f.warunki.etat }}"></div></div>
+<div class="row"><div><label>Oczekiwania od (zł netto miesięcznie)</label><input type="text" name="w_min_netto" value="{{ f.warunki.min_netto }}" inputmode="numeric"></div>
+<div><label>Dojazd do (km od Krakowa)</label><input type="number" name="w_dojazd_km" value="{{ f.warunki.dojazd_km }}" min="0" max="300"></div></div>
+<label>Kiedy mogę zacząć</label><input type="text" name="w_dostepnosc" value="{{ f.warunki.dostepnosc }}">
+<label class="check" style="margin-top:14px"><input type="checkbox" name="w_zdalna" value="1" {{ 'checked' if f.warunki.zdalna }}> Biorę pod uwagę pracę zdalną i hybrydową</label>
+<label class="check"><input type="checkbox" name="w_poza_krakowem" value="1" {{ 'checked' if f.warunki.poza_krakowem }}> Mogę dojeżdżać do pracy stacjonarnej poza Krakowem</label>
+<label>Uwagi dla Sebastiana (opcjonalnie)</label>
+<textarea name="w_uwagi" rows="2" style="min-height:64px">{{ f.warunki.uwagi }}</textarea>
+<p class="small soft" style="margin-top:10px">Kwoty nie wpisuję do CV ani listów. Przyda się, gdy formularz albo rekruter zapyta o oczekiwania.</p>

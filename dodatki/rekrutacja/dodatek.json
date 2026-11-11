@@ -1,0 +1,78 @@
+{
+  "id": "rekrutacja",
+  "nazwa": "Rekrutacja — aplikacje o pracę dla Agi",
+  "wersja": "1.0.0",
+  "rdzen": "2.7",
+  "opis": "Osobny panel dla Agi (przez Tailscale): szukanie ofert, dopasowane CV i list z kontrolą prawdy, wysyłka mailem i przez formularze Recruitee, czytanie odpowiedzi, podziękowania, przypomnienia, powiadomienia na WhatsAppie, raport wieczorny.",
+  "domyslnie_wlaczony": true,
+  "uprawnienia": [
+    "model"
+  ],
+  "pomoc": [],
+  "polecenia": [
+    {
+      "nazwa": "usluga",
+      "opis": "instaluj / usun / status — panel i praca w tle (launchd)."
+    },
+    {
+      "nazwa": "adres",
+      "opis": "Adres panelu w sieci Tailscale i link pierwszego uruchomienia."
+    },
+    {
+      "nazwa": "start",
+      "opis": "Uruchamia panel w tym oknie Terminala (do prób)."
+    },
+    {
+      "nazwa": "status",
+      "opis": "Stan: skrzynki, liczba aplikacji, kolejka wysyłki."
+    },
+    {
+      "nazwa": "szukaj",
+      "opis": "Przegląda źródła ofert teraz (bez czekania na harmonogram)."
+    },
+    {
+      "nazwa": "skrzynka",
+      "opis": "Sprawdza odpowiedzi pracodawców teraz."
+    },
+    {
+      "nazwa": "raport",
+      "opis": "Wysyła raport wieczorny teraz (próba)."
+    },
+    {
+      "nazwa": "haslo",
+      "opis": "Nowy link do ustawienia hasła panelu (gdy Aga zapomni hasła)."
+    },
+    {
+      "nazwa": "ustawienia",
+      "opis": "Pokazuje ustawienia dodatku."
+    },
+    {
+      "nazwa": "ustaw",
+      "opis": "Zmienia ustawienie, np. ustaw limit_dzienny 40"
+    }
+  ],
+  "ustawienia": {
+    "port": 8790,
+    "nasluch": "tailscale",
+    "dodatkowy_host": "",
+    "limit_dzienny": 70,
+    "godziny": "08:00-16:00",
+    "tylko_dni_robocze": true,
+    "odstep_min": 4,
+    "odstep_max": 9,
+    "raport": "20:00",
+    "wstrzymane": false,
+    "autopilot": false,
+    "prog_autopilota": 75,
+    "prog_dopasowania": 55,
+    "szukanie": true,
+    "spontaniczne": true,
+    "zrodla_co_godzin": 6,
+    "skrzynka_co_minut": 10,
+    "podziekowania": true,
+    "przypomnienia": true,
+    "przypomnienie_po_dniach": 10,
+    "whatsapp": true,
+    "whatsapp_numer": ""
+  }
+}

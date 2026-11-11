@@ -91,7 +91,7 @@ class HostTests(AddonBase):
         with self.assertRaises(DH.AddonError):
             DH.set_enabled("zepsuty", True)
         DH.set_enabled("przypominacz", False)
-        self.assertEqual(DH.active(), [])
+        self.assertNotIn("przypominacz", [ctx.id for _, ctx in DH.active()])
         with self.con() as con:
             self.assertFalse(DH.on_message(con, "text", "przypomnij mi o fakturze"))
         out = io.StringIO()

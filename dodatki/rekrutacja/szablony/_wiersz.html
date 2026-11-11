@@ -1,0 +1,7 @@
+{% set cls = {'wyslana':'g','wyslana_recznie':'g','zaproszenie':'b','rozmowa':'b','oferta':'b','do_zatwierdzenia':'o','do_sprawdzenia':'o','do_uzupelnienia':'o','blad':'r','odmowa':'','odrzucona':'','duplikat':''} %}
+<a class="item" href="{{ url_for('detail', aid=r.id) }}">
+  <div class="main"><b>{{ r.firma or 'Firma do ustalenia' }}</b>
+    <span>{{ r.stanowisko or ('zapytanie o współpracę' if r.zrodlo == 'spontaniczna' else 'stanowisko do ustalenia') }}{% if r.miasto %} · {{ r.miasto }}{% endif %} · {{ (r.wyslano or r.zmieniono)|dzien }}</span></div>
+  {% if r.ocena is not none %}<span class="score" title="dopasowanie">{{ r.ocena }}%</span>{% endif %}
+  <span class="pill {{ cls.get(r.status, '') }}">{{ STATUS.get(r.status, r.status) }}</span>
+</a>

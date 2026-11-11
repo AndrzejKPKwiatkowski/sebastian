@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Ustawienia</h1>
+{% if error %}<div class="note err">{{ error }}</div>{% endif %}
+
+<div class="card">
+  <h2>Wysyłka</h2>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="wysylka">
+    <div class="row3"><div><label>Limit dziennie (do 70)</label><input type="number" name="limit_dzienny" value="{{ st.limit_dzienny }}" min="1" max="70"></div>
+      <div><label>Godziny wysyłki</label><input type="text" name="godziny" value="{{ st.godziny }}"></div>
+      <div><label>Raport wieczorny</label><input type="text" name="raport" value="{{ st.raport }}"></div></div>
+    <div class="actions"><button class="btn ghost">Zapisz</button></div></form>
+  <form method="post" class="actions" style="margin-top:6px"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    <button class="btn plain" name="co" value="pauza">{{ 'Wznów wysyłkę' if st.wstrzymane else 'Wstrzymaj wysyłkę' }}</button>
+    <button class="btn plain" name="co" value="raport_teraz">Wyślij mi raport teraz</button></form>
+</div>
+
+<div class="card">
+  <h2>Jak pracuję</h2>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="praca">
+    <label class="check"><input type="checkbox" name="szukanie" value="1" {{ 'checked' if st.szukanie }}> Sam szukam ofert w źródłach poniżej</label>
+    <label class="check"><input type="checkbox" name="spontaniczne" value="1" {{ 'checked' if st.spontaniczne }}> Piszę do firm z listy (bez ogłoszenia)</label>
+    <label class="check"><input type="checkbox" name="podziekowania" value="1" {{ 'checked' if st.podziekowania }}> Podziękowanie po odmowie</label>
+    <label class="check"><input type="checkbox" name="przypomnienia" value="1" {{ 'checked' if st.przypomnienia }}> Jedno przypomnienie po ciszy</label>
+    <label class="check"><input type="checkbox" name="whatsapp" value="1" {{ 'checked' if st.whatsapp }}> Pilne sprawy na WhatsAppie</label>
+    <label class="check"><input type="checkbox" name="autopilot" value="1" {{ 'checked' if st.autopilot }}> Autopilot: wysyłam sam aplikacje z wysokim dopasowaniem</label>
+    <input type="hidden" name="limit_dzienny" value="{{ st.limit_dzienny }}">
+    <div class="row3"><div><label>Autopilot od (% dopasowania)</label><input type="number" name="prog_autopilota" value="{{ st.prog_autopilota }}" min="50" max="100"></div>
+      <div><label>Pomijam oferty poniżej (%)</label><input type="number" name="prog_dopasowania" value="{{ st.prog_dopasowania }}" min="0" max="95"></div>
+      <div><label>Przypomnienie po (dniach)</label><input type="number" name="przypomnienie_po_dniach" value="{{ st.przypomnienie_po_dniach }}" min="3" max="30"></div></div>
+    <div class="actions"><button class="btn ghost">Zapisz</button></div></form>
+</div>
+
+<div class="card">
+  <h2>Źródła ofert</h2>
+  <p class="soft small">Przeglądam je co {{ st.zrodla_co_godzin }} godzin. Dodawaj strony z listą ogłoszeń: urzędy, uczelnie, strony karier firm, kanały RSS i tablice Recruitee. Duże portale (Pracuj.pl, OLX, LinkedIn, Indeed) nie pozwalają na automaty, więc oferty z nich wklejaj linkami na stronie „Dziś”.</p>
+  <div class="list">{% for z in sources %}
+    <div class="item" style="display:flex;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid rgba(0,0,0,.07)">
+      <div class="main"><b>{{ z.nazwa or z.url }}</b><span>{{ z.wynik or 'jeszcze nie sprawdzone' }}{% if z.znalezione %} · łącznie dodanych: {{ z.znalezione }}{% endif %}</span></div>
+      <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="id" value="{{ z.id }}">
+        <button class="btn plain small" name="co" value="zrodlo_przelacz">{{ 'Wyłącz' if z.wlaczone else 'Włącz' }}</button>
+        <button class="btn danger small" name="co" value="zrodlo_usun">Usuń</button></form>
+    </div>{% else %}<p class="soft">Brak źródeł.</p>{% endfor %}</div>
+  <form method="post" class="row" style="grid-template-columns:2fr 1fr auto;margin-top:14px;align-items:end"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    <div><label>Adres strony z ogłoszeniami</label><input type="text" name="url" placeholder="https://…"></div>
+    <div><label>Nazwa (opcjonalnie)</label><input type="text" name="nazwa"></div>
+    <button class="btn ghost" name="co" value="zrodlo_dodaj">Dodaj</button></form>
+  <form method="post" class="actions"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="btn plain" name="co" value="szukaj_teraz">Przejrzyj źródła teraz</button></form>
+</div>
+
+<div class="card">
+  <h2>Firmy do aplikacji bez ogłoszenia</h2>
+  <p class="soft small">Na liście: {{ firms.n or 0 }}, wykorzystane: {{ firms.u or 0 }}. Wklej firmy, po jednej w linii: <i>Nazwa; e-mail; strona www; kilka słów o firmie</i>. Piszę do nich, gdy ogłoszeń jest za mało do dziennego celu.</p>
+  <details {{ 'open' if part == 'firmy' }}><summary>Dodaj firmy</summary>
+  <form method="post" style="margin-top:10px"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="firmy">
+    <textarea name="firmy" rows="6" placeholder="Biuro Rachunkowe Przykład; biuro@przyklad.pl; www.przyklad.pl; księgowość i kadry dla małych firm"></textarea>
+    <div class="actions"><button class="btn ghost">Dodaj do listy</button></div></form></details>
+</div>
+
+<div class="card">
+  <h2>Pomoc Claude'a</h2>
+  <p class="soft small">Gdy coś jest za trudne (nietypowy formularz, wymagające pytanie rekrutera), pobierz paczkę i wklej ją w rozmowie z Claude'em.</p>
+  <a class="btn ghost" href="{{ url_for('claude_pack') }}">Pobierz paczkę dla Claude'a</a>
+</div>
+
+<div class="card">
+  <h2>Skrzynki</h2>
+  <p>Twoja: <b>{{ me or 'niepodłączona' }}</b><br>Sebastiana: <b>{{ seb or 'niepodłączona' }}</b></p>
+  <details {{ 'open' if part in ('aga','sebastian') }}><summary>Podłącz skrzynkę ponownie</summary>
+    {% for who, label, adres in (('aga', 'Twoja skrzynka', me), ('sebastian', 'Skrzynka Sebastiana', seb or 'sebastian.k.kwiatkowski@gmail.com')) %}
+    <form method="post" style="margin-top:14px"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="{{ who }}">
+      <h3>{{ label }}</h3>{% include "_skrzynka.html" %}<div class="actions"><button class="btn ghost">Sprawdź i zapisz</button></div></form>
+    {% endfor %}
+  </details>
+</div>
+
+{% for key, title, tpl in (('dane', 'Twoje dane i CV', '_dane.html'), ('narzedzia', 'Narzędzia i umiejętności', '_narzedzia.html'), ('kryteria', 'Czego szukasz', '_kryteria.html')) %}
+<div class="card"><h2>{{ title }}</h2>
+  <details {{ 'open' if part == key }}><summary>Pokaż i zmień</summary>
+    <form method="post" style="margin-top:14px"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="{{ key }}">
+      {% include tpl %}<div class="actions"><button class="btn">Zapisz</button>{% if key == 'dane' %}<a class="btn plain" href="{{ url_for('preview_cv') }}" target="_blank">Podgląd CV</a>{% endif %}</div></form>
+  </details></div>
+{% endfor %}
+{% endblock %}

@@ -21,6 +21,7 @@ Lokalny asystent poczty i spraw na Macu, z modułem nauki, który buduje wiedzę
 8b. [WhatsApp — Sebastian w telefonie (od 2.3)](#8b-whatsapp--sebastian-w-telefonie-od-23)
     - [8b.8. Lista dozwolonych numerów (od 2.4)](#8b8-lista-dozwolonych-numerów--kto-może-pisać-do-sebastiana-od-24-dostęp-pełny-od-25) · [8b.9. Twój WhatsApp (od 2.4)](#8b9-twój-whatsapp--kto-pisał-komu-odpisać-do-kogo-oddzwonić-od-24)
 8c. [Dodatki i Przypominacz (od 2.7)](#8c-dodatki-i-przypominacz-od-27)
+8d. [Rekrutacja — aplikacje o pracę dla Agi (od 2.8)](#8d-rekrutacja--aplikacje-o-pracę-dla-agi-od-28)
 9. [Połączenie z Open WebUI](#9-połączenie-z-open-webui)
 10. [Mapa plików i danych](#10-mapa-plików-i-danych)
 11. [Wszystkie polecenia](#11-wszystkie-polecenia)
@@ -943,6 +944,31 @@ znika). Pełny opis, ustawienia i Twilio: `docs/aktualizacje/AKTUALIZACJA_2_7.md
 | Nic nie przyszło wieczorem | `wa-status` (usługa, linia „Dodatki”), `… przypominacz lista`, log: `grep Dodatek data/logs/whatsapp.log` |
 | Twilio nie dzwoni | `… przypominacz telefon test`; konto próbne dzwoni tylko na zweryfikowany numer; przy błędzie idzie głosówka |
 
+## 8d. Rekrutacja — aplikacje o pracę dla Agi (od 2.8)
+
+Dodatek `dodatki/rekrutacja/` ma **własny panel** i **własną usługę** (`pl.sebastian.rekrutacja`): Flask na porcie 8790,
+nasłuch tylko na adresie Tailscale Maca i na `127.0.0.1`, osobne hasło (Agi) i osobna sesja. Panel Sebastiana na 8765
+jest nietknięty. Praca w tle działa w wątku tej usługi, więc nie blokuje pętli WhatsAppa; do WhatsAppa trafiają tylko
+wpisy w `outbox` (adresat: numer Agi z listy dozwolonych).
+
+| Moduł | Zadanie |
+| --- | --- |
+| `rdzen.py` | baza `stan.sqlite3` (migracje tylko dodające), baza faktów `fakty.json` z numerami faktów, klucz duplikatu, sekrety |
+| `dokumenty.py` | CV (ReportLab, Montserrat z dodatku — licencja OFL), list PDF, list i mail z modelu, kontroler prawdy |
+| `oferty.py` | pobranie ogłoszenia (tylko adresy publiczne), wyciągnięcie danych i ocena dopasowania |
+| `zrodla.py` | źródła: strony z ogłoszeniami (JSON-LD JobPosting albo linki), RSS/Atom, Recruitee; lista firm; blokada portali bez zgody na automaty |
+| `poczta.py` | Gmail: logowanie, wysyłka z załącznikami i nagłówkami wątku, odbiór `readonly` + `BODY.PEEK` |
+| `odpowiedzi.py` | dopasowanie do aplikacji (In-Reply-To/References, domena, nazwa firmy), rodzaj (reguły + model), szkice, pytania do Agi, podziękowania, przypomnienia, WhatsApp |
+| `formularze.py` | kanał wysyłki (mail / Recruitee / formularz / brak), wysyłka Recruitee, zestaw jednego kliknięcia |
+| `panel.py` | przygotowanie aplikacji, wysyłka, raport, praca w tle, aplikacja Flask, adres Tailscale |
+
+Statusy: `nowa → przygotowywanie → do_zatwierdzenia | do_sprawdzenia | do_uzupelnienia | formularz → zatwierdzona → wyslana
+→ pytanie | zaproszenie | rozmowa | oferta | odmowa`, a także `odrzucona` (pominięta), `duplikat`, `blad`. Zasada prawdy:
+CV składa się wyłącznie z faktów z bazy (model zwraca numery, `clean_selection()` odrzuca nieistniejące), list i mail przechodzą
+`rule_check()` i `model_check()`; autopilot zatwierdza tylko `do_zatwierdzenia` (bez uwag) z oceną od progu.
+
+Pełny opis, ustawienia, instalacja i problemy: `docs/aktualizacje/AKTUALIZACJA_2_8.md`.
+
 ---
 
 ## 9. Połączenie z Open WebUI
@@ -1236,6 +1262,9 @@ Każde polecenie uruchamiaj w folderze `sebastian-start` z aktywnym `.venv`: `py
 | `dodatek przypominacz teraz` | Przypomnij od razu (próba całego wieczoru) |
 | `dodatek przypominacz telefon [test\|wylacz]` | Prawdziwe dzwonienie przez Twilio (token w pęku kluczy) |
 | `dodatek przypominacz ustawienia` / `ustaw KLUCZ WARTOŚĆ` / `historia` | Ustawienia i historia zmian |
+| `dodatek rekrutacja adres` / `status` / `haslo` | Adres panelu Agi i link pierwszego wejścia · stan · nowy link do hasła |
+| `dodatek rekrutacja szukaj` / `skrzynka` / `raport` | Przejrzyj źródła · sprawdź odpowiedzi · wyślij raport — teraz |
+| `dodatek rekrutacja usluga status\|instaluj\|usun` | Usługa panelu i pracy w tle (launchd) |
 
 ---
 
@@ -1618,6 +1647,7 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2, 2.3):
 | 2.3 | 20.10.2026 | **WhatsApp**: poranny przegląd z głosówką („Hej Andrzej!”, polski głos Piper, lokalnie), rozmowa i komendy (zadania, zrobione N, pilne, poczta, kalendarz, dokumenty, zapamiętaj, cisza), rozumienie głosówek (mlx-whisper), powiadomienia z ciszą nocną, opcjonalnie wieczór i tydzień; zakładka WhatsApp, polecenia `wa-*`, sekcja „7. WhatsApp” w `check` |
 | 2.6 | 3.11.2026 | **Asystent na WhatsAppie**: rola `asystent` (sprawy firmowe), dodawanie zadań z WhatsAppa (od razu w panelu, z terminem), `szczegóły N`, pytania do właściciela z odsyłaniem odpowiedzi, zgłaszanie pomysłów (panel, `wa-pomysly`), powiadomienia o działaniach asystenta |
 | 2.7 | 9.11.2026 | **Dodatki** (gniazdo `dodatki_host.py`, układ jak w Sebastianie 3) i pierwszy dodatek **Przypominacz**: głosówka „na później” → potwierdzenie → kontekst z poczty i WhatsAppa → wieczorem po ostatnim spotkaniu wiadomość i głos (albo połączenie Twilio) → drugi raz po godzinie → minka; odpowiedzi regułami i modelem; polecenia `dodatki`, `dodatek` |
+| 2.8 | 11.11.2026 | Dodatek Rekrutacja: panel Agi przez Tailscale z powitaniem, baza faktów, CV i list z kontrolą prawdy, źródła ofert, wysyłka (Gmail, Recruitee), odpowiedzi, podziękowania, przypomnienia, WhatsApp, raport wieczorny |
 | 2.5.2 | 20.10.2026 | Poprawka nauki z rozmów WhatsApp: w procesie nauki moduł WhatsAppa nie był podłączony (`AttributeError: 'NoneType' object has no attribute 'TZ'` co 2 minuty i zablokowana kolejka). Dodatkowo: pozycja, która 3 razy z rzędu kończy się błędem, dostaje status „błąd” i nauka idzie dalej (`learn-retry` przywraca) |
 | 2.5.1 | 20.10.2026 | Diagnostyka „żona pisze, a Sebastian milczy”: odrzucone numery w logu i w `wa-status` (nazwa profilu, zamaskowany numer, bez treści, raz na godzinę), ostrzeżenie, gdy Sebastian jest na numerze właściciela, a lista zawiera inne osoby; w `wa-status` poziom dostępu i czy osoba została przywitana |
 | 2.5 | 20.10.2026 | **WhatsApp — pamięć rozmów i dostęp pełny**: rozmowy przechowywane na stałe, czytanie załączników (PDF, Office, OCR zdjęć — także wysłanych przez Ciebie), zapis historii przesłanej przy połączeniu, akta osób (`kto to Jan`, `wa-watch ludzie`, panel), nauka z rozmów (zakres `whatsapp`, bez Open WebUI); lista dozwolonych numerów z poziomem dostępu `prywatny`/`pelny` (`wa-user dodaj --dostep pelny`) |

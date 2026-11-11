@@ -1,0 +1,52 @@
+<h3>Kontakt</h3>
+<div class="row"><div><label>Imię</label><input type="text" name="o_imie" value="{{ f.osoba.imie }}" required></div>
+<div><label>Nazwisko</label><input type="text" name="o_nazwisko" value="{{ f.osoba.nazwisko }}" required></div></div>
+<div class="row"><div><label>E-mail w CV</label><input type="email" name="o_email" value="{{ f.osoba.email }}" required></div>
+<div><label>Telefon</label><input type="text" name="o_telefon" value="{{ f.osoba.telefon }}"></div></div>
+<div class="row"><div><label>Ulica i numer</label><input type="text" name="o_adres" value="{{ f.osoba.adres }}"></div>
+<div><label>Kod i miasto</label><input type="text" name="o_miasto" value="{{ f.osoba.miasto }}"></div></div>
+<label>Profil LinkedIn (opcjonalnie)</label><input type="text" name="o_linkedin" value="{{ f.osoba.linkedin }}">
+{% if not has_photo %}<p class="small soft" style="margin-top:10px">Nie mam zdjęcia do CV. Poproś Andrzeja, żeby wgrał plik <code>zdjecie.jpg</code> do folderu dodatku.</p>{% endif %}
+
+<h3 style="margin-top:28px">Profil zawodowy</h3>
+<p class="small soft">Z tych zdań składam początek CV: do każdej oferty wybieram 3–4 najlepiej pasujące. Każde zdanie w osobnej linii. Niczego do nich nie dopisuję.</p>
+<textarea name="profil" rows="6">{% for p in f.profil %}{{ p.tekst }}
+{% endfor %}</textarea>
+
+<h3 style="margin-top:28px">Doświadczenie</h3>
+<p class="small soft">Daty i nazwy trafiają do CV dokładnie tak, jak tutaj. Punkty wpisuj po jednym w linii.</p>
+{% set jobs = f.doswiadczenie + [{}, {}, {}] %}
+<input type="hidden" name="ile_stanowisk" value="{{ jobs|length }}">
+{% for j in jobs %}
+<div class="job{{ ' extra' if not j.stanowisko }}" {{ 'hidden' if not j.stanowisko }}>
+  <div class="row"><div><label>Stanowisko</label><input type="text" name="d{{ loop.index0 }}_stanowisko" value="{{ j.stanowisko or '' }}"></div>
+  <div><label>Firma</label><input type="text" name="d{{ loop.index0 }}_firma" value="{{ j.firma or '' }}"></div></div>
+  <div class="row3"><div><label>Miejscowość</label><input type="text" name="d{{ loop.index0 }}_miejsce" value="{{ j.miejsce or '' }}"></div>
+  <div><label>Od</label><input type="text" name="d{{ loop.index0 }}_od" value="{{ j.od or '' }}" placeholder="MM.RRRR"></div>
+  <div><label>Do</label><input type="text" name="d{{ loop.index0 }}_do" value="{{ j.do or '' }}" placeholder="MM.RRRR albo obecnie"></div></div>
+  <label>Co robiłam (po jednym punkcie w linii)</label>
+  <textarea name="d{{ loop.index0 }}_punkty" rows="3">{% for p in j.punkty or [] %}{{ p.tekst }}
+{% endfor %}</textarea>
+  {% if j.stanowisko %}<label class="check small"><input type="checkbox" name="d{{ loop.index0 }}_usun" value="1"> usuń to stanowisko z bazy</label>{% endif %}
+</div>
+{% endfor %}
+<p style="margin-top:14px"><button type="button" class="btn ghost" onclick="var e=document.querySelector('.job.extra[hidden]');if(e){e.hidden=false}else{this.disabled=true;this.textContent='Zapisz, a pojawią się kolejne pola'}">Dodaj stanowisko</button></p>
+
+<h3 style="margin-top:28px">Wykształcenie</h3>
+{% set schools = f.wyksztalcenie + [{}] %}
+<input type="hidden" name="ile_szkol" value="{{ schools|length }}">
+{% for e in schools %}
+<div class="job">
+  <div class="row"><div><label>Uczelnia lub szkoła</label><input type="text" name="w{{ loop.index0 }}_uczelnia" value="{{ e.uczelnia or '' }}"></div>
+  <div><label>Kierunek</label><input type="text" name="w{{ loop.index0 }}_kierunek" value="{{ e.kierunek or '' }}"></div></div>
+  <div class="row"><div><label>Tytuł</label><input type="text" name="w{{ loop.index0 }}_tytul" value="{{ e.tytul or '' }}"></div>
+  <div><label>Okres</label><input type="text" name="w{{ loop.index0 }}_okres" value="{{ e.okres or '' }}"></div></div>
+</div>
+{% endfor %}
+
+<h3 style="margin-top:28px">Kursy i kwalifikacje</h3>
+<textarea name="kursy" rows="4">{% for k in f.kursy %}{{ k.tekst }}
+{% endfor %}</textarea>
+<h3 style="margin-top:20px">Języki</h3>
+<textarea name="jezyki" rows="3">{% for k in f.jezyki %}{{ k.tekst }}
+{% endfor %}</textarea>

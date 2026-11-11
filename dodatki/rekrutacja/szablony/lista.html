@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+{% if search %}
+<form method="get" class="row" style="margin:16px 0 18px;grid-template-columns:2fr 1fr">
+  <input type="search" name="q" value="{{ q }}" placeholder="Szukaj firmy, stanowiska, adresu…" autofocus>
+  <select name="status" onchange="this.form.submit()"><option value="">Wszystkie statusy</option>
+    {% for k, v in STATUS.items() %}<option value="{{ k }}" {{ 'selected' if status == k }}>{{ v }}</option>{% endfor %}</select>
+</form>
+<p class="small soft">Ktoś dzwoni z firmy? Wpisz jej nazwę, a zobaczysz, na co aplikowałaś i co wysłałaś.</p>
+{% endif %}
+<div class="card list">
+  {% for r in rows %}{% include "_wiersz.html" %}{% else %}<p class="soft center" style="margin:20px 0">{{ empty }}</p>{% endfor %}
+</div>
+{% endblock %}
