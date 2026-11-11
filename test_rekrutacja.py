@@ -70,6 +70,8 @@ class RekrutacjaBase(Base):
         pkg = self.mod.__name__
         self.extra.append(patch.object(importlib.import_module(pkg + ".poczta"), "send", self.fake_send))
         self.extra[-1].start()
+        self.extra.append(patch.object(importlib.import_module(pkg + ".kontakty"), "find_email", lambda *a, **k: {}))   # bez internetu
+        self.extra[-1].start()
         self.R = importlib.import_module(pkg + ".rdzen")
         self.D = importlib.import_module(pkg + ".dokumenty")
         self.P = importlib.import_module(pkg + ".panel")
@@ -654,6 +656,233 @@ class ReviewFindings(Replies):
         self.assertTrue(self.P.evening_report(self.ctx, send=self.fake_send, force=True))
         with patch.object(W, "now", lambda: TUE_10.replace(hour=20, minute=5)):
             self.assertTrue(self.P.evening_report(self.ctx, send=self.fake_send))
+
+
+class Update281(RekrutacjaBase):
+    """2.8.1: klauzula RODO, sprzedaż i obsługa klienta, szukanie maila w sieci, agregatory, import wiedzy."""
+
+    def mod_(self, name):
+        return importlib.import_module(self.mod.__name__ + "." + name)
+
+    def test_consent_clause_is_validated(self):
+        info = "Jeśli masz pytania dotyczące przetwarzania Twoich danych, skontaktuj się z inspektorem: iod@firma.pl. Administratorem danych jest Firma."
+        self.assertFalse(self.R.is_consent(info))
+        good = "Wyrażam zgodę na przetwarzanie moich danych osobowych przez Firma Sp. z o.o. w celu prowadzenia rekrutacji na stanowisko Asystentka."
+        self.assertTrue(self.R.is_consent(good))
+        self.assertEqual(self.R.consent_clause("Firma", good), good)
+        default = self.R.consent_clause("Biuro Testowe", info)
+        self.assertIn("przez Biuro Testowe", default)
+        self.assertIn("przyszłych procesów rekrutacyjnych", default)
+        import fitz
+        self.ready()
+        aid = self.add()
+        with patch.object(W, "ask", lambda prompt, **kw: json.dumps({"firma": "Testowe", "stanowisko": "Asystentka", "miasto": "Kraków",
+                                                                      "email": "rekrutacja@testowe.pl", "rodo": info, "ocena": 80})
+                          if "Przeczytaj" in prompt else self.model(prompt)):
+            self.P.prepare(self.ctx, aid)
+        a = self.row(aid)
+        text = re.sub(r"\s+", " ", fitz.open(self.P.app_dir(self.ctx, aid) / a["cv_plik"])[0].get_text())
+        self.assertNotIn("skontaktuj się z inspektorem", text)
+        self.assertIn("przyszłych procesów rekrutacyjnych", text)
+
+    def test_sales_and_customer_service_are_welcome(self):
+        Z = self.mod_("zrodla")
+        self.assertTrue(Z.looks_relevant(self.facts, "Doradca klienta w salonie"))
+        self.assertTrue(Z.looks_relevant(self.facts, "Specjalistka ds. sprzedaży"))
+        O = self.mod_("oferty")
+        with patch.object(W, "ask", lambda prompt, **kw: json.dumps({"firma": "X", "stanowisko": "Sprzedawca", "sprzedaz": True, "ocena": 70})):
+            out = O.analyze(self.ctx, self.facts, "sprzedaż sprzedaż sprzedaż obsługa klienta, cele sprzedażowe, prowizja")
+        self.assertEqual(out["ostrzezenia"], [])
+        f = self.R.load_facts(self.ctx)
+        f["kryteria"]["nie_chce"] = list(self.R.AVOID)
+        self.assertFalse(Z.looks_relevant(f, "Sprzedawca w sklepie"))
+
+    def test_migration_unblocks_sales_and_fixes_old_clauses(self):
+        self.ready()
+        f = self.R.load_facts(self.ctx)
+        f["kryteria"]["nie_chce"] = list(self.R.AVOID) + ["praca w nocy"]
+        self.R.save_facts(self.ctx, f)
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        with self.R.db(self.ctx) as c:
+            c.execute("UPDATE aplikacje SET rodo='Informacja o administratorze danych osobowych — kontakt iod@x.pl, dane przetwarzamy w celu…' WHERE id=?", (aid,))
+            c.commit()
+        self.P.migrate_281(self.ctx)
+        crit = self.R.load_facts(self.ctx)["kryteria"]
+        self.assertEqual(crit["nie_chce"], ["praca w nocy"])
+        self.assertIn("sprzedaż i doradztwo", crit["chce"])
+        self.assertEqual(self.row(aid)["rodo"], "")
+
+    def site(self, pages):
+        """Udawany internet: adres → html."""
+        def get(url, **k):
+            for key, page in pages.items():
+                if url.rstrip("/") == key.rstrip("/"):
+                    return page, url
+            raise RuntimeError("404")
+        return get
+
+    def test_company_email_found_on_its_website(self):
+        K = self.mod_("kontakty")
+        Z = self.mod_("zrodla")
+        importlib.reload(K) if False else None
+        real_find = K.__dict__.get("find_email")
+        pages = {"https://testowe.pl": '<html><title>Biuro Testowe</title><body>Biuro Testowe — usługi. <a href="/kontakt">Kontakt</a></body></html>',
+                 "https://testowe.pl/kontakt": "Biuro Testowe, Kraków. Napisz: iod@testowe.pl, biuro@testowe.pl, rekrutacja@testowe.pl, jan@gmail.com"}
+        self.extra[-1].stop()                                             # w tym teście prawdziwa funkcja, udawane strony
+        try:
+            find = importlib.import_module(self.mod.__name__ + ".kontakty").find_email
+            with patch.object(Z, "_get", lambda url, **k: self.site(pages)(url)):
+                got = find(self.ctx, {"firma": "Biuro Testowe Sp. z o.o.", "url": "https://www.pracuj.pl/praca/1"})
+                self.assertEqual((got["email"], got["sposob"]), ("rekrutacja@testowe.pl", "domysl"))
+                self.assertEqual(find(self.ctx, {"firma": "Zupełnie Inna Firma", "url": ""}), {})
+            other = {"https://kowalski.pl": "<html>Sklep z rowerami Kowalski</html>"}
+            with patch.object(Z, "_get", lambda url, **k: self.site(other)(url)):
+                self.assertEqual(find(self.ctx, {"firma": "Kancelaria Adwokacka Jan Kowalski", "url": ""}), {})
+        finally:
+            self.extra[-1].start()
+
+    def test_prepare_uses_web_email_and_mentions_the_offer(self):
+        self.ready()
+        self.ctx.set_setting("autopilot", "tak")
+        aid = self.add(zrodlo="auto", url="https://kariera.firma.pl/oferta/1", tresc=OFFER.replace("rekrutacja@testowe.pl", "formularz na stronie"))
+        K = self.mod_("kontakty")
+        with patch.object(K, "find_email", lambda *a, **k: {"email": "biuro@testowe.pl", "strona": "https://testowe.pl/kontakt", "sposob": "domysl"}), \
+             patch.object(W, "ask", lambda prompt, **kw: json.dumps({"firma": "Biuro Testowe", "stanowisko": "Asystentka", "miasto": "Kraków", "ocena": 90})
+                          if "Przeczytaj" in prompt else (None if "Piszesz w imieniu" in prompt else self.model(prompt))):
+            status = self.P.prepare(self.ctx, aid)
+        a = self.row(aid)
+        self.assertEqual(status, "do_zatwierdzenia")                      # adres zgadnięty → bez autopilota
+        self.assertEqual(a["email"], "biuro@testowe.pl")
+        self.assertIn("w nawiązaniu do ogłoszenia Państwa firmy na stanowisko Asystentka (https://kariera.firma.pl/oferta/1)", a["mail"])
+        self.assertIn("sprawdź, czy to ta firma", a["uwagi"])
+
+    def test_aggregators(self):
+        Z = self.mod_("zrodla")
+
+        class Resp:
+            status_code = 200
+
+            def __init__(self, data):
+                self.data = data
+
+            def json(self):
+                return self.data
+
+            def raise_for_status(self):
+                pass
+        calls = []
+        adz = {"results": [{"title": "Asystentka biura", "company": {"display_name": "ABC"}, "location": {"display_name": "Kraków, małopolskie"},
+                            "description": "Obsługa biura i dokumentacji", "redirect_url": "https://www.adzuna.pl/land/ad/1"}]}
+        got = Z.adzuna(self.ctx, "id", "key", get=lambda url, params=None, **k: calls.append(params) or Resp(adz))
+        self.assertEqual((got[0]["firma"], got[0]["url"]), ("ABC", "https://www.adzuna.pl/land/ad/1"))
+        self.assertEqual((calls[0]["where"], calls[0]["distance"]), ("Kraków", 50))
+        job = {"jobs": [{"title": "Recepcjonistka", "company": "Hotel X", "location": "Kraków", "snippet": "recepcja", "link": "https://jooble.org/desc/1"}]}
+        got = Z.jooble(self.ctx, "k", post=lambda url, json=None, **k: Resp(job))
+        self.assertEqual(got[0]["tytul"], "Recepcjonistka")
+        with self.R.db(self.ctx) as c:
+            Z.seed(c, self.ctx)
+            c.execute("DELETE FROM zrodla WHERE typ NOT IN ('adzuna','jooble')")
+            c.commit()
+        Z.discover(self.ctx)
+        with self.R.db(self.ctx) as c:
+            self.assertIn("czeka na klucz", c.execute("SELECT wynik FROM zrodla WHERE typ='adzuna'").fetchone()["wynik"])
+
+    def test_knowledge_import_from_chatgpt_export(self):
+        Wd = self.mod_("wiedza")
+        export = [{"title": "Pomoc z CV", "mapping": {
+            "a": {"message": {"author": {"role": "user"}, "create_time": 1, "content": {"parts": ["Pomóż mi z CV. Pracowałam w ZZOZ, robiłam grafiki zmian dla 20 osób."]}}},
+            "b": {"message": {"author": {"role": "assistant"}, "create_time": 2, "content": {"parts": ["Napiszę, że znasz SAP i masz certyfikat PMP."]}}}}},
+            {"title": "Przepis na sernik", "mapping": {"c": {"message": {"author": {"role": "user"}, "content": {"parts": ["Jak zrobić sernik?"]}}}}}]
+        n, msg = Wd.start(self.ctx, upload=json.dumps(export).encode(), filename="conversations.json")
+        self.assertEqual((n, msg), (1, ""))
+        job = Wd.load(self.ctx)
+        self.assertIn("grafiki zmian", job["kawalki"][0])
+        self.assertNotIn("SAP", job["kawalki"][0])                        # odpowiedzi ChatGPT pomijane
+        self.assertNotIn("sernik", job["kawalki"][0])
+        found = {"profil": ["Układałam grafiki pracy dla zespołu 20 osób."], "punkty": [{"stanowisko": "Sekretarka medyczna", "firma": "ZZOZ", "tekst": "układanie grafików zmian dla 20 osób"}],
+                 "narzedzia": [{"nazwa": "Word", "poziom": "dobry"}], "niepewne": ["zna SAP"]}
+        with patch.object(W, "ask", lambda prompt, **kw: json.dumps(found)):
+            Wd.work(self.ctx)
+            Wd.work(self.ctx)
+        job = Wd.load(self.ctx)
+        self.assertEqual(job["status"], "do przejrzenia")
+        ids = {c["id"] for c in job["kandydaci"] if c["rodzaj"] != "profil"}
+        self.assertEqual(Wd.apply(self.ctx, ids | {999}), 2)
+        f = self.R.load_facts(self.ctx)
+        pts = [p["tekst"] for p in f["doswiadczenie"][0]["punkty"]]
+        self.assertIn("układanie grafików zmian dla 20 osób", pts)
+        self.assertIn("Word", [t["nazwa"] for t in f["narzedzia"]])
+        self.assertNotIn("Układałam grafiki pracy dla zespołu 20 osób.", [p["tekst"] for p in f["profil"]])
+        self.assertIsNone(Wd.load(self.ctx))
+
+
+class Corrections281(RekrutacjaBase):
+    def test_optional_positions_only_when_picked(self):
+        f = self.R.load_facts(self.ctx)
+        jobs = [dict(j, punkty=[p["tekst"] for p in j["punkty"]]) for j in f["doswiadczenie"]]
+        jobs.append({"stanowisko": "Asystent nauczyciela", "firma": "Przedszkole", "od": "02.2021", "do": "04.2021", "opcjonalne": True, "punkty": ["praca z dziećmi"]})
+        f["doswiadczenie"] = jobs
+        self.R.save_facts(self.ctx, f)
+        f = self.R.load_facts(self.ctx)
+        self.assertNotIn("d3", self.D.default_selection(f)["kolejnosc"])
+        self.assertNotIn("d3", self.D.clean_selection(f, {"kolejnosc": ["d1"]})["kolejnosc"])
+        sel = self.D.clean_selection(f, {"kolejnosc": ["d3", "d1"]})
+        self.assertEqual(sel["kolejnosc"], ["d2", "d1", "d3"])            # w CV zawsze od najnowszego
+        self.assertEqual(sel["ranking"][:2], ["d3", "d1"])                # a ważność według oferty
+
+    def test_less_relevant_positions_are_shorter_and_cv_has_only_city(self):
+        f = self.R.load_facts(self.ctx)
+        jobs = [dict(j, punkty=[p["tekst"] for p in j["punkty"]]) for j in f["doswiadczenie"]]
+        for extra in range(3):
+            jobs.append({"stanowisko": f"Stanowisko {extra}", "firma": "X", "od": f"0{extra + 1}.2019", "do": f"0{extra + 2}.2019",
+                         "punkty": ["a", "b", "c", "d"]})
+        f["doswiadczenie"] = jobs
+        self.R.save_facts(self.ctx, f)
+        f = self.R.load_facts(self.ctx)
+        sel = self.D.clean_selection(f, {"kolejnosc": ["d1", "d2", "d3"]})
+        self.assertEqual(len(sel["punkty"]["d5"]), 2)
+        self.assertEqual(len(self.D.default_selection(f)["punkty"]["d5"]), 4)
+        self.mod.apply_patch(self.ctx, {"osoba": {"adres": "", "miasto": "Kraków"}, "warunki": {"dojazd_km": 20}, "ustawienia": {"bez_prowizji": "tak"}})
+        import fitz
+        out = self.ctx.folder() / "cv3.pdf"
+        self.D.render_cv(self.R.load_facts(self.ctx), None, out)
+        text = fitz.open(out)[0].get_text()
+        self.assertNotIn("Próbna", text)
+        self.assertIn("Kraków", text)
+        self.assertTrue(self.ctx.settings()["bez_prowizji"])
+        self.assertTrue(self.R.in_area("Wieliczka", 20) and not self.R.in_area("Bochnia", 20) and self.R.in_area("Bochnia", 50))
+
+    def test_patch_from_chatgpt_summary(self):
+        patch_ = {"punkty": [{"firma": "ZZOZ", "tekst": "umawianie badań i organizowanie transportu medycznego"}],
+                  "kursy": ["Interwencja kryzysowa - CRP (2022)", "Szkolenie z LinkedIna"], "kursy_zmien": [{"zawiera": "Interwencja kryzysowa", "na": "Interwencja kryzysowa - CRP (2026)"}],
+                  "kursy_usun": ["LinkedIn"], "narzedzia": [{"nazwa": "Excel", "poziom": "bardzo dobry"}], "narzedzia_usun": ["Canva"],
+                  "nie_chce": ["praca w social mediach"], "historia": [{"firma": "homfi", "stanowisko": "Asystent Oddziału"}]}
+        self.mod.apply_patch(self.ctx, patch_)
+        self.mod.apply_patch(self.ctx, patch_)                          # drugi raz niczego nie dubluje
+        f = self.R.load_facts(self.ctx)
+        kursy = [k["tekst"] for k in f["kursy"]]
+        self.assertIn("Interwencja kryzysowa - CRP (2026)", kursy)
+        self.assertFalse(any("LinkedIn" in k or "(2022)" in k and "Interwencja" in k for k in kursy))
+        self.assertEqual([(t["nazwa"], t["poziom"]) for t in f["narzedzia"]], [("Excel", "bardzo dobry")])
+        self.assertEqual([p["tekst"] for p in f["doswiadczenie"][0]["punkty"]].count("umawianie badań i organizowanie transportu medycznego"), 1)
+        Z = importlib.import_module(self.mod.__name__ + ".zrodla")
+        self.assertFalse(Z.looks_relevant(f, "Social Media Manager"))
+        self.assertTrue(Z.looks_relevant(f, "Asystentka biura"))
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM aplikacje WHERE firma='homfi'").fetchone()[0], 1)
+            self.assertTrue(self.R.find_duplicate(c, "homfi", "Asystent Oddziału"))
+
+    def test_pay_never_imported(self):
+        Wd = importlib.import_module(self.mod.__name__ + ".wiedza")
+        items = Wd._items({"profil": ["Zarabiałam 5000 zł netto.", "Mam doświadczenie w administracji."],
+                           "punkty": [{"firma": "X", "tekst": "stawka 31 zł/h"}], "odpowiedzi": [{"pytanie": "Oczekiwania finansowe", "odpowiedz": "7000 netto"},
+                                                                                              {"pytanie": "Dostępność", "odpowiedz": "od zaraz"}]})
+        texts = " ".join(i["tekst"] for i in items)
+        self.assertNotIn("5000", texts)
+        self.assertNotIn("31 zł", texts)
+        self.assertNotIn("7000", texts)
+        self.assertIn("Dostępność: od zaraz", texts)
 
 
 if __name__ == "__main__":

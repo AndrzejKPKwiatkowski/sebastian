@@ -27,6 +27,7 @@
   <label>Co robiłam (po jednym punkcie w linii)</label>
   <textarea name="d{{ loop.index0 }}_punkty" rows="3">{% for p in j.punkty or [] %}{{ p.tekst }}
 {% endfor %}</textarea>
+  <label class="check small"><input type="checkbox" name="d{{ loop.index0 }}_opcjonalne" value="1" {{ 'checked' if j.opcjonalne }}> pokazuj w CV tylko wtedy, gdy pasuje do oferty</label>
   {% if j.stanowisko %}<label class="check small"><input type="checkbox" name="d{{ loop.index0 }}_usun" value="1"> usuń to stanowisko z bazy</label>{% endif %}
 </div>
 {% endfor %}

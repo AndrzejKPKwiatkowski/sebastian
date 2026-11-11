@@ -69,18 +69,20 @@ def safe_url(url):
     return True
 
 
-def fetch(url):
-    """(tekst, tytuł, [maile]) albo wyjątek RuntimeError z komunikatem po polsku."""
+def fetch(url, deny=None):
+    """(tekst, tytuł, [maile], [linki]) albo wyjątek RuntimeError z komunikatem po polsku."""
     import requests
     if not safe_url(url):
         raise RuntimeError("Ten adres nie wygląda na publiczną stronę z ogłoszeniem.")
+    if deny and deny(url):
+        raise RuntimeError("Ten portal nie zgadza się na automaty.")
     try:
         with requests.get(url, timeout=25, stream=True, allow_redirects=False,
                           headers={"User-Agent": "Mozilla/5.0 (Macintosh) Sebastian-Rekrutacja", "Accept-Language": "pl,en;q=0.7"}) as r:
             hops = 0
             while r.is_redirect and hops < 5:
                 nxt = requests.compat.urljoin(r.url, r.headers.get("Location", ""))
-                if not safe_url(nxt):
+                if not safe_url(nxt) or (deny and deny(nxt)):
                     raise RuntimeError("Strona przekierowuje pod adres, którego nie otwieram.")
                 r = requests.get(nxt, timeout=25, stream=True, allow_redirects=False, headers=r.request.headers)
                 hops += 1
@@ -96,7 +98,8 @@ def fetch(url):
     text, title = to_text(page)
     if len(text) < 200:
         raise RuntimeError("Strona nie pokazała treści ogłoszenia (pewnie wymaga przeglądarki). Wklej treść ręcznie.")
-    return text[:20000], title[:200], emails(html.unescape(page))
+    links = [html.unescape(h) for h in re.findall(r'href=["\'](https?://[^"\'#]+)["\']', page, re.I)][:300]
+    return text[:20000], title[:200], emails(html.unescape(page)), links
 
 
 def emails(text):
@@ -117,9 +120,10 @@ def sales_hits(text):
 
 def analyze(ctx, f, text, title="", url=""):
     """Dane oferty i ocena dopasowania. Bez modelu zwraca to, co da się ustalić regułami."""
-    out = {"firma": "", "stanowisko": "", "miasto": "", "email": "", "ocena": None, "uzasadnienie": "", "rodo": "", "ostrzezenia": []}
-    hits = sales_hits(text)
-    if hits >= 3:
+    out = {"firma": "", "stanowisko": "", "miasto": "", "email": "", "ocena": None, "uzasadnienie": "", "rodo": "", "ostrzezenia": [],
+           "social_media": False, "niedziele_wieczory": False, "tylko_prowizja": False}
+    no_sales = any(x in R.SALES_AVOID for x in f["kryteria"].get("nie_chce", []))
+    if no_sales and sales_hits(text) >= 3:
         out["ostrzezenia"].append("W ogłoszeniu często pojawia się sprzedaż albo obsługa klienta — sprawdź zakres obowiązków.")
     crit = f["kryteria"]
     w = f["warunki"]
@@ -137,8 +141,11 @@ OGŁOSZENIE:
 JSON:
 {{"firma": "nazwa pracodawcy", "stanowisko": "nazwa stanowiska bez dopisków typu (K/M)", "miasto": "miejsce pracy albo zdalnie",
   "email": "adres do wysłania aplikacji, jeśli jest w treści",
-  "rodo": "dokładna treść klauzuli zgody, której wymaga pracodawca, jeśli ją podał",
+  "rodo": "dokładna treść klauzuli ZGODY do wpisania w CV (zaczyna się zwykle od „Wyrażam zgodę na przetwarzanie…”), jeśli pracodawca ją podał; NIE informacja o przetwarzaniu danych ani o administratorze",
   "sprzedaz": true/false (czy znaczną część pracy stanowi sprzedaż, pozyskiwanie klientów albo stała obsługa klienta),
+  "social_media": true/false (czy główną częścią pracy jest prowadzenie mediów społecznościowych lub tworzenie treści na nie),
+  "niedziele_wieczory": true/false (czy ogłoszenie wymaga regularnej pracy w niedziele albo wieczorami/nocą),
+  "tylko_prowizja": true/false (czy wynagrodzenie jest wyłącznie prowizyjne, bez stałej podstawy),
   "ocena": liczba 0-100 (jak dobrze oferta pasuje do tego, czego kandydatka szuka i co umie),
   "uzasadnienie": "jedno zdanie po polsku"}}"""
     got = None
@@ -156,10 +163,13 @@ JSON:
             out["ocena"] = max(0, min(100, int(float(got.get("ocena")))))
         except (TypeError, ValueError):
             pass
-        if got.get("sprzedaz") is True and not out["ostrzezenia"]:
+        out["social_media"] = got.get("social_media") is True
+        out["niedziele_wieczory"] = got.get("niedziele_wieczory") is True
+        out["tylko_prowizja"] = got.get("tylko_prowizja") is True
+        if no_sales and got.get("sprzedaz") is True and not out["ostrzezenia"]:
             out["ostrzezenia"].append("Model ocenia, że znaczną część tej pracy stanowi sprzedaż albo obsługa klienta.")
-        if out["rodo"] and (len(out["rodo"]) < 60 or R.plain(out["rodo"])[:40] not in R.plain(text)):
-            out["rodo"] = ""                                         # klauzula musi być cytatem z ogłoszenia
+        if out["rodo"] and (not R.is_consent(out["rodo"]) or R.plain(out["rodo"])[:40] not in R.plain(text)):
+            out["rodo"] = ""                                         # tylko prawdziwa klauzula zgody, zacytowana z ogłoszenia
     if not out["stanowisko"] and title:
         out["stanowisko"] = re.split(r"\s[|\-–—]\s", title)[0][:120]
     return out

@@ -263,3 +263,17 @@ Wynik: 100 testów zaliczonych, 7 pominiętych (`test_sebastian`, `test_dodatki`
 Nie sprawdzono tu: prawdziwego Gmaila (logowanie hasłem aplikacji, IMAP), prawdziwych stron startowych źródeł (z tego środowiska
 nie ma do nich dostępu), formularza Recruitee na żywo, jakości listów z modelu na Macu, wyglądu w Safari, nasłuchu na adresie Tailscale
 i zapory macOS.
+
+
+# Weryfikacja 2.8.1
+
+Data: 2026-11-11. Wynik: `test_rekrutacja` — 46 testów zaliczonych; `test_sebastian`, `test_dodatki`, `test_whatsapp` bez zmian (zaliczone).
+
+- RODO: informacja o administratorze nie jest zgodą → w CV klauzula domyślna z nazwą firmy; prawdziwa zgoda przechodzi bez zmian; migracja przelicza czekające aplikacje.
+- Sprzedaż i obsługa klienta przechodzą filtry; przy ustawionym wykluczeniu nadal są pomijane; social media wykluczone.
+- CV: od najnowszego; ranking z oferty decyduje o długości opisu; stanowiska opcjonalne tylko na życzenie modelu; tylko „Kraków” w kontakcie; jedna strona.
+- Adres firmy: strona z nazwą firmy i adres w jej domenie (IOD pominięty); obca strona z podobną nazwą odrzucona; mail „w nawiązaniu do ogłoszenia … (link)”; adres zgadnięty → bez autopilota; liczby w linkach nie są zgłaszane przez kontrolę prawdy.
+- Agregatory: Adzuna i Jooble — poprawne parametry (Kraków, promień z ustawień), bez klucza „czeka na klucz”.
+- Import wiedzy: z eksportu tylko wiadomości użytkowniczki z rozmów o pracy; niepewne i zarobki nigdy nie trafiają do bazy; dopisywanie bez duplikatów; uzupełnienia z pliku idempotentne.
+
+Nie sprawdzono tu: prawdziwych odpowiedzi Jooble, Adzuny i Brave, prawdziwych stron firm.

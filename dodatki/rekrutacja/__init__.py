@@ -154,5 +154,85 @@ def cmd_raport(ctx, args):
     return 0
 
 
-COMMANDS = {"szukaj": cmd_szukaj, "skrzynka": cmd_skrzynka, "raport": cmd_raport, "start": cmd_start, "usluga": cmd_usluga, "adres": cmd_adres, "haslo": cmd_haslo, "status": cmd_status,
+def cmd_uzupelnij(ctx, args):
+    """Scala zatwierdzone uzupełnienia (JSON) z bazą faktów. Niczego nie usuwa poza tym, co plik wprost wskazuje."""
+    import json
+    from pathlib import Path
+    if not args:
+        print("Użycie: python sebastian.py dodatek rekrutacja uzupelnij PLIK.json")
+        return 1
+    patch = json.loads(Path(args[0]).expanduser().read_text(encoding="utf-8"))
+    print(apply_patch(ctx, patch))
+    return 0
+
+
+def apply_patch(ctx, patch):
+    f = R.load_facts(ctx)
+    n = R.norm
+    added = 0
+    flat = lambda lst: [x["tekst"] if isinstance(x, dict) else x for x in lst]
+
+    def add_list(key, items):
+        nonlocal added
+        cur = flat(f[key])
+        for t in items:
+            if n(t) not in {n(x) for x in cur}:
+                cur.append(t)
+                added += 1
+        f[key] = cur
+
+    for key in ("profil", "umiejetnosci", "kursy", "jezyki"):
+        add_list(key, patch.get(key, []))
+    kursy = flat(f["kursy"])
+    for rule in patch.get("kursy_zmien", []):
+        kursy = [rule["na"] if n(rule["zawiera"]) in n(k) else k for k in kursy]
+    kursy = [k for k in kursy if not any(n(x) in n(k) for x in patch.get("kursy_usun", []))]
+    f["kursy"] = list(dict.fromkeys(kursy))
+    jobs = [dict(j, punkty=flat(j["punkty"])) for j in f["doswiadczenie"]]
+    for s in patch.get("stanowiska", []):
+        if not any(n(j["stanowisko"]) == n(s["stanowisko"]) and n(j.get("firma", "")) == n(s.get("firma", "")) for j in jobs):
+            jobs.append(dict(s))
+            added += 1
+    for p in patch.get("punkty", []):
+        j = next((j for j in jobs if (p.get("firma") and n(p["firma"]) in n(j.get("firma", ""))) or
+                  (p.get("stanowisko") and n(p["stanowisko"]) == n(j["stanowisko"]))), None)
+        if j is not None and n(p["tekst"]) not in {n(x) for x in j["punkty"]}:
+            j["punkty"].append(p["tekst"])
+            added += 1
+    f["doswiadczenie"] = jobs
+    tools = [{"nazwa": t["nazwa"], "poziom": t["poziom"]} for t in f["narzedzia"]]
+    tools = [t for t in tools if not any(n(x) in n(t["nazwa"]) for x in patch.get("narzedzia_usun", []))]
+    for t in patch.get("narzedzia", []):
+        cur = next((x for x in tools if n(x["nazwa"]) == n(t["nazwa"])), None)
+        if cur:
+            cur["poziom"] = t.get("poziom") or cur["poziom"]
+        else:
+            tools.append({"nazwa": t["nazwa"], "poziom": t.get("poziom", "")})
+            added += 1
+    f["narzedzia"] = tools
+    crit = f["kryteria"]
+    crit["nie_chce"] = list(dict.fromkeys(crit.get("nie_chce", []) + patch.get("nie_chce", [])))
+    for k, v in (patch.get("osoba") or {}).items():
+        f["osoba"][k] = v
+    for k, v in (patch.get("warunki") or {}).items():
+        f["warunki"][k] = v
+    for k, v in (patch.get("ustawienia") or {}).items():
+        ctx.set_setting(k, v)
+    R.save_facts(ctx, f)
+    hist = 0
+    with R.db(ctx) as c:
+        for h in patch.get("historia", []):
+            if R.find_duplicate(c, h["firma"], h.get("stanowisko", ""), zrodlo="oferta"):
+                continue
+            now = R.stamp(ctx)
+            cur = c.execute("INSERT INTO aplikacje(utworzono,zmieniono,status,zrodlo,firma,stanowisko,miasto,klucz,notatka,wyslano) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                            (now, now, h.get("status", "wyslana_recznie"), "oferta", h["firma"], h.get("stanowisko", ""), h.get("miasto", "Kraków"),
+                             R.dedupe_key(h["firma"], h.get("stanowisko", "")), h.get("notatka", "Aplikacja wysłana przed uruchomieniem Sebastiana."), ""))
+            R.note(c, ctx, cur.lastrowid, "dopisana z historii poszukiwań (przed Sebastianem)")
+            hist += 1
+        c.commit()
+    return f"Baza faktów: dodane {added}. Historia aplikacji: dopisane {hist}."
+
+
+COMMANDS = {"uzupelnij": cmd_uzupelnij, "szukaj": cmd_szukaj, "skrzynka": cmd_skrzynka, "raport": cmd_raport, "start": cmd_start, "usluga": cmd_usluga, "adres": cmd_adres, "haslo": cmd_haslo, "status": cmd_status,
             "ustawienia": cmd_ustawienia, "ustaw": cmd_ustaw}

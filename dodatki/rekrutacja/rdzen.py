@@ -36,6 +36,12 @@ KRAKOW_AREA = ["krakow", "wieliczka", "niepolomice", "skawina", "zabierzow", "zi
                "kocmyrzow", "igolomia", "klaj", "chrzanow", "trzebinia", "alwernia", "wadowice", "biskupice", "gdow", "sulkowice",
                "jerzmanowice", "wielka wies", "modlnica", "batowice", "rybna", "czernichow", "tyniec", "brzesko", "bukowno",
                "sulowice", "lanckorona", "pcim", "raciechowice", "kokotow", "prusy", "zelkow", "radziszow", "libertow"]
+AREA_KM = {"krakow": 0, "wieliczka": 15, "zielonki": 10, "zabierzow": 15, "skawina": 15, "liszki": 15, "mogilany": 15, "swiatniki": 15,
+           "michalowice": 12, "kocmyrzow": 15, "igolomia": 20, "niepolomice": 20, "modlnica": 10, "batowice": 8, "tyniec": 10,
+           "czernichow": 20, "wielka wies": 12, "rybna": 20, "biskupice": 20, "radziszow": 20, "libertow": 10, "kokotow": 15, "prusy": 15,
+           "zelkow": 12, "krzeszowice": 25, "sulkowice": 25, "dobczyce": 28, "kalwaria": 30, "myslenice": 30, "gdow": 30, "slomniki": 30,
+           "proszowice": 30, "klaj": 25, "lanckorona": 35, "jerzmanowice": 25, "alwernia": 30, "raciechowice": 35, "pcim": 40,
+           "bochnia": 40, "olkusz": 40, "miechow": 40, "trzebinia": 35, "chrzanow": 40, "bukowno": 40, "sulowice": 25, "wadowice": 45, "brzesko": 50}
 REMOTE = ["zdaln", "remote", "home office", "z domu", "hybryd", "cala polska", "dowolna lokalizacja"]
 
 
@@ -46,7 +52,7 @@ def in_area(place, km=50):
         return True
     if any(w in p for w in REMOTE):
         return True
-    return any(w in p for w in (KRAKOW_AREA if km >= 40 else KRAKOW_AREA[:12]))
+    return any(w in p for w, d in AREA_KM.items() if d <= km)
 
 RODO = ("Wyrażam zgodę na przetwarzanie moich danych osobowych dla potrzeb niezbędnych do realizacji procesu rekrutacji "
         "zgodnie z Rozporządzeniem Parlamentu Europejskiego i Rady (UE) 2016/679 z dnia 27 kwietnia 2016 r. w sprawie "
@@ -57,11 +63,30 @@ TOOLS = ["Word", "Excel", "PowerPoint", "Outlook", "Microsoft Teams", "Dokumenty
          "ChatGPT i narzędzia AI", "Zoom / Google Meet", "Systemy CRM", "Systemy dokumentacji medycznej",
          "Trello / Asana", "Media społecznościowe (obsługa profili)", "WordPress"]
 LEVELS = ["", "podstawowy", "dobry", "bardzo dobry"]
+def is_consent(text):
+    """Czy tekst to naprawdę klauzula zgody (a nie np. informacja o przetwarzaniu danych przez pracodawcę)."""
+    p = plain(text)
+    return bool(len(p) >= 60 and re.search(r"\b(wyrazam|udzielam) zgod", p) and "przetwarz" in p and re.search(r"danych osobowych|moich danych", p))
+
+
+def consent_clause(firma="", custom=""):
+    """Klauzula do CV: zgoda pracodawcy, jeśli to naprawdę zgoda; w przeciwnym razie szeroka klauzula domyślna."""
+    if custom and is_consent(custom):
+        return custom.strip()
+    who = f" przez {firma.strip()}" if firma and firma.strip() else ""
+    return (f"Wyrażam zgodę na przetwarzanie moich danych osobowych{who} dla potrzeb niezbędnych do realizacji obecnego procesu "
+            "rekrutacji, a także przyszłych procesów rekrutacyjnych, zgodnie z Rozporządzeniem Parlamentu Europejskiego i Rady (UE) "
+            "2016/679 z dnia 27 kwietnia 2016 r. w sprawie ochrony osób fizycznych w związku z przetwarzaniem danych osobowych i w sprawie "
+            "swobodnego przepływu takich danych oraz uchylenia dyrektywy 95/46/WE (RODO).")
+
+
 WANT = ["koordynacja projektów i zadań", "administracja i back office", "wsparcie zespołu lub zarządu (asysta)",
         "dokumentacja i obieg informacji", "research i analizy", "przygotowanie treści i materiałów",
-        "koordynacja wydarzeń i współpracy", "usprawnianie procesów i procedury", "administracja marketingu"]
+        "koordynacja wydarzeń i współpracy", "usprawnianie procesów i procedury", "administracja marketingu",
+        "sprzedaż i doradztwo", "obsługa klienta (biuro obsługi, recepcja, infolinia)"]
 AVOID = ["sprzedaż produktów lub usług", "pozyskiwanie klientów", "cold calling i telemarketing",
          "infolinia i call center", "stała bezpośrednia obsługa klientów lub pacjentów", "obsługa reklamacji"]
+SALES_AVOID = list(AVOID)
 
 
 # ================================================================ baza
@@ -204,7 +229,7 @@ def empty_facts():
             "narzedzia": [], "prawo_jazdy": False,
             "warunki": {"umowa": "umowa o pracę", "etat": "pełny etat", "min_netto": "", "dostepnosc": "", "dojazd_km": 50,
                         "zdalna": True, "poza_krakowem": True, "uwagi": ""},
-            "kryteria": {"chce": list(WANT), "nie_chce": list(AVOID)}, "rodo": RODO, "odpowiedzi": {}}
+            "kryteria": {"chce": list(WANT), "nie_chce": []}, "rodo": RODO, "odpowiedzi": {}}
 
 
 def load_facts(ctx):
@@ -262,7 +287,8 @@ def facts_brief(f, ids=True):
     out += [f"  {tag(p)}{p['tekst']}" for p in f["profil"]]
     out.append("DOŚWIADCZENIE:")
     for j in f["doswiadczenie"]:
-        out.append(f"  {tag(j)}{j['stanowisko']} — {j.get('firma', '')}, {j.get('miejsce', '')} ({j.get('od', '')} – {j.get('do', '')})")
+        out.append(f"  {tag(j)}{j['stanowisko']} — {j.get('firma', '')}, {j.get('miejsce', '')} ({j.get('od', '')} – {j.get('do', '')})"
+                   + (" (opcjonalne)" if j.get("opcjonalne") and ids else ""))
         out += [f"      {tag(p)}{p['tekst']}" for p in j["punkty"]]
     out.append("WYKSZTAŁCENIE:")
     out += [f"  {e.get('uczelnia', '')}: {e.get('kierunek', '')}, {e.get('tytul', '')} ({e.get('okres', '')})" for e in f["wyksztalcenie"]]

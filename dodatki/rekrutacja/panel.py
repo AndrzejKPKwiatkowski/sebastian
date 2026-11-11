@@ -6,7 +6,7 @@ dane dodatku Rekrutacja.
 import contextlib, datetime as dt, hmac, json, os, random, re, secrets, subprocess, threading, time
 from pathlib import Path
 
-from . import dokumenty as D, formularze as F, odpowiedzi as A, oferty as O, poczta as P, rdzen as R, zrodla as Z
+from . import dokumenty as D, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, poczta as P, rdzen as R, wiedza as Wd, zrodla as Z
 
 HERE = Path(__file__).resolve().parent
 STEPS = ["Powitanie", "Twoja skrzynka", "Skrzynka Sebastiana", "Twoje dane", "Narzędzia", "Czego szukasz", "Jak mam pracować", "Gotowe"]
@@ -14,6 +14,10 @@ OPEN_ENDPOINTS = {"login", "first_run", "healthz"}
 
 
 # ================================================================ przygotowanie kompletu dokumentów
+
+def _ok_social_f(f):
+    return not any("social" in R.plain(x) or "spolecznosciow" in R.plain(x) for x in f["kryteria"].get("nie_chce", []))
+
 
 def app_dir(ctx, aid):
     p = ctx.folder() / "aplikacje" / str(aid)
@@ -34,9 +38,10 @@ def render_files(ctx, f, a, letter, selection, rodo=""):
     base = f"{R.slug(f['osoba'].get('imie', ''), 'CV')}_{R.slug(f['osoba'].get('nazwisko', ''), 'x')}"
     firm = R.slug(a["firma"], "aplikacja")
     cv, li = f"{base}_CV_{firm}.pdf", f"{base}_List_{firm}.pdf"
-    D.render_cv(f, selection, folder / cv, photo=photo_path(ctx, f), rodo=rodo or None)
+    rodo = R.consent_clause(a.get("firma", ""), rodo)                   # zgoda pracodawcy tylko, jeśli to naprawdę zgoda
+    D.render_cv(f, selection, folder / cv, photo=photo_path(ctx, f), rodo=rodo)
     D.render_letter(f, letter, folder / li, firma=a["firma"], stanowisko="" if a["zrodlo"] == "spontaniczna" else a["stanowisko"],
-                    today=ctx.now().date(), rodo=rodo or None)
+                    today=ctx.now().date(), rodo=rodo)
     return cv, li
 
 
@@ -46,13 +51,18 @@ def prepare(ctx, aid):
     with R.db(ctx) as c:
         a = dict(c.execute("SELECT * FROM aplikacje WHERE id=?", (aid,)).fetchone())
         R.set_status(c, ctx, aid, "przygotowywanie", blad="")
-    notes, warn, found_mails, title = [], [], [], ""
+    notes, warn, found_mails, title, page_links = [], [], [], "", []
     try:
         if a["url"] and not a["tresc"].strip():
             try:
-                a["tresc"], title, found_mails = O.fetch(a["url"])
+                a["tresc"], title, found_mails, page_links = O.fetch(a["url"], deny=Z.blocked if a["zrodlo"] == "auto" else None)
             except RuntimeError as e:
                 notes.append(str(e))
+        elif a["url"] and a["zrodlo"] == "auto" and len(a["tresc"]) < 1500:
+            with contextlib.suppress(RuntimeError):                       # z agregatora jest tylko skrót — próbuję pełnej treści
+                full, title, found_mails, page_links = O.fetch(a["url"], deny=Z.blocked)
+                if len(full) > len(a["tresc"]):
+                    a["tresc"] = full
         if a["tresc"].strip():
             found_mails = found_mails or O.emails(a["tresc"])
             info = O.analyze(ctx, f, a["tresc"], title, a["url"])
@@ -61,6 +71,13 @@ def prepare(ctx, aid):
             a["email"] = a["email"].strip() or info["email"] or (found_mails[0] if found_mails and a["zrodlo"] != "auto" else "")
             a["ocena"], a["ocena_opis"], a["rodo"] = info["ocena"], info["uzasadnienie"], info["rodo"]
             warn = info["ostrzezenia"]
+            st0 = ctx.settings()
+            if info.get("social_media") and not _ok_social_f(f):
+                warn = warn + ["Główną częścią tej pracy są media społecznościowe, a ich nie chcesz."]
+            if info.get("niedziele_wieczory") and st0.get("bez_niedziel_wieczorow"):
+                warn = warn + ["Ogłoszenie wymaga pracy w niedziele albo wieczorami."]
+            if info.get("tylko_prowizja") and st0.get("bez_prowizji"):
+                warn = warn + ["Wynagrodzenie wyłącznie prowizyjne."]
         a["klucz"] = R.dedupe_key(a["firma"], a["stanowisko"])
         if "kanal" not in a or not a["kanal"]:
             a["kanal"] = "{}"
@@ -76,7 +93,7 @@ def prepare(ctx, aid):
             if a.get("ocena") is not None and a["ocena"] < int(st.get("prog_dopasowania", 55)):
                 why = f"za słabe dopasowanie ({a['ocena']}%)"
             elif warn:
-                why = "w ogłoszeniu dominuje sprzedaż albo obsługa klienta"
+                why = warn[0].rstrip(".").lower()
             elif not R.in_area(a["miasto"], int(f["warunki"].get("dojazd_km") or 50)):
                 why = f"za daleko ({a['miasto']})"
             elif not a["tresc"].strip():
@@ -91,6 +108,16 @@ def prepare(ctx, aid):
             with R.db(ctx) as c:
                 R.set_status(c, ctx, aid, "do_uzupelnienia", tresc=a["tresc"], uwagi=json.dumps(notes, ensure_ascii=False))
             return "do_uzupelnienia"
+        web = {}
+        if F.channel(a)["typ"] in ("formularz", "brak") and ctx.settings().get("szukaj_maila", True) and a["firma"]:
+            with contextlib.suppress(Exception):
+                web = K.find_email(ctx, a, K.offer_links("".join(f'<a href="{u}">' for u in page_links), a["url"] or "https://x.invalid/"))
+            if web:
+                a["email"] = web["email"]
+                a["z_sieci"] = True
+                how = {"ogloszenie": "na stronie firmy podlinkowanej w ogłoszeniu", "wyszukiwarka": "przez wyszukiwarkę na stronie firmy",
+                       "domysl": "na stronie, którą uznałem za stronę firmy"}.get(web["sposob"], "na stronie firmy")
+                notes.append(f"Ogłoszenie nie podaje adresu. Adres {web['email']} znalazłem {how}: {web['strona']} — sprawdź, czy to ta firma.")
         selection = D.select_for_offer(ctx, f, a) if a["tresc"].strip() else D.default_selection(f)
         letter, mail, by_model = D.compose(ctx, f, a)
         notes += D.check(ctx, f, a, letter, mail, by_model=by_model)
@@ -108,7 +135,7 @@ def prepare(ctx, aid):
         else:
             status = "do_sprawdzenia" if suspect else "do_zatwierdzenia"
         st = ctx.settings()
-        auto_ok = st.get("autopilot") and status == "do_zatwierdzenia" and not warn and (
+        auto_ok = st.get("autopilot") and status == "do_zatwierdzenia" and not warn and (not web or web.get("sposob") == "ogloszenie") and (
             a["zrodlo"] == "spontaniczna" or (a.get("ocena") or 0) >= int(st.get("prog_autopilota", 75)))
         if auto_ok:
             status = "zatwierdzona"
@@ -326,9 +353,12 @@ def work_once(ctx):
         if waiting < target and st.get("spontaniczne", True):
             with contextlib.suppress(Exception):
                 Z.spontaneous_fill(ctx, max(0, min(10, target - waiting)))
+    busy = False
+    with contextlib.suppress(Exception):
+        busy = Wd.work(ctx)                                           # import wiedzy ma pierwszeństwo — Aga czeka na wynik
     with R.db(ctx) as c:
-        row = c.execute("SELECT id FROM aplikacje WHERE status='nowa' AND zrodlo NOT IN ('auto','spontaniczna') ORDER BY id LIMIT 1").fetchone()
-        if not row and prepared_today < int(target * 1.3):
+        row = None if busy else c.execute("SELECT id FROM aplikacje WHERE status='nowa' AND zrodlo NOT IN ('auto','spontaniczna') ORDER BY id LIMIT 1").fetchone()
+        if not row and not busy and prepared_today < int(target * 1.3):
             row = c.execute("SELECT id FROM aplikacje WHERE status='nowa' ORDER BY id LIMIT 1").fetchone()
     if row:
         prepare(ctx, row["id"])
@@ -346,6 +376,30 @@ def work_once(ctx):
     evening_report(ctx)
 
 
+def migrate_281(ctx):
+    """2.8.1: niewłaściwe klauzule RODO w czekających aplikacjach → klauzula domyślna (pliki PDF na nowo)."""
+    with R.db(ctx) as c:
+        if R.meta_get(c, "migracja_281"):
+            return
+        rows = [dict(r) for r in c.execute("SELECT * FROM aplikacje WHERE status IN ('do_zatwierdzenia','do_sprawdzenia','do_uzupelnienia','formularz','zatwierdzona','blad') AND cv_plik<>''")]
+    f = R.load_facts(ctx)
+    crit = f["kryteria"]                                              # Andrzej i Aga: sprzedaż i obsługa klienta też wchodzą w grę
+    crit["nie_chce"] = [x for x in crit.get("nie_chce", []) if x not in R.SALES_AVOID]
+    crit["chce"] = list(dict.fromkeys(crit.get("chce", []) + ["sprzedaż i doradztwo", "obsługa klienta (biuro obsługi, recepcja, infolinia)"]))
+    R.save_facts(ctx, f)
+    for a in rows:
+        if a["rodo"] and R.is_consent(a["rodo"]):
+            continue
+        with contextlib.suppress(Exception):
+            cv, li = render_files(ctx, f, a, a["list"], json.loads(a["wybor"] or "null"), "")
+            with R.db(ctx) as c:
+                c.execute("UPDATE aplikacje SET rodo='', cv_plik=?, list_plik=? WHERE id=?", (cv, li, a["id"]))
+                R.note(c, ctx, a["id"], "klauzula RODO zamieniona na domyślną (2.8.1)")
+                c.commit()
+    with R.db(ctx) as c:
+        R.meta_set(c, "migracja_281", R.stamp(ctx))
+
+
 def worker(ctx, stop):
     import fcntl
     lock = open(ctx.folder() / ".praca.lock", "w")
@@ -359,6 +413,8 @@ def worker(ctx, stop):
         for r in c.execute("SELECT id FROM aplikacje WHERE status='wysylanie'").fetchall():
             R.set_status(c, ctx, r["id"], "blad", blad="Wysyłka została przerwana (restart). Sprawdź w Gmailu (Wysłane), czy wiadomość wyszła, zanim zatwierdzisz ją ponownie.")
         c.commit()
+    with contextlib.suppress(Exception):
+        migrate_281(ctx)
     while not stop.is_set():
         try:
             work_once(ctx)
@@ -418,7 +474,7 @@ def make_app(ctx, hosts=None):
             key_path.chmod(0o600)
     app.secret_key = key_path.read_text(encoding="utf-8").strip()
     app.config.update(SESSION_COOKIE_NAME="rekrutacja", SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
-                      PERMANENT_SESSION_LIFETIME=dt.timedelta(days=30), MAX_CONTENT_LENGTH=4 * 1024 * 1024)
+                      PERMANENT_SESSION_LIFETIME=dt.timedelta(days=30), MAX_CONTENT_LENGTH=120 * 1024 * 1024)
     app.jinja_env.globals.update(STATUS=R.STATUS, STEPS=STEPS, TOOLS=R.TOOLS, LEVELS=R.LEVELS, WANT=R.WANT, AVOID=R.AVOID)
     app.jinja_env.filters["loads"] = lambda s: json.loads(s or "[]")
     app.jinja_env.filters["dzien"] = lambda s: (s or "")[:16].replace("T", " ")
@@ -541,7 +597,8 @@ def make_app(ctx, hosts=None):
                 continue
             jobs.append({"stanowisko": request.form.get(f"d{i}_stanowisko", "").strip(), "firma": request.form.get(f"d{i}_firma", "").strip(),
                          "miejsce": request.form.get(f"d{i}_miejsce", "").strip(), "od": request.form.get(f"d{i}_od", "").strip(),
-                         "do": request.form.get(f"d{i}_do", "").strip(), "punkty": lines(f"d{i}_punkty")})
+                         "do": request.form.get(f"d{i}_do", "").strip(), "punkty": lines(f"d{i}_punkty"),
+                         "opcjonalne": bool(request.form.get(f"d{i}_opcjonalne"))})
         f["doswiadczenie"] = jobs
         edu = []
         for i in range(int(request.form.get("ile_szkol", 0))):
@@ -857,6 +914,22 @@ def make_app(ctx, hosts=None):
         qs = g.db.execute("SELECT * FROM pytania WHERE wiadomosc_id=? ORDER BY id", (wid,)).fetchall()
         return render_template("wiadomosc.html", m=m, qs=qs, tab="odp", KINDS=A.KINDS)
 
+    @app.route("/import-wiedzy", methods=["GET", "POST"])
+    def knowledge():
+        if request.method == "POST":
+            what = request.form.get("co", "")
+            if what == "start":
+                up = request.files.get("plik")
+                n, msg = Wd.start(ctx, request.form.get("tekst", ""), up.read() if up and up.filename else None, up.filename if up else "")
+                flash(msg or f"Czytam ({n} {'część' if n == 1 else 'części'}). Strona odświeży się sama.")
+            elif what == "zastosuj":
+                ids = {int(x) for x in request.form.getlist("k") if x.isdigit()}
+                flash(f"Dodane do Twojej bazy faktów: {Wd.apply(ctx, ids)}. Zobaczysz je w Ustawieniach → Twoje dane.")
+            elif what == "anuluj":
+                Wd.clear(ctx)
+            return redirect(url_for("knowledge"))
+        return render_template("import.html", job=Wd.load(ctx), tab="ust")
+
     @app.route("/paczka-dla-claude.txt")
     def claude_pack():
         f = R.load_facts(ctx)
@@ -899,6 +972,8 @@ def make_app(ctx, hosts=None):
                     error = "Nie udało się zapisać ustawień wysyłki."
             elif what == "praca":
                 save_work()
+                for key in ("bez_niedziel_wieczorow", "bez_prowizji"):
+                    ctx.set_setting(key, "tak" if request.form.get(key) else "nie")
                 for key, lo, hi in (("prog_autopilota", 50, 100), ("prog_dopasowania", 0, 95), ("przypomnienie_po_dniach", 3, 30)):
                     with contextlib.suppress(ValueError):
                         ctx.set_setting(key, max(lo, min(hi, int(request.form.get(key, ctx.settings()[key])))))
@@ -930,13 +1005,24 @@ def make_app(ctx, hosts=None):
                 added, skipped = Z.import_firms(g.db, ctx, request.form.get("firmy", ""))
                 flash(f"Dodane firmy: {added}." + (f" Pominięte (powtórki albo brak adresu): {skipped}." if skipped else ""))
                 return redirect(url_for("settings", czesc="firmy"))
+            elif what == "klucze":
+                for field, name in (("adzuna_id", "adzuna_id"), ("adzuna_key", "adzuna_key"), ("jooble", "jooble"), ("brave", "brave")):
+                    val = request.form.get(field, "").strip()
+                    if val:
+                        R.set_secret(ctx, name, val)
+                frazy = request.form.get("frazy", "").strip()
+                if frazy:
+                    ctx.set_setting("frazy", frazy[:600])
+                g.db.execute("UPDATE zrodla SET sprawdzono='' WHERE typ IN ('adzuna','jooble')")
+                g.db.commit()
+                R.meta_set(g.db, "ostatnie_szukanie", 0)
             elif what == "pauza":
                 ctx.set_setting("wstrzymane", "nie" if ctx.settings().get("wstrzymane") else "tak")
                 return redirect(request.form.get("powrot") or url_for("home"))
             elif what == "raport_teraz":
                 flash("Raport wysłany na Twoją skrzynkę." if evening_report(ctx, send=app.config.get("SEND", P.send), force=True) else "Raport nie wyszedł — sprawdź podłączenie skrzynek.")
             if not error:
-                if what in ("dane", "narzedzia", "kryteria", "aga", "sebastian", "wysylka", "praca"):
+                if what in ("dane", "narzedzia", "kryteria", "aga", "sebastian", "wysylka", "praca", "klucze"):
                     flash("Zapisane.")
                 return redirect(url_for("settings", czesc=what if what.startswith("zrodlo") else ""))
             part = what if what in ("dane", "narzedzia", "kryteria") else ("zrodla" if what.startswith("zrodlo") else part)
@@ -944,8 +1030,9 @@ def make_app(ctx, hosts=None):
         Z.seed(g.db, ctx)
         sources = g.db.execute("SELECT * FROM zrodla ORDER BY id").fetchall()
         firms = g.db.execute("SELECT COUNT(*) n, SUM(uzyta) u FROM firmy").fetchone()
+        keys = {k: bool(R.secret(ctx, k)) for k in ("adzuna_id", "adzuna_key", "jooble", "brave")}
         return render_template("ustawienia.html", f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)),
-                               sources=sources, firms=firms)
+                               sources=sources, firms=firms, keys=keys)
 
     return app
 

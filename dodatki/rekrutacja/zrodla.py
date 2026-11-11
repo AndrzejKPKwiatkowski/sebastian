@@ -15,9 +15,13 @@ NO_AUTOMATION = ("pracuj.pl", "olx.pl", "linkedin.com", "indeed.com", "indeed.pl
                  "nofluffjobs.com", "justjoin.it", "facebook.com")
 OFFER_HINTS = ("oferta", "oferty", "ogloszen", "praca", "job", "kariera", "career", "nabor", "rekrutac", "stanowisk", "konkurs", "vacanc", "/o/")
 ROLE_WORDS = ("asystent", "sekretar", "administrac", "administrat", "biur", "office", "koordynat", "referent", "inspektor", "specjalist",
-              "dokumentac", "kancelar", "recepc", "back office", "kadr", "rejestr", "archiw", "projekt", "operacyj", "pracownik", "obslug")
+              "dokumentac", "kancelar", "recepc", "back office", "kadr", "rejestr", "archiw", "projekt", "operacyj", "pracownik", "obslug",
+              "sprzeda", "handlow", "doradc", "konsultant", "customer", "klient", "account", "opiekun", "infolini", "call center")
+SALES_ROLES = ("sprzedawca", "przedstawiciel handlowy", "telemarket", "doradca klienta", "call center", "kasjer")
 JUNK_LINKS = ("logowanie", "login", "rejestracja", "polityka", "cookies", "regulamin", "kontakt", "rodo", "mapa", "facebook", "instagram",
               "twitter", "youtube", "mailto:", "tel:", "javascript:", "#")
+AGGREGATORS = [("adzuna", "api://adzuna", "Adzuna — oferty z wielu polskich portali (API)"),
+               ("jooble", "api://jooble", "Jooble — oferty z wielu polskich portali (API)")]
 DEFAULT_SOURCES = [
     ("strona", "https://nabory.kprm.gov.pl/", "Służba cywilna — nabory (KPRM)"),
     ("strona", "https://praca.uj.edu.pl/", "Uniwersytet Jagielloński — praca"),
@@ -31,11 +35,14 @@ def blocked(url):
 
 
 def seed(c, ctx):
-    if R.meta_get(c, "zrodla_zasiane"):
-        return
-    for typ, url, name in DEFAULT_SOURCES:
-        c.execute("INSERT OR IGNORE INTO zrodla(typ,url,nazwa,dodano) VALUES(?,?,?,?)", (typ, url, name, R.stamp(ctx)))
-    R.meta_set(c, "zrodla_zasiane", "1")
+    if not R.meta_get(c, "zrodla_zasiane"):
+        for typ, url, name in DEFAULT_SOURCES:
+            c.execute("INSERT OR IGNORE INTO zrodla(typ,url,nazwa,dodano) VALUES(?,?,?,?)", (typ, url, name, R.stamp(ctx)))
+        R.meta_set(c, "zrodla_zasiane", "1")
+    if not R.meta_get(c, "agregatory_zasiane"):
+        for typ, url, name in AGGREGATORS:
+            c.execute("INSERT OR IGNORE INTO zrodla(typ,url,nazwa,dodano) VALUES(?,?,?,?)", (typ, url, name, R.stamp(ctx)))
+        R.meta_set(c, "agregatory_zasiane", "1")
 
 
 def kind_of(url):
@@ -160,10 +167,67 @@ def recruitee_offers(url):
     return out
 
 
-def scan_source(src):
+# ================================================================ agregatory z oficjalnym API (Adzuna, Jooble)
+
+def phrases(ctx):
+    return [p.strip() for p in str(ctx.settings().get("frazy", "")).split(",") if p.strip()][:12]
+
+
+def adzuna(ctx, app_id, app_key, get=None):
+    import requests
+    get = get or requests.get
+    out = []
+    km = int(R.load_facts(ctx)["warunki"].get("dojazd_km") or 20)
+    queries = [(p, "Kraków", km) for p in phrases(ctx)] + [("praca zdalna " + p, "", 0) for p in phrases(ctx)[:2]]
+    for what, where, km in queries:
+        params = {"app_id": app_id, "app_key": app_key, "what": what, "results_per_page": 50, "max_days_old": 10, "content-type": "application/json"}
+        if where:
+            params.update(where=where, distance=km)
+        r = get("https://api.adzuna.com/v1/api/jobs/pl/search/1", params=params, timeout=30)
+        if r.status_code in (401, 403):
+            raise RuntimeError("Adzuna odrzuciła klucz")
+        r.raise_for_status()
+        for j in r.json().get("results", []):
+            desc = O.to_text(j.get("description") or "")[0]
+            city = (j.get("location") or {}).get("display_name", "")
+            firm = (j.get("company") or {}).get("display_name", "")
+            out.append({"url": j.get("redirect_url", ""), "tytul": j.get("title", ""), "firma": firm, "miasto": city,
+                        "tresc": f"{j.get('title', '')}\n{firm}\n{city}\n\n{desc}"[:20000]})
+    return out
+
+
+def jooble(ctx, key, post=None):
+    import requests
+    post = post or requests.post
+    host = str(ctx.settings().get("jooble_host", "") or "jooble.org")
+    out = []
+    for kw in phrases(ctx)[:4]:                                   # klucz Jooble ma mały limit — oszczędnie
+        km = str(int(R.load_facts(ctx)["warunki"].get("dojazd_km") or 20))
+        r = post(f"https://{host}/api/{key}", json={"keywords": kw, "location": "Kraków", "radius": km, "page": "1"}, timeout=30)
+        if r.status_code in (401, 403):
+            raise RuntimeError("Jooble odrzuciło klucz")
+        r.raise_for_status()
+        for j in r.json().get("jobs", []):
+            snip = O.to_text(j.get("snippet") or "")[0]
+            out.append({"url": j.get("link", ""), "tytul": j.get("title", ""), "firma": j.get("company", ""), "miasto": j.get("location", ""),
+                        "tresc": f"{j.get('title', '')}\n{j.get('company', '')}\n{j.get('location', '')}\n\n{snip}"[:20000]})
+    return out
+
+
+def scan_source(src, ctx=None):
     """[{url, tytul, tresc?, firma?, miasto?, kanal?}] z jednego źródła."""
     if src["typ"] == "recruitee":
         return recruitee_offers(src["url"])
+    if src["typ"] == "adzuna":
+        a, b = R.secret(ctx, "adzuna_id"), R.secret(ctx, "adzuna_key")
+        if not a or not b:
+            raise RuntimeError("brak klucza Adzuna (Ustawienia → Klucze)")
+        return adzuna(ctx, a, b)
+    if src["typ"] == "jooble":
+        k = R.secret(ctx, "jooble")
+        if not k:
+            raise RuntimeError("brak klucza Jooble (Ustawienia → Klucze)")
+        return jooble(ctx, k)
     page, final = _get(src["url"])
     if src["typ"] == "rss" or page.lstrip()[:200].lower().startswith(("<?xml", "<rss", "<feed")):
         return rss_items(page)
@@ -175,11 +239,18 @@ def scan_source(src):
 
 # ================================================================ wstępny filtr (tani, przed pobraniem całej oferty)
 
+def _ok_social(f):
+    return not any("social" in R.plain(x) or "spolecznosciow" in R.plain(x) for x in f["kryteria"].get("nie_chce", []))
+
+
 def looks_relevant(f, title, text=""):
     low = R.plain(title + " " + text[:600])
     if any(w in low for w in ("kierowca", "magazynier", "spawacz", "operator wozka", "kucharz", "sprzataczk", "budowlan", "monter",
                               "elektryk", "mechanik", "pielegniar", "lekarz", "programist", "developer", "kelner", "barista",
-                              "ochron", "kasjer", "sprzedawca", "przedstawiciel handlowy", "telemarket", "doradca klienta", "call center")):
+                              "ochron", "social media", "community manager", "content creator", "tiktok", "influencer", "copywriter",
+                              "specjalista ds. mediow spolecznosciowych", "social media manager", "smm")) and not _ok_social(f):
+        return False
+    if any(w in low for w in SALES_ROLES) and any(x in R.SALES_AVOID for x in f["kryteria"].get("nie_chce", [])):
         return False
     wants = " ".join(R.plain(x) for x in f["kryteria"].get("chce", []))
     return any(w in low for w in ROLE_WORDS) or any(w in low for w in wants.split() if len(w) > 6)
@@ -201,7 +272,17 @@ def discover(ctx, max_new=40):
         with contextlib.suppress(Exception):
             import datetime as dt
             last = dt.datetime.fromisoformat(src["sprawdzono"]).timestamp() if src["sprawdzono"] else 0
-        if time.time() - last < every:
+        period = every
+        if src["typ"] == "adzuna":
+            period = float(st.get("agregatory_co_godzin", 12)) * 3600
+        elif src["typ"] == "jooble":
+            period = float(st.get("jooble_co_godzin", 24)) * 3600
+        if time.time() - last < period:
+            continue
+        if src["typ"] in ("adzuna", "jooble") and not (R.secret(ctx, "jooble") if src["typ"] == "jooble" else R.secret(ctx, "adzuna_key")):
+            with R.db(ctx) as c:
+                c.execute("UPDATE zrodla SET wynik=? WHERE id=?", ("czeka na klucz (Ustawienia → Klucze)", src["id"]))
+                c.commit()
             continue
         if blocked(src["url"]):
             with R.db(ctx) as c:
@@ -209,7 +290,7 @@ def discover(ctx, max_new=40):
                 c.commit()
             continue
         try:
-            items = scan_source(src)
+            items = scan_source(src, ctx)
             msg, err = f"znaleziono {len(items)} ogłoszeń", 0
         except Exception as e:
             items, msg, err = [], f"nie działa: {type(e).__name__} {str(e)[:80]}", 1

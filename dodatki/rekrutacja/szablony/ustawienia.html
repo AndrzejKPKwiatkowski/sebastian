@@ -24,6 +24,8 @@
     <label class="check"><input type="checkbox" name="przypomnienia" value="1" {{ 'checked' if st.przypomnienia }}> Jedno przypomnienie po ciszy</label>
     <label class="check"><input type="checkbox" name="whatsapp" value="1" {{ 'checked' if st.whatsapp }}> Pilne sprawy na WhatsAppie</label>
     <label class="check"><input type="checkbox" name="autopilot" value="1" {{ 'checked' if st.autopilot }}> Autopilot: wysyłam sam aplikacje z wysokim dopasowaniem</label>
+    <label class="check"><input type="checkbox" name="bez_niedziel_wieczorow" value="1" {{ 'checked' if st.bez_niedziel_wieczorow }}> Pomijaj oferty z pracą w niedziele albo wieczorami</label>
+    <label class="check"><input type="checkbox" name="bez_prowizji" value="1" {{ 'checked' if st.bez_prowizji }}> Pomijaj oferty z wynagrodzeniem wyłącznie prowizyjnym</label>
     <input type="hidden" name="limit_dzienny" value="{{ st.limit_dzienny }}">
     <div class="row3"><div><label>Autopilot od (% dopasowania)</label><input type="number" name="prog_autopilota" value="{{ st.prog_autopilota }}" min="50" max="100"></div>
       <div><label>Pomijam oferty poniżej (%)</label><input type="number" name="prog_dopasowania" value="{{ st.prog_dopasowania }}" min="0" max="95"></div>
@@ -46,6 +48,27 @@
     <div><label>Nazwa (opcjonalnie)</label><input type="text" name="nazwa"></div>
     <button class="btn ghost" name="co" value="zrodlo_dodaj">Dodaj</button></form>
   <form method="post" class="actions"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="btn plain" name="co" value="szukaj_teraz">Przejrzyj źródła teraz</button></form>
+</div>
+
+<div class="card">
+  <h2>Klucze do wyszukiwarek ofert</h2>
+  <p class="soft small">Adzuna i Jooble zbierają oferty z wielu polskich portali (m.in. tych, których nie wolno przeglądać automatem). Brave Search pomaga znaleźć adres e-mail firmy, gdy ogłoszenie go nie podaje. Puste pole = bez zmian.</p>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="klucze">
+    <div class="row"><div><label>Adzuna app_id {{ '✓ zapisany' if keys.adzuna_id }}</label><input type="password" name="adzuna_id" autocomplete="off"></div>
+      <div><label>Adzuna app_key {{ '✓ zapisany' if keys.adzuna_key }}</label><input type="password" name="adzuna_key" autocomplete="off"></div></div>
+    <div class="row"><div><label>Jooble — klucz API {{ '✓ zapisany' if keys.jooble }}</label><input type="password" name="jooble" autocomplete="off"></div>
+      <div><label>Brave Search — klucz API {{ '✓ zapisany' if keys.brave }}</label><input type="password" name="brave" autocomplete="off"></div></div>
+    <label>Czego szukać (frazy oddzielone przecinkami)</label><input type="text" name="frazy" value="{{ st.frazy }}">
+    <p class="small soft">Klucze: <a href="https://developer.adzuna.com/" target="_blank" rel="noopener">developer.adzuna.com</a> ·
+      <a href="https://jooble.org/api/about" target="_blank" rel="noopener">jooble.org/api/about</a> ·
+      <a href="https://api-dashboard.search.brave.com/" target="_blank" rel="noopener">api-dashboard.search.brave.com</a></p>
+    <div class="actions"><button class="btn ghost">Zapisz</button></div></form>
+</div>
+
+<div class="card">
+  <h2>Import wiedzy o mnie</h2>
+  <p class="soft small">Wklej podsumowanie z ChatGPT albo wgraj eksport danych ChatGPT. Wyciągnę z tego fakty o Twojej pracy, a Ty zdecydujesz, które trafią do CV.</p>
+  <a class="btn ghost" href="{{ url_for('knowledge') }}">Otwórz import wiedzy</a>
 </div>
 
 <div class="card">

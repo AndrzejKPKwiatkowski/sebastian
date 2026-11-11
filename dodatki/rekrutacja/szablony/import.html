@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="small"><a href="{{ url_for('settings') }}">‹ Ustawienia</a></p>
+<h1>Import wiedzy o Tobie</h1>
+<p class="soft">Do CV trafi wyłącznie to, co zaznaczysz. Z eksportu ChatGPT czytam tylko Twoje własne wiadomości z rozmów o pracy, nie odpowiedzi ChatGPT.</p>
+
+{% if not job %}
+<div class="card">
+  <h2>Sposób 1: podsumowanie z ChatGPT</h2>
+  <p class="small soft">W swoim ChatGPT wklej to polecenie, a odpowiedź skopiuj tutaj:</p>
+  <div class="kit"><code id="prompt">Przygotuj dla mnie szczegółowe podsumowanie wszystkiego, co wiesz o mojej karierze z naszych rozmów: stanowiska i firmy z datami, konkretne obowiązki i osiągnięcia (z liczbami, jeśli je podawałam), umiejętności, programy i narzędzia z poziomem, kursy i certyfikaty, języki, czego szukam w pracy, czego nie chcę, oczekiwania finansowe i dostępność. Pisz wyłącznie to, co ode mnie wiesz — nic nie dopowiadaj ani nie zgaduj. Jeśli czegoś nie jesteś pewien, oznacz to „(niepewne)”. Podziel na sekcje z nagłówkami.</code><button type="button" class="btn ghost small" data-copy="prompt">Kopiuj</button></div>
+  <form method="post" style="margin-top:14px"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="start">
+    <textarea name="tekst" rows="10" placeholder="Wklej tutaj odpowiedź ChatGPT"></textarea>
+    <div class="actions"><button class="btn">Przeczytaj</button></div></form>
+</div>
+<div class="card">
+  <h2>Sposób 2: eksport danych ChatGPT</h2>
+  <ol class="steps small"><li>ChatGPT → Ustawienia → Kontrola danych → Eksportuj dane.</li><li>Po chwili przyjdzie mail z plikiem ZIP. Pobierz go.</li><li>Wgraj tutaj cały ZIP albo sam plik conversations.json.</li></ol>
+  <form method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="start">
+    <input type="file" name="plik" accept=".zip,.json" required>
+    <div class="actions"><button class="btn">Wgraj i przeczytaj</button></div></form>
+</div>
+{% elif job.status == 'w toku' %}
+<div class="card center" style="padding:44px 24px"><div class="spinner"></div><h2>Czytam</h2>
+  <p class="soft">Część {{ job.gotowe }} z {{ job.kawalki|length }}. Jedna część to zwykle 1–2 minuty.</p>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="btn plain" name="co" value="anuluj">Przerwij</button></form></div>
+<script>setTimeout(()=>location.reload(),15000)</script>
+{% else %}
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}">
+<div class="card">
+  <h2>Co znalazłem</h2>
+  {% set labels = {'profil':'Profil zawodowy','punkt':'Obowiązek / osiągnięcie','stanowisko':'Nowe stanowisko','umiejetnosc':'Umiejętność','narzedzie':'Narzędzie','kurs':'Kurs','jezyk':'Język','odpowiedz':'Odpowiedź na typowe pytanie','niepewne':'Niepewne — nie dodam'} %}
+  {% for kind in ('profil','stanowisko','punkt','umiejetnosc','narzedzie','kurs','jezyk','odpowiedz','niepewne') %}
+    {% set items = job.kandydaci|selectattr('rodzaj','equalto',kind)|list %}
+    {% if items %}<h3 style="margin-top:18px">{{ labels[kind] }}</h3>
+      {% for c in items %}<label class="check"><input type="checkbox" name="k" value="{{ c.id }}" {{ 'disabled' if kind == 'niepewne' else 'checked' }}> {{ c.tekst }}</label>{% endfor %}
+    {% endif %}
+  {% endfor %}
+  {% if not job.kandydaci %}<p class="soft">Nie znalazłem nowych faktów, których nie byłoby już w bazie.</p>{% endif %}
+  <p class="small soft" style="margin-top:14px">Odznacz wszystko, co nie jest prawdą albo nie chcesz tego w CV. Niepewnych rzeczy nie dodaję — jeśli są prawdziwe, dopisz je sama w Ustawieniach → Twoje dane.</p>
+</div>
+<div class="actions"><button class="btn big" name="co" value="zastosuj">Dodaj zaznaczone</button><button class="btn plain" name="co" value="anuluj" formnovalidate>Odrzuć wszystko</button></div>
+</form>
+{% endif %}
+{% endblock %}

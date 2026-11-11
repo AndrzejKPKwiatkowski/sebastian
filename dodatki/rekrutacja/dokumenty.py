@@ -46,8 +46,22 @@ def fonts():
 
 # ================================================================ wybór faktów do CV (model zwraca tylko numery)
 
+def _ym(text):
+    t = R.plain(text or "")
+    if any(w in t for w in ("obecnie", "nadal", "teraz", "present")):
+        return (9999, 12)
+    m = re.search(r"(\d{1,2})[./-](\d{4})", t) or re.search(r"()(\d{4})", t)
+    return (int(m.group(2)), int(m.group(1) or 0)) if m else (0, 0)
+
+
+def chronological(f, ids):
+    """Od najnowszego: najpierw data zakończenia, potem rozpoczęcia."""
+    by = {j["id"]: j for j in f["doswiadczenie"]}
+    return sorted(ids, key=lambda i: (_ym(by[i].get("do")), _ym(by[i].get("od"))), reverse=True)
+
+
 def default_selection(f):
-    return {"kolejnosc": [j["id"] for j in f["doswiadczenie"]],
+    return {"kolejnosc": chronological(f, [j["id"] for j in f["doswiadczenie"] if not j.get("opcjonalne")]),
             "punkty": {j["id"]: [p["id"] for p in j["punkty"]] for j in f["doswiadczenie"]},
             "profil": [p["id"] for p in f["profil"]][:4],
             "umiejetnosci": [u["id"] for u in f["umiejetnosci"]][:6],
@@ -65,14 +79,19 @@ def clean_selection(f, sel):
         return got if len(got) >= minimum else base[key]
 
     jobs = [j["id"] for j in f["doswiadczenie"]]
-    order = [x for x in dict.fromkeys(sel.get("kolejnosc") or []) if x in jobs]
-    order += [x for x in jobs if x not in order]
+    optional = {j["id"] for j in f["doswiadczenie"] if j.get("opcjonalne")}
+    ranking = [x for x in dict.fromkeys(sel.get("kolejnosc") or []) if x in jobs]
+    picked = bool(ranking)
+    ranking += [x for x in jobs if x not in ranking and x not in optional]  # stanowiska opcjonalne tylko, gdy pasują do oferty
+    order = chronological(f, ranking)                                      # w CV zawsze od najnowszego
+    key_jobs = set(ranking[:3])
     points = {}
     for j in f["doswiadczenie"]:
         ids = [p["id"] for p in j["punkty"]]
         got = [x for x in dict.fromkeys((sel.get("punkty") or {}).get(j["id"]) or []) if x in ids]
-        points[j["id"]] = got + [x for x in ids if x not in got]          # kolejność od modelu, komplet z bazy
-    return {"kolejnosc": order, "punkty": points,
+        full = got + [x for x in ids if x not in got]                      # kolejność od modelu, komplet z bazy
+        points[j["id"]] = full if (not picked or j["id"] in key_jobs) else full[:2]   # mniej ważne stanowiska — krócej
+    return {"kolejnosc": order, "ranking": ranking, "punkty": points,
             "profil": pick("profil", [p["id"] for p in f["profil"]], 4, 2),
             "umiejetnosci": pick("umiejetnosci", [u["id"] for u in f["umiejetnosci"]], 6, 3),
             "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 7, 1)}
@@ -89,7 +108,8 @@ FAKTY:
 {R.facts_brief(f)}
 
 Zwróć JSON:
-{{"kolejnosc": [numery stanowisk d… od najlepiej pasującego do oferty],
+{{"kolejnosc": [numery stanowisk d… od NAJLEPIEJ PASUJĄCEGO do oferty (np. przy ofercie pedagogicznej najpierw praca z dziećmi i praktyki,
+     przy gastronomii najpierw gastronomia, przy biurze najpierw administracja); stanowiska oznaczone (opcjonalne) dodaj tylko, gdy pasują],
   "punkty": {{"d1": [numery punktów tego stanowiska, najważniejsze dla oferty pierwsze]}},
   "profil": [3 albo 4 numery zdań p…, w kolejności czytania],
   "umiejetnosci": [do 6 numerów u…],
@@ -107,17 +127,21 @@ def render_cv(f, sel, out_path, photo=None, rodo=None):
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
     sel = clean_selection(f, sel)
-    data = None
-    for scale in (1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7):
-        buf = io.BytesIO()
-        c = canvas.Canvas(buf, pagesize=A4)
-        c.setTitle(f"CV — {R.full_name(f)}")
-        c.setAuthor(R.full_name(f))
-        fits = _draw_cv(c, f, sel, photo, rodo or f.get("rodo") or R.RODO, scale)
-        c.save()
-        data = buf.getvalue()
-        if fits:
-            break
+    rodo = rodo or f.get("rodo") or R.RODO
+    scales = (1.3, 1.25, 1.2, 1.15, 1.1, 1.05, 1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7)   # największy rozmiar, który się mieści
+
+    def trial(kl, kr):
+        c = canvas.Canvas(io.BytesIO(), pagesize=A4)
+        return _draw_cv(c, f, sel, None, rodo, kl, kr)
+    kl = next((k for k in scales if trial(k, 0.7)[0]), 0.7)               # lewa i prawa kolumna dobierane osobno
+    kr = next((k for k in scales if trial(kl, k)[1]), 0.7)
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setTitle(f"CV — {R.full_name(f)}")
+    c.setAuthor(R.full_name(f))
+    _draw_cv(c, f, sel, photo, rodo, kl, kr)
+    c.save()
+    data = buf.getvalue()
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_bytes(data)
     return out_path
@@ -160,7 +184,10 @@ def _heading(c, text, x, y, width, size):
     return y - size * 1.55
 
 
-def _draw_cv(c, f, sel, photo, rodo, k):
+def _draw_cv(c, f, sel, photo, rodo, kl, kr=None):
+    """Rysuje CV; kl/kr — skala tekstu lewej i prawej kolumny. Zwraca (lewa_się_mieści, prawa_się_mieści)."""
+    kr = kl if kr is None else kr
+    k = kr
     from reportlab.lib.colors import HexColor, white
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.utils import ImageReader
@@ -226,12 +253,18 @@ def _draw_cv(c, f, sel, photo, rodo, k):
     heights = [h for _, h in blocks]
     split = min(range(len(blocks) + 1), key=lambda i: max(sum(heights[:i]), sum(heights[i:]))) if blocks else 0
     for col, part in enumerate((blocks[:split], blocks[split:])):
+        used = sum(h for _, h in part)
+        spare = (top - floor) - used
+        gap = min(22.0, spare / max(1, len(part))) if spare > 0 else 0        # równo rozłożony zapas, żeby kolumna nie była pusta
         yy = top
         for items, h in part:
             _flow(c, items, x0 + col * (col_w + 14), yy, col_w)
-            yy -= h
-        fits = fits and yy >= floor - 9 * k
+            yy -= h + gap
+        fits = fits and top - used >= floor - 9 * k
 
+    right_fits, fits = fits, True
+    k = kl
+    body, head = 8.7 * k, 13.2 * k
     # ---- lewa kolumna: kursy, umiejętności, narzędzia, języki, wykształcenie, kontakt
     lx, lw = 24.0, LW - 46
     contact_h = 132.0
@@ -274,7 +307,7 @@ def _draw_cv(c, f, sel, photo, rodo, k):
     for line in lines:
         c.drawString(13 + 22, yy, line)
         yy -= step
-    return fits
+    return fits, right_fits
 
 
 # ================================================================ list przewodni (PDF)
@@ -344,7 +377,9 @@ def fallback_texts(f, app):
         mail_open = "przesyłam swoje CV i list przewodni z pytaniem o możliwość współpracy."
     else:
         opening = f"z zainteresowaniem przeczytałam ogłoszenie na stanowisko {app['stanowisko']}{where} i chciałabym zgłosić swoją kandydaturę."
-        mail_open = f"w odpowiedzi na ogłoszenie na stanowisko {app['stanowisko']} przesyłam swoje CV i list przewodni."
+        mail_open = (f"w nawiązaniu do ogłoszenia Państwa firmy na stanowisko {app['stanowisko']}"
+                     + (f" ({app['url']})" if app.get("url") else "") + " przesyłam swoje CV i list przewodni.") if app.get("z_sieci") else \
+                    f"w odpowiedzi na ogłoszenie na stanowisko {app['stanowisko']} przesyłam swoje CV i list przewodni."
     avail = f["warunki"].get("dostepnosc", "")
     letter = (f"Szanowni Państwo,\n\n{opening}\n\n{prof}\n\n"
               + (f"Pracę mogę rozpocząć w terminie: {avail}. " if avail else "")
@@ -372,9 +407,11 @@ Nie podawaj oczekiwań finansowych.
 
 STYL: naturalnie, ciepło i profesjonalnie; pewnie, ale bez zadęcia; po partnersku, nie służalczo. Bez rekrutacyjnych
 frazesów („dynamiczny zespół”, „z pasją”, „wychodząc naprzeciw”), bez myślników i wypunktowań, zdania różnej długości.
-Doświadczenie sprzedażowe i obsługowe przedstawiaj tylko jako źródło umiejętności organizacyjnych i komunikacyjnych.
+Doświadczenie sprzedażowe i w obsłudze klienta pokazuj jako atut, gdy oferta dotyczy sprzedaży lub obsługi klienta; w ofertach biurowych
+jako źródło umiejętności organizacyjnych i komunikacyjnych.
 
 {'To aplikacja SPONTANICZNA: firma nie ogłosiła naboru. Zapytaj uprzejmie o możliwość współpracy przy administracji, dokumentacji lub koordynacji.' if spont else 'To odpowiedź na ogłoszenie.'}
+{('Adres e-mail nie pochodzi z ogłoszenia, tylko ze strony firmy. Mail MUSI zaczynać się od zdania: „Dzień dobry, w nawiązaniu do ogłoszenia Państwa firmy na stanowisko ' + (app['stanowisko'] or '') + ((' (' + app['url'] + ')') if app.get('url') else '') + ' przesyłam swoje CV i list przewodni.”') if app.get('z_sieci') else ''}
 FIRMA: {app['firma'] or '(nieznana — pisz bez nazwy)'}
 STANOWISKO: {app['stanowisko'] or '(brak)'}
 OGŁOSZENIE / OPIS FIRMY:
@@ -419,6 +456,7 @@ def rule_check(f, app, text):
     low = R.plain(text)
     out = []
     body = re.sub(r"(?s)z powazaniem.*$", "", low)
+    body = re.sub(r"https?://\S+|www\.\S+|[\w.+-]+@[\w.-]+", " ", body)          # linki i adresy to nie twierdzenia o kandydatce
     for num in dict.fromkeys(re.findall(r"\b\d[\d.,]*\d|\b\d\b", body)):
         seen = lambda hay: re.search(rf"(?<!\d){re.escape(num)}(?!\d)", hay)
         if not seen(facts) and not seen(offer):
