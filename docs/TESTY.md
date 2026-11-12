@@ -300,3 +300,12 @@ Data: 2026-11-12. Wynik: `test_rekrutacja` — 57 testów zaliczonych; `test_seb
 - Oferta: wynagrodzenie tylko z treści ogłoszenia, dopasowanie wymagań (mam/częściowo/brak), strona aplikacji z dojazdem i pobieraniem.
 - Migracja: czekające aplikacje przygotowane od nowa, jednorazowo.
 - Izolacja: przy `SEBASTIAN_TESTY=1` kontekst dodatku nie wywołuje `security` (ani odczytu, ani zapisu); próbne hasła z dawnych testów są ignorowane; brak hasła skrzynki nie psuje kolejki (zatwierdzone czekają).
+
+
+# Weryfikacja 2.8.4
+
+Data: 2026-11-12. Wynik: `test_rekrutacja` — 63 testy zaliczone; `test_sebastian`, `test_dodatki`, `test_whatsapp` zaliczone.
+Przypadki z prawdziwej skrzynki: list „Droga Agnieszko… przygotowywałaś” odrzucony i zastąpiony listem z faktów; eRecruiter „Czy to Twoja
+aplikacja?” → potwierdź aplikację (mimo że model mówi „zaproszenie”); „Twoje zgłoszenie trafiło…” → potwierdzenie; „skontaktujemy się
+wyłącznie z wybranymi” → potwierdzenie (nie odmowa); Pracuj.pl „sprawdź kompetencje innych kandydatów” → reklama; prawdziwe zaproszenie
+z adresu no-reply i prawdziwa odmowa rozpoznane; „&nbsp;” usunięte, przycisk potwierdzenia wyciągnięty; migracja poprawia zapisane wiadomości.

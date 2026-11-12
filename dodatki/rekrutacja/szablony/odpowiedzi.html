@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Odpowiedzi</h1>
-<p class="soft">Czytam Twoją skrzynkę co kilka minut i pokazuję tylko wiadomości od pracodawców. Ważne są na górze.</p>
+<p class="soft">Czytam Twoją skrzynkę co kilka minut i pokazuję tylko wiadomości od pracodawców. Ważne są na górze.
+  {% if hidden %}<a href="{{ url_for('replies', wszystkie=1) }}">Pokaż też potwierdzenia i reklamy ({{ hidden }})</a>{% elif everything %}<a href="{{ url_for('replies') }}">Tylko ważne</a>{% endif %}</p>
 {% if qs %}
 <div class="card"><h2>Potrzebuję Twojej odpowiedzi</h2>
   {% for q in qs %}<div class="kit"><span>{{ q.firma or 'pracodawca' }}</span><code>{{ q.pytanie }}</code><a class="btn ghost small" href="{{ url_for('message', wid=q.wiadomosc_id) }}">Odpowiedz</a></div>{% endfor %}
@@ -11,7 +12,7 @@
   {% for m in rows %}
   <a class="item" href="{{ url_for('message', wid=m.id) }}">
     <div class="main"><b>{{ m.firma or m.od_nazwa or m.od }}</b><span>{{ m.streszczenie or m.temat }} · {{ m.data|dzien }}</span></div>
-    <span class="pill {{ 'g' if m.rodzaj in ('zaproszenie','oferta') else ('o' if m.rodzaj in ('pytanie','zadanie') else '') }}">{{ KINDS.get(m.rodzaj, m.rodzaj) }}{% if m.status == 'nowa' and m.wazne %} · nowa{% endif %}</span>
+    <span class="pill {{ 'g' if m.rodzaj in ('zaproszenie','oferta') else ('o' if m.rodzaj in ('pytanie','zadanie','do_potwierdzenia') else '') }}">{{ KINDS.get(m.rodzaj, m.rodzaj) }}{% if m.status == 'nowa' and m.wazne %} · nowa{% endif %}</span>
   </a>
   {% else %}<p class="soft center" style="margin:20px 0">Na razie nikt nie odpisał. Pierwsze odpowiedzi zwykle przychodzą po kilku dniach.</p>{% endfor %}
 </div>

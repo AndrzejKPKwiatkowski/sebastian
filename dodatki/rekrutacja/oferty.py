@@ -142,7 +142,7 @@ def analyze(ctx, f, text, title="", url=""):
 
 Kandydatka SZUKA pracy w obszarach: {'; '.join(crit.get('chce', []))}.
 NIE CHCE pracy, w której znaczną część stanowi: {'; '.join(crit.get('nie_chce', []))}.
-Warunki: {w.get('umowa', '')}, {w.get('etat', '')}, Kraków i do {w.get('dojazd_km', 50)} km albo zdalnie.
+Jej warunki (tylko do oceny, NIE przepisuj ich do pól oferty): {w.get('umowa', '')}, {w.get('etat', '')}, praca w promieniu {w.get('dojazd_km', 50)} km od Krakowa lub zdalna.
 Krótko o niej: {' '.join(p['tekst'] for p in f['profil'][:3])}
 
 TYTUŁ STRONY: {title}
@@ -150,7 +150,7 @@ OGŁOSZENIE:
 {text[:6000]}
 
 JSON:
-{{"firma": "nazwa pracodawcy", "stanowisko": "nazwa stanowiska bez dopisków typu (K/M)", "miasto": "miejsce pracy albo zdalnie",
+{{"firma": "nazwa pracodawcy", "stanowisko": "nazwa stanowiska bez dopisków typu (K/M)", "miasto": "miejsce pracy z OGŁOSZENIA (miasto albo „zdalnie”), pusty tekst, gdy ogłoszenie go nie podaje",
   "email": "adres do wysłania aplikacji, jeśli jest w treści",
   "rodo": "dokładna treść klauzuli ZGODY do wpisania w CV (zaczyna się zwykle od „Wyrażam zgodę na przetwarzanie…”), jeśli pracodawca ją podał; NIE informacja o przetwarzaniu danych ani o administratorze",
   "sprzedaz": true/false (czy znaczną część pracy stanowi sprzedaż, pozyskiwanie klientów albo stała obsługa klienta),
@@ -163,7 +163,7 @@ JSON:
   "obowiazki": ["krótkie punkty: co będzie się robić na tym stanowisku"],
   "oferujemy": ["krótkie punkty: co oferuje pracodawca (umowa, etat, benefity)"],
   "ocena": liczba 0-100 (jak dobrze oferta pasuje do tego, czego kandydatka szuka i co umie),
-  "uzasadnienie": "jedno zdanie po polsku"}}"""
+  "uzasadnienie": "1–2 krótkie zdania po polsku do Agi, w drugiej osobie (np. „Pasuje do Ciebie, bo… Uważaj na…”)"}}"""
     got = None
     try:
         got = ctx.ask(prompt, as_json=True, max_tokens=1100, temperature=0.1)
@@ -171,7 +171,12 @@ JSON:
         ctx.log.warning(f"Rekrutacja: analiza oferty bez modelu ({type(e).__name__})")
     if isinstance(got, dict):
         for k in ("firma", "stanowisko", "miasto", "uzasadnienie", "rodo"):
-            out[k] = re.sub(r"\s+", " ", str(got.get(k) or "")).strip()[:1200 if k == "rodo" else 200]
+            out[k] = re.sub(r"\s+", " ", str(got.get(k) or "")).strip()[:{"rodo": 1200, "uzasadnienie": 700}.get(k, 200)]
+        if len(out["uzasadnienie"]) >= 700:                            # bez ucinania w pół słowa
+            out["uzasadnienie"] = out["uzasadnienie"][:out["uzasadnienie"].rfind(".") + 1] or out["uzasadnienie"]
+        for k in ("miasto", "stanowisko", "firma"):                     # model nie przepisuje warunków kandydatki jako danych oferty
+            if re.search(r"(?i)\bdo \d+ ?km\b|albo zdalnie|kandydat", out[k]):
+                out[k] = ""
         m = EMAIL_RE.search(str(got.get("email") or ""))
         if m and m.group(0).lower() in text.lower() and emails(m.group(0)):    # w ogłoszeniu i nie adres IOD/RODO itp.
             out["email"] = m.group(0).lower()

@@ -14,7 +14,22 @@ import contextlib, datetime as dt, json, re
 from . import dokumenty as D, poczta as P, rdzen as R
 
 KINDS = {"zaproszenie": "zaproszenie na rozmowę", "oferta": "propozycja pracy", "pytanie": "pytanie lub prośba",
-         "zadanie": "zadanie rekrutacyjne", "odmowa": "odmowa", "potwierdzenie": "potwierdzenie otrzymania", "inne": "inna wiadomość"}
+         "zadanie": "zadanie rekrutacyjne", "do_potwierdzenia": "potwierdź aplikację", "odmowa": "odmowa",
+         "potwierdzenie": "potwierdzenie otrzymania", "reklama": "reklama portalu", "inne": "inna wiadomość"}
+QUIET = ("potwierdzenie", "reklama", "inne")                             # bez powiadomień, bez maila, nie w raporcie
+AUTO_SENDER = r"(no.?reply|do.?not.?reply|nie.?odpowiadaj|system@|mailer|notification|powiadomien|newsletter|erecruiter|recruitee|" \
+              r"smartrecruiters|teamtailor|workday|greenhouse|lever\.co|pracuj\.pl|olx|linkedin|indeed|jooble|adzuna|rocketjobs|justjoin|nofluff)"
+INVITE_RE = (r"(zaprasza\w* (pania |cie |ciebie )?na (rozmow|spotkan|wideorozmow|wywiad)|zapraszamy (do|na) (biura|siedziby|rozmow|spotkan)|"
+             r"termin rozmowy|umowmy sie|proponuj\w* (termin|spotkanie|rozmow)|rozmowa (odbedzie|bedzie) sie|"
+             r"(rozmow|spotkan)\w* (kwalifikacyjn|rekrutacyjn)\w* (w dniu|dnia|odbedzie|w terminie|o godz)|kiedy (pani )?(moze|mozesz) (porozmawiac|przyjsc))")
+CONFIRM_ACTION_RE = (r"(czy to (twoja|pani) aplikacja|potwierdz\w* (swoja |twoja |pani )?(aplikacj|zgloszeni|kandydatur|adres|wlasnosc|ze to)|"
+                     r"zdecyduj,? co (mamy|mam) z nia zrobic|aktywuj (konto|profil)|zweryfikuj (adres|e-?mail|konto)|kliknij,? aby potwierdzic)")
+RECEIVED_RE = (r"(automatyczn|auto.?repl|nie odpowiadaj|wygenerowana automatycznie|potwierdzamy otrzymanie|otrzymalismy (pani|twoja|twoje|zgloszen|aplikac|cv)|"
+               r"dziekujemy za (przeslanie|zlozenie|aplikacj|twoje zgloszen|pani zgloszen|zainteresowanie|cv)|zgloszenie (wlasnie )?(trafilo|dotarlo|zostalo przyjete)|"
+               r"aplikacja (zostala )?(przyjeta|wyslana|dotarla)|odezwiemy sie|skontaktuj\w* sie (wylacznie |tylko |jedynie )?z (wybranymi|wybrany\w*|osobami)|"
+               r"(wybranymi|wybrany\w*) (kandydat\w*|osob\w*)|rozpoczelismy proces|przyjelismy|wypelnienie kwestionariusza|dziekujemy za (wypelnienie|udzial))")
+PROMO_RE = (r"(sprawdz (kompetencje|swoje szanse|jak wypadasz)|innych kandydatow|podobne oferty|polecane oferty|rekomendowane oferty|oferty dla ciebie|"
+            r"nowe oferty pracy|zobacz (oferty|wiecej ofert)|wypisz sie|zrezygnuj z subskrypcji|newsletter|premium|kup |pakiet|promocj|zarabiaj)")
 IMPORTANT = ("zaproszenie", "oferta", "pytanie", "zadanie")
 RECRUIT_WORDS = ("rekrutac", "aplikac", "kandydat", "cv", "stanowisk", "rozmow", "spotkani", "zgloszeni", "oferta pracy", "ogloszeni",
                  "dziekujemy za", "dziekuje za", "interview", "application", "candidate")
@@ -73,15 +88,30 @@ def looks_recruiting(m):
 
 # ================================================================ rozpoznanie rodzaju
 
+REJECT_RE = (r"(nie zakwalifikowal|zdecydowalismy sie na (innego|inna|kandydat)|wybralismy (innego|inna|innych|kandydat)|nie bedziemy kontynuowac|"
+             r"(pani|twoja) kandydatura (nie|zostala odrzucona)|nie przeszla|zakonczyl\w* proces rekrutac\w*,? (bez|i nie)|"
+             r"nie mozemy zaproponowac|nie zostala (pani|pan) wybran|nie spelnia (pani )?wymagan|postanowilismy kontynuowac z innym)")
+
+
+def automated(m):
+    return bool(m.get("auto") or re.search(AUTO_SENDER, R.plain(f"{m.get('od', '')} {m.get('od_nazwa', '')}")))
+
+
 def classify_rules(m):
     low = R.plain(f"{m.get('temat', '')}\n{m.get('tresc', '')}")
-    if re.search(r"(zaprasza\w* (pania )?na (rozmow|spotkan)|rozmow\w* (kwalifikacyjn|rekrutacyjn)|umowmy sie|termin rozmowy|spotkanie online|teams|google meet|zoom)", low):
-        return "zaproszenie"
-    if m.get("auto") or re.search(r"(automatyczn|auto.?repl|nie odpowiadaj|potwierdzamy otrzymanie|otrzymalismy (pani|twoja|twoje)|dziekujemy za (przeslanie|zlozenie|aplikacj))", low):
-        return "potwierdzenie"
-    if re.search(r"(nie zakwalifikowal|zdecydowalismy sie na (innego|inna)|wybralismy (innego|inna|innych)|nie bedziemy kontynuowac|"
-                 r"pani kandydatura (nie|zostala odrzucona)|nie przeszla|zakonczyl\w* proces rekrutac|nie mozemy zaproponowac)", low):
+    if re.search(CONFIRM_ACTION_RE, low):
+        return "do_potwierdzenia"
+    rejection = re.search(REJECT_RE, low)
+    if rejection:
         return "odmowa"
+    if re.search(INVITE_RE, low):
+        return "zaproszenie"
+    if automated(m) and re.search(PROMO_RE, low):
+        return "reklama"
+    if re.search(RECEIVED_RE, low):
+        return "potwierdzenie"
+    if m.get("auto"):
+        return "potwierdzenie"
     if re.search(r"(zadanie rekrutacyjne|zadanie do wykonania|test kompetenc|case study|prosimy o wykonanie)", low):
         return "zadanie"
     if re.search(r"(propozycj\w* (zatrudnienia|pracy|wspolpracy)|oferte zatrudnienia|chcielibysmy zatrudnic)", low):
@@ -93,7 +123,21 @@ def classify_rules(m):
 
 def classify(ctx, m, app):
     rule = classify_rules(m)
-    prompt = f"""Przeczytaj wiadomość od pracodawcy do kandydatki, która aplikowała na stanowisko „{app.get('stanowisko') or 'bez ogłoszenia'}” w firmie „{app.get('firma', '')}”.
+    firm = app.get("firma") or m.get("od_nazwa") or "Firma"
+    fixed = {"do_potwierdzenia": f"{firm}: system rekrutacyjny prosi, żebyś potwierdziła, że to Twoja aplikacja. Kliknij przycisk w wiadomości.",
+             "potwierdzenie": f"{firm} potwierdza, że Twoja aplikacja dotarła.",
+             "reklama": "Reklama portalu z ogłoszeniami — nic nie trzeba robić."}
+    if rule in fixed and (automated(m) or rule != "potwierdzenie"):
+        return {"rodzaj": rule, "streszczenie": fixed[rule], "termin": "", "pytania": [], "pewne": True}
+    prompt = f"""Przeczytaj wiadomość do kandydatki (Agi), która aplikowała na stanowisko „{app.get('stanowisko') or 'bez ogłoszenia'}” w firmie „{app.get('firma', '')}”.
+
+RODZAJE (wybierz jeden, uważnie):
+- "zaproszenie": pracodawca ZAPRASZA na rozmowę lub spotkanie — proponuje termin albo prosi o kontakt, żeby go umówić.
+- "potwierdzenie": automatyczne lub zwykłe potwierdzenie, że aplikacja dotarła, „odezwiemy się”, „rozpoczęliśmy rekrutację”. To NIE jest zaproszenie.
+- "do_potwierdzenia": system prosi, żeby kandydatka kliknęła i potwierdziła aplikację albo adres e-mail.
+- "reklama": reklama lub newsletter portalu (np. „sprawdź kompetencje innych kandydatów”, „podobne oferty”).
+- "pytanie": pracodawca o coś pyta albo prosi o informacje lub dokumenty.
+- "zadanie": zadanie lub test do wykonania. "oferta": propozycja zatrudnienia. "odmowa": odrzucenie kandydatury. "inne": nic z powyższych.
 
 WIADOMOŚĆ
 Od: {m.get('od_nazwa', '')} <{m.get('od', '')}>
@@ -102,7 +146,7 @@ Temat: {m.get('temat', '')}
 
 Zwróć JSON:
 {{"rodzaj": jedno z "zaproszenie", "oferta", "pytanie", "zadanie", "odmowa", "potwierdzenie", "inne",
-  "streszczenie": "1–2 zdania po polsku, co pisze pracodawca i czego oczekuje",
+  "streszczenie": "jedno krótkie zdanie po polsku do Agi, w drugiej osobie (np. „Firma X zaprasza Cię na rozmowę w piątek.”, „Firma X pyta o Twoją dostępność.”)",
   "termin": "termin rozmowy albo odpowiedzi, dokładnie jak w wiadomości, albo pusty tekst",
   "pytania": ["konkretne pytania pracodawcy do kandydatki, jeśli są"]}}"""
     out = None
@@ -111,9 +155,16 @@ Zwróć JSON:
     if not isinstance(out, dict) or out.get("rodzaj") not in KINDS:
         return {"rodzaj": rule, "streszczenie": (m.get("tresc") or "")[:240], "termin": "", "pytania": [], "pewne": False}
     kind = out["rodzaj"]
-    if rule in ("odmowa", "zaproszenie", "oferta") and kind in ("inne", "potwierdzenie"):
+    if rule in ("odmowa", "zaproszenie", "oferta") and kind in ("inne", "potwierdzenie", "reklama"):
         kind = rule                                                    # reguła łapie ważne sprawy, których model nie docenił
-    sure = out["rodzaj"] == kind and rule != "zaproszenie"             # odmowa „pewna” tylko, gdy uznał ją model i nic nie wskazuje na zaproszenie
+    if kind in ("zaproszenie", "oferta", "zadanie") and rule in ("potwierdzenie", "do_potwierdzenia", "reklama"):
+        kind = rule                                                    # model nie zrobi zaproszenia z potwierdzenia czy reklamy
+    low_all = R.plain(f"{m.get('temat', '')}\n{m.get('tresc', '')}")
+    if kind == "odmowa" and not re.search(REJECT_RE, low_all):
+        kind = "potwierdzenie" if rule == "potwierdzenie" or re.search(RECEIVED_RE, low_all) else "inne"
+    if kind == "zaproszenie" and rule != "zaproszenie" and automated(m):
+        kind = "potwierdzenie" if re.search(RECEIVED_RE, R.plain(m.get("tresc", ""))) else "inne"   # system bez słowa o rozmowie
+    sure = out["rodzaj"] == kind and rule != "zaproszenie" and (kind != "odmowa" or bool(re.search(REJECT_RE, low_all)))
     if kind == "odmowa" and rule == "zaproszenie":
         kind = "zaproszenie"                                           # przy sprzeczności wygrywa bezpieczniejsze: Aga zobaczy wiadomość
     pyt = [str(x).strip()[:300] for x in (out.get("pytania") or []) if str(x).strip()][:6]
@@ -256,15 +307,16 @@ def check_inbox(ctx, send=None, fetch=None):
         if kind in ("zaproszenie", "oferta", "pytanie", "zadanie"):
             draft, missing = draft_reply(ctx, f, app, m, info)
         with R.db(ctx) as c:
-            cur = c.execute("INSERT INTO wiadomosci(uid,message_id,od,od_nazwa,temat,data,tresc,aplikacja_id,rodzaj,wazne,streszczenie,termin,szkic,status,utworzono,references_) "
-                            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                            (m["uid"], m["message_id"], m["od"], m["od_nazwa"], m["temat"], m["data"], m["tresc"], aid, kind, int(kind in IMPORTANT),
-                             info["streszczenie"], info["termin"], draft, "nowa" if kind in IMPORTANT else "zalatwiona", R.stamp(ctx),
-                             f"{m['references']} {m['message_id']}".strip()))
+            act = kind in IMPORTANT or kind == "do_potwierdzenia"
+            cur = c.execute("INSERT INTO wiadomosci(uid,message_id,od,od_nazwa,temat,data,tresc,aplikacja_id,rodzaj,wazne,streszczenie,termin,szkic,status,utworzono,references_,linki) "
+                            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (m["uid"], m["message_id"], m["od"], m["od_nazwa"], m["temat"], m["data"], m["tresc"], 0 if kind == "reklama" else aid, kind, int(act),
+                             info["streszczenie"], info["termin"], draft, "nowa" if act else "zalatwiona", R.stamp(ctx),
+                             f"{m['references']} {m['message_id']}".strip(), json.dumps(m.get("linki") or [], ensure_ascii=False)))
             wid = cur.lastrowid
             for q in missing:
                 c.execute("INSERT INTO pytania(aplikacja_id,wiadomosc_id,pytanie,utworzono) VALUES(?,?,?,?)", (aid, wid, q, R.stamp(ctx)))
-            if aid:
+            if aid and kind != "reklama":
                 new_status = {"zaproszenie": "zaproszenie", "oferta": "oferta", "pytanie": "pytanie", "zadanie": "zaproszenie", "odmowa": "odmowa"}.get(kind)
                 cur_status = c.execute("SELECT status FROM aplikacje WHERE id=?", (aid,)).fetchone()["status"]
                 rank = ["wyslana", "wyslana_recznie", "pytanie", "odmowa", "zaproszenie", "rozmowa", "oferta"]

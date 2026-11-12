@@ -50,7 +50,7 @@ class FakeModel:
             return json.dumps({"firma": "Biuro Rachunkowe Testowe Sp. z o.o.", "stanowisko": "Specjalistka ds. administracji biurowej",
                                "miasto": "Kraków", "email": "rekrutacja@testowe.pl", "rodo": "", "sprzedaz": False, "ocena": 84,
                                "uzasadnienie": "Administracja i dokumentacja, bez sprzedaży."})
-        if "Piszesz w imieniu" in prompt:
+        if "Piszesz w imieniu" in prompt or "piszesz SWÓJ list" in prompt:
             return json.dumps({"list": self.letter, "mail": "Dzień dobry,\n\nw odpowiedzi na ogłoszenie przesyłam w załączniku CV i list "
                                "przewodni. Praca z dokumentacją i koordynacja terminów to obszar, w którym czuję się pewnie. "
                                "Będę wdzięczna za informację zwrotną."})
@@ -1107,6 +1107,94 @@ class KeychainIsolation283(RekrutacjaBase):
             self.assertEqual(self.R.secret(self.ctx, "aga"), "x" * 16)          # zapis do pliku próbnego w folderze testu
             self.assertIsNone(self.ctx.secret("jooble"))
             run.assert_not_called()
+
+
+
+class RealMail283(RekrutacjaBase):
+    """Przypadki z prawdziwej skrzynki Agi (12.11.2026)."""
+    BAD_LETTER = ("Szanowni Państwo,\n\nDroga Agnieszko Kwiatkowska,\n\nSzukamy osoby, która wesprze codzienne funkcjonowanie biura oraz działu. "
+                  "Twoje doświadczenie w administracji i prowadzeniu dokumentacji będzie nieocenionym atutem.\n\nW trakcie swojej kariery zawodowej "
+                  "przygotowywałaś analizy i raporty, pracowałaś z danymi poufnymi oraz koordynowałaś zadania. Twoja skrupulatność pomoże Ci "
+                  "sprawnie wykonywać obowiązki biurowe.\n\nWspierałaś również pracowników w rozliczeniach czasu pracy i prowadziłaś ewidencje.")
+
+    def kind(self, model_kind, **m):
+        msg = dict({"od": "", "od_nazwa": "", "temat": "", "tresc": "", "auto": False}, **m)
+        with patch.object(W, "ask", lambda prompt, **kw: json.dumps({"rodzaj": model_kind, "streszczenie": "x", "termin": "", "pytania": []})):
+            return self.A.classify(self.ctx, msg, {"firma": "Empik", "stanowisko": "Doradca"})
+
+    def setUp(self):
+        super().setUp()
+        self.A = importlib.import_module(self.mod.__name__ + ".odpowiedzi")
+
+    def test_letter_written_to_aga_is_never_used(self):
+        names = ("Agnieszka", "Kwiatkowska")
+        self.assertTrue(any("zwraca się do kandydatki" in x for x in self.D.language_issues(self.BAD_LETTER, names)))
+        self.model.letter = self.BAD_LETTER
+        a = {"stanowisko": "Pracownik ds. Administracji", "firma": "Solid MCG", "tresc": OFFER, "zrodlo": "oferta", "url": ""}
+        letter, mail, by_model = self.D.compose(self.ctx, self.facts, a)
+        self.assertFalse(by_model)
+        for bad in ("Droga", "Szukamy", "Twoje", "przygotowywałaś"):
+            self.assertNotIn(bad, letter)
+        f = self.facts
+        self.assertEqual(self.D.language_issues(letter, (f["osoba"]["imie"], f["osoba"]["nazwisko"])), [])
+
+    def test_erecruiter_and_portal_mails(self):
+        own = self.kind("zaproszenie", od="system@konto.erecruiter.pl", od_nazwa="Konto Kandydata", temat="Czy to Twoja aplikacja?",
+                        tresc="Czy to Twoja aplikacja? Zauważyliśmy nową aplikację powiązaną z Twoim adresem e-mail. Zdecyduj co mamy z nią zrobić. Teams")
+        self.assertEqual(own["rodzaj"], "do_potwierdzenia")
+        got = self.kind("zaproszenie", od="mail@stage.erecruiter.pl", od_nazwa="eRecruiter", temat="Dziękujemy",
+                        tresc="Cześć! Cieszymy się, że chcesz rozwijać swoją karierę właśnie z nami. Twoje zgłoszenie właśnie trafiło do naszego Zespołu "
+                              "Rekrutacji. Jeśli Twoje doświadczenie będzie tym, czego szukamy, odezwiemy się do Ciebie telefonicznie. "
+                              "*Wiadomość wygenerowana automatycznie, prosimy na nią nie odpowiadać.")
+        self.assertEqual(got["rodzaj"], "potwierdzenie")
+        sel = self.kind("odmowa", od="mail@stage.erecruiter.pl", od_nazwa="eRecruiter", temat="Dziękujemy za aplikację",
+                        tresc="Dziękujemy za złożenie aplikacji i wypełnienie kwestionariusza. Skontaktujemy się wyłącznie z wybranymi kandydatami.")
+        self.assertEqual(sel["rodzaj"], "potwierdzenie")
+        promo = self.kind("inne", od="noreply@pracuj.pl", od_nazwa="Pracuj.pl", temat="Jak wypadasz na tle innych?",
+                          tresc="Sprawdź kompetencje innych kandydatów na to samo stanowisko w firmie INSMIND i oceń swoje szanse rekrutacyjne.")
+        self.assertEqual(promo["rodzaj"], "reklama")
+        real = self.kind("inne", od="noreply@erecruiter.pl", temat="Rozmowa", tresc="Zapraszamy Panią na rozmowę kwalifikacyjną 20.11 o godz. 10:00 w naszym biurze.")
+        self.assertEqual(real["rodzaj"], "zaproszenie")
+        no = self.kind("odmowa", od="hr@firma.pl", tresc="Dziękujemy za udział. Niestety zdecydowaliśmy się na innego kandydata.")
+        self.assertEqual((no["rodzaj"], no["pewne"]), ("odmowa", True))
+
+    def test_mail_text_and_buttons(self):
+        P = importlib.import_module(self.mod.__name__ + ".poczta")
+        import email, email.policy
+        raw = ("From: Konto Kandydata <system@konto.erecruiter.pl>\nSubject: Czy to Twoja aplikacja?\nMIME-Version: 1.0\n"
+               "Content-Type: text/html; charset=utf-8\n\n<p>Czy to Twoja aplikacja?</p><p>&nbsp;</p><p>&nbsp;</p>"
+               '<a href="https://konto.erecruiter.pl/potwierdz/abc">Tak, to moja aplikacja</a> <a href="https://erecruiter.pl/polityka">Polityka prywatności</a>')
+        msg = email.message_from_string(raw, policy=email.policy.default)
+        self.assertNotIn("&nbsp;", P._text(msg))
+        self.assertEqual(P.links(msg), [{"tekst": "Tak, to moja aplikacja", "url": "https://konto.erecruiter.pl/potwierdz/abc"}])
+        self.assertEqual(P.clean_text("a&amp;nbsp;\n\n\n\n b"), "a\n\nb")
+
+    def test_offer_fields_are_not_aga_conditions(self):
+        long = "Pasuje do Ciebie, bo to administracja i dokumentacja. " * 8
+        with patch.object(W, "ask", lambda prompt, **kw: json.dumps({"firma": "X", "stanowisko": "Asystentka", "miasto": "Kraków i do 20 km albo zdalnie",
+                                                                     "uzasadnienie": long, "ocena": 95})):
+            out = self.O.analyze(self.ctx, self.facts, OFFER)
+        self.assertEqual(out["miasto"], "")
+        self.assertGreater(len(out["uzasadnienie"]), 300)
+        self.assertTrue(out["uzasadnienie"].endswith("."))
+
+    def test_migration_fixes_stored_messages(self):
+        self.ready()
+        aid = self.add(firma="Empik", stanowisko="Doradca", email="hr@empik.com")
+        with self.R.db(self.ctx) as c:
+            self.R.set_status(c, self.ctx, aid, "zaproszenie", wyslano=self.R.stamp(self.ctx))
+            c.execute("UPDATE aplikacje SET podziekowanie='czeka' WHERE id=?", (aid,))
+            c.execute("INSERT INTO wiadomosci(uid,od,od_nazwa,temat,tresc,aplikacja_id,rodzaj,wazne,status,streszczenie) VALUES(1,'system@konto.erecruiter.pl',"
+                      "'Konto Kandydata','Czy to Twoja aplikacja?','Czy to Twoja aplikacja? Zdecyduj co mamy z nią zrobić.',?,'zaproszenie',1,'nowa','Pracownik firmy Empik informuje')", (aid,))
+            c.execute("INSERT INTO wiadomosci(uid,od,od_nazwa,temat,tresc,aplikacja_id,rodzaj,wazne,status) VALUES(2,'mail@stage.erecruiter.pl','eRecruiter','x',"
+                      "'Dziękujemy za złożenie aplikacji. Skontaktujemy się wyłącznie z wybranymi kandydatami.',?,'odmowa',0,'zalatwiona')", (aid,))
+            c.commit()
+        self.P.migrate_283(self.ctx)
+        with self.R.db(self.ctx) as c:
+            kinds = [r["rodzaj"] for r in c.execute("SELECT rodzaj FROM wiadomosci ORDER BY uid")]
+        self.assertEqual(kinds, ["do_potwierdzenia", "potwierdzenie"])
+        a = self.row(aid)
+        self.assertEqual((a["status"], a["podziekowanie"]), ("wyslana", ""))
 
 if __name__ == "__main__":
     unittest.main()

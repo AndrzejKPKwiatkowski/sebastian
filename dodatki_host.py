@@ -15,7 +15,7 @@ from pathlib import Path
 
 W = None                      # moduł whatsapp (związany przez bind)
 log = logging.getLogger("sebastian.dodatki")
-HOST_VERSION = "2.8.3"
+HOST_VERSION = "2.8.4"
 PERMISSIONS = {
     "whatsapp.wysylanie": "wysyła Ci wiadomości i głosówki na WhatsAppie",
     "whatsapp.obserwacja": "czyta (tylko odczyt) Twoje rozmowy z obserwowanego WhatsAppa",

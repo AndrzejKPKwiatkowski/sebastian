@@ -597,10 +597,30 @@ OVERCLAIM = [r"bez (zbędnej |dodatkowej |długiej )?nauki", r"bez (żadnego )?w
              r"bezbłędn", r"potrafi(łabym|łbym) szybko przejść", r"list polecaj"]
 
 
-def language_issues(text):
-    """Błędy, których list Agi mieć nie może: formy męskie, przesadne obietnice, powtórzenia, niedokończone zdania."""
+SECOND_PERSON = r"\b[a-ząćęłńóśźż]{3,}łaś\b|\b(twoj\w*|twoim|twoich|tobie|ciebie|ciebi\w*)\b|\b(będziesz|możesz|jesteś|pomożesz|wykażesz|dołączysz)\b"
+EMPLOYER_VOICE = r"\b(szukamy|poszukujemy|oferujemy|zapewniamy|zapraszamy|dołącz do nas|nasz(ego|ym|a|ej)? (zesp|firm|dział))\w*"
+FIRST_PERSON = (r"\b[a-ząćęłńóśźż]{2,}(łam|łabym)\b|\b(jestem|mam|chciałabym|chcę|pracuję|potrafię|prowadzę|zajmuję się|znam|mogę|opowiem|"
+                r"zgłaszam|przesyłam|cenię|umiem|wiem|moich|moje|mój|moja|mnie)\b")
+
+
+def language_issues(text, names=()):
+    """Błędy, których list Agi mieć nie może: list pisany DO niej albo głosem pracodawcy, formy męskie, przesadne obietnice,
+    powtórzenia, niedokończone zdania."""
     out = []
-    low = text.lower()
+    body = re.sub(r"(?is)\n\s*(z poważaniem|z wyrazami szacunku).*$", "", text)       # podpis z imieniem nie jest błędem
+    low = body.lower()
+    hits = sorted({m.group(0) for m in re.finditer(SECOND_PERSON, low)})
+    if hits:
+        out.append(f"List zwraca się do kandydatki zamiast być napisany przez nią („{'”, „'.join(hits[:3])}”).")
+    hits = sorted({m.group(0) for m in re.finditer(EMPLOYER_VOICE, low)})
+    if hits:
+        out.append(f"List brzmi jak ogłoszenie pracodawcy („{'”, „'.join(hits[:3])}”).")
+    for n in [x for x in names if x and len(x) > 2]:
+        if re.search(rf"\b{re.escape(n.lower()[:5])}\w*", low):
+            out.append(f"W treści listu pada imię lub nazwisko kandydatki („{n}”) — list pisze ona sama.")
+            break
+    if len(re.findall(FIRST_PERSON, low)) < 3:
+        out.append("List nie jest napisany w pierwszej osobie (jak „pracowałam”, „przygotowywałam”).")
     for w in dict.fromkeys(re.findall(r"\b[a-ząćęłńóśźż]{2,}(?:łbym|łem)\b", low)):
         if w not in NOT_VERBS:
             out.append(f"Forma męska „{w}” — list pisze kobieta.")
@@ -610,12 +630,12 @@ def language_issues(text):
         m = re.search(pat, low)
         if m:
             out.append(f"Przesadne albo niezgodne sformułowanie „{m.group(0)}”.")
-    sentences = [x.strip().lower() for x in re.split(r"(?<=[.!?])\s+", text) if len(x.strip()) > 25]
+    sentences = [x.strip().lower() for x in re.split(r"(?<=[.!?])\s+", body) if len(x.strip()) > 25]
     if len(sentences) != len(set(sentences)):
         out.append("To samo zdanie powtarza się dwa razy.")
     if re.search(r"\b(dostaję się|dostaje się|aplikacja na stanowisko\s*\.)", low):
         out.append("Zdanie bez sensu („dostaję się…”).")
-    if re.search(r"[a-ząćęłńóśźż]{3,}\s*$", text.strip()) and not text.strip().endswith((".", "!", "?")):
+    if re.search(r"[a-ząćęłńóśźż]{3,}\s*$", body.strip()) and not body.strip().endswith((".", "!", "?")):
         out.append("Tekst kończy się w pół zdania.")
     return list(dict.fromkeys(out))
 
@@ -741,8 +761,10 @@ def compose(ctx, f, app, sel=None):
     """(list, mail, czy_model) — list pisany przez model wyłącznie z faktów, sprawdzony i poprawiony językowo; mail z szablonu.
     Gdy list nie przejdzie kontroli po dwóch próbach — wersja z faktów bez modelu."""
     spont = app["zrodlo"] == "spontaniczna" or not app["stanowisko"]
-    base = f"""Piszesz w imieniu kandydatki LIST MOTYWACYJNY do pracodawcy. Po polsku, poprawną polszczyzną, w formach żeńskich
-(kandydatka pisze o sobie: „pracowałam”, „przygotowywałam”, „jestem gotowa”).
+    base = f"""Jesteś kandydatką do pracy i piszesz SWÓJ list motywacyjny do pracodawcy. Piszesz o sobie w pierwszej osobie,
+w formach żeńskich: „pracowałam”, „przygotowywałam”, „jestem gotowa”, „chciałabym”. Adresatem jest pracodawca (zwracasz się
+do niego „Państwo”). NIE piszesz do kandydatki i nie piszesz jak pracodawca: żadnego „Ty”, „Twoje”, „przygotowywałaś”,
+„szukamy”, „oferujemy”, żadnego zwracania się do kandydatki po imieniu. Poprawna polszczyzna.
 
 ŻELAZNA ZASADA: o kandydatce wolno napisać WYŁĄCZNIE to, co jest w FAKTACH. Żadnych nowych umiejętności, narzędzi,
 lat doświadczenia, liczb, certyfikatów ani stanowisk. Nie obiecuj, że nie potrzebuje wdrożenia ani nauki. Jeśli oferta
@@ -768,7 +790,9 @@ Zwróć JSON {{"list": "..."}}:
   z ogłoszenia, na które FAKTY dają pokrycie — każde poparte tym, co kandydatka faktycznie robiła (czynność, miejsce, efekt).
   Jeśli FAKTY podają liczby (np. „ok. 80 historii choroby miesięcznie”, liczba wydarzeń, osób, dokumentów), użyj 2–3 najlepiej
   pasujących do oferty, dokładnie w tym brzmieniu. Liczb spoza FAKTÓW nie wolno podawać ani szacować.
-  Ostatni akapit: gotowość do rozmowy."""
+  Ostatni akapit: gotowość do rozmowy.
+PRZYKŁAD TONU (nie kopiuj treści): „W ZZOZ w Czarnkowie prowadziłam dokumentację medyczną, ok. 80 historii choroby miesięcznie.
+Dzięki temu wiem, jak ważna jest kompletność dokumentów i terminowość.”"""
     fb_letter, fb_mail = fallback_texts(f, app, sel)
     mail = mail_text(f, app, sel)
     feedback = ""
@@ -783,9 +807,16 @@ Zwróć JSON {{"list": "..."}}:
             feedback = "\n\nPOPRZEDNIA WERSJA BYŁA ZA KRÓTKA. Napisz pełny list (170–240 słów)."
             continue
         letter = tidy(body, f)
-        if language_issues(letter):
+        names = (f["osoba"].get("imie", ""), f["osoba"].get("nazwisko", ""))
+        if any(x.startswith("List zwraca się") or x.startswith("List brzmi") or "imię lub nazwisko" in x or "pierwszej osobie" in x
+               for x in language_issues(letter, names)):
+            feedback = ("\n\nPOPRZEDNIA WERSJA BYŁA NAPISANA DO KANDYDATKI albo głosem pracodawcy. To ma być list OD niej: "
+                        "pisz „ja” w pierwszej osobie (np. „Przez dwa lata prowadziłam dokumentację…”), nie używaj „Ty”, „Twoje”, "
+                        "„przygotowywałaś”, nie pisz „szukamy”, nie zwracaj się do niej po imieniu.")
+            continue                                                   # takiego tekstu się nie poprawia — piszę od nowa
+        if language_issues(letter, names):
             letter = tidy(proofread(ctx, f, app, letter.rsplit("\n\nZ poważaniem", 1)[0]), f)
-        problems = language_issues(letter) + rule_check(f, app, letter)
+        problems = language_issues(letter, names) + rule_check(f, app, letter)
         if not problems:
             return letter, mail, True
         feedback = "\n\nPOPRAW TE BŁĘDY Z POPRZEDNIEJ WERSJI (nie powtarzaj ich):\n- " + "\n- ".join(problems[:6])

@@ -65,7 +65,7 @@
   {% endif %}
 
   {% for m in msgs %}
-  <div class="note {{ 'ok' if m.rodzaj in ('zaproszenie','oferta') else ('err' if m.rodzaj == 'odmowa' else 'info') }}">
+  <div class="note {{ 'ok' if m.rodzaj in ('zaproszenie','oferta') else ('err' if m.rodzaj in ('odmowa','do_potwierdzenia') else 'info') }}">
     <b>{{ KINDS.get(m.rodzaj, m.rodzaj) }}</b> · {{ m.data|dzien }} — {{ m.streszczenie or m.temat }} <a href="{{ url_for('message', wid=m.id) }}">Otwórz</a></div>
   {% endfor %}
 

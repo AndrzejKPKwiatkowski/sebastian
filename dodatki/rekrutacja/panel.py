@@ -301,7 +301,7 @@ def report_text(ctx):
         queue = c.execute("SELECT COUNT(*) FROM aplikacje WHERE status='zatwierdzona'").fetchone()[0]
         invites = c.execute("SELECT COUNT(*) FROM aplikacje WHERE status IN ('zaproszenie','rozmowa','oferta')").fetchone()[0]
         replies = c.execute("SELECT w.rodzaj, a.firma FROM wiadomosci w LEFT JOIN aplikacje a ON a.id=w.aplikacja_id WHERE substr(w.utworzono,1,10)=? "
-                            "AND w.rodzaj IN ('zaproszenie','oferta','pytanie','zadanie','odmowa')", (today,)).fetchall()
+                            "AND w.rodzaj IN ('zaproszenie','oferta','pytanie','zadanie','odmowa','do_potwierdzenia')", (today,)).fetchall()
         open_q = c.execute("SELECT COUNT(*) FROM pytania WHERE status='otwarte'").fetchone()[0]
         drafts = c.execute("SELECT COUNT(*) FROM wiadomosci WHERE status='nowa' AND wazne=1").fetchone()[0]
         found = c.execute("SELECT COUNT(*) FROM aplikacje WHERE zrodlo='auto' AND substr(utworzono,1,10)=?", (today,)).fetchone()[0]
@@ -451,6 +451,49 @@ def migrate_282(ctx):
         R.meta_set(c, "migracja_282", R.stamp(ctx))
 
 
+def migrate_283(ctx):
+    """2.8.3: wiadomości rozpoznane na nowo (potwierdzenia, reklamy portali, prośby o potwierdzenie nie są zaproszeniami ani odmowami);
+    czekające listy z błędami (pisane do Agi, głosem pracodawcy) przygotowane od nowa."""
+    with R.db(ctx) as c:
+        if R.meta_get(c, "migracja_283"):
+            return
+        firms = {r["id"]: r["firma"] for r in c.execute("SELECT id, firma FROM aplikacje")}
+        touched = set()
+        for w in [dict(r) for r in c.execute("SELECT * FROM wiadomosci WHERE rodzaj IN ('zaproszenie','oferta','zadanie','odmowa','pytanie','inne')")]:
+            rule = A.classify_rules(w)
+            low = R.plain(f"{w['temat']}\n{w['tresc']}")
+            new = rule if rule in ("do_potwierdzenia", "potwierdzenie", "reklama") else ""
+            if w["rodzaj"] == "odmowa" and not re.search(A.REJECT_RE, low):
+                new = new or "inne"
+            if not new or new == w["rodzaj"] or (new != "do_potwierdzenia" and w["rodzaj"] == "zaproszenie" and re.search(A.INVITE_RE, low)):
+                continue
+            firm = firms.get(w["aplikacja_id"]) or w["od_nazwa"] or "Firma"
+            summary = {"do_potwierdzenia": f"{firm}: system rekrutacyjny prosi, żebyś potwierdziła, że to Twoja aplikacja. Kliknij przycisk w wiadomości (otwórz ją w Gmailu).",
+                       "potwierdzenie": f"{firm} potwierdza, że Twoja aplikacja dotarła.", "reklama": "Reklama portalu z ogłoszeniami — nic nie trzeba robić."}.get(new, w["streszczenie"])
+            act = new == "do_potwierdzenia"
+            c.execute("UPDATE wiadomosci SET rodzaj=?, wazne=?, status=?, streszczenie=?, szkic='' WHERE id=?",
+                      (new, int(act), "nowa" if act and w["status"] == "nowa" else ("nowa" if act else "zalatwiona"), summary, w["id"]))
+            if w["aplikacja_id"]:
+                touched.add(w["aplikacja_id"])
+        for aid in touched:                                          # status aplikacji z pozostałych, prawdziwych odpowiedzi
+            kinds = [r["rodzaj"] for r in c.execute("SELECT rodzaj FROM wiadomosci WHERE aplikacja_id=?", (aid,))]
+            cur = c.execute("SELECT status, podziekowanie FROM aplikacje WHERE id=?", (aid,)).fetchone()
+            best = next((k for k in ("oferta", "zaproszenie", "odmowa", "pytanie") if k in kinds), "")
+            if cur and cur["status"] in ("zaproszenie", "odmowa", "pytanie", "oferta") and cur["status"] not in kinds:
+                R.set_status(c, ctx, aid, best or "wyslana")
+                R.note(c, ctx, aid, "status poprawiony po ponownym rozpoznaniu odpowiedzi (2.8.3)")
+            if cur and cur["podziekowanie"] == "czeka" and "odmowa" not in kinds:
+                c.execute("UPDATE aplikacje SET podziekowanie='' WHERE id=?", (aid,))
+        f = R.load_facts(ctx)
+        names = (f["osoba"].get("imie", ""), f["osoba"].get("nazwisko", ""))
+        for a in [dict(r) for r in c.execute("SELECT id, list, status FROM aplikacje WHERE status IN ('do_zatwierdzenia','do_sprawdzenia','formularz','zatwierdzona') AND list<>''")]:
+            if D.language_issues(a["list"], names):
+                c.execute("UPDATE aplikacje SET status='nowa', uwagi='[]', zrodlo=CASE WHEN zrodlo='auto' THEN 'oferta' ELSE zrodlo END WHERE id=? AND status=?", (a["id"], a["status"]))
+                R.note(c, ctx, a["id"], "list miał błędy (pisany do Agi albo głosem pracodawcy) — przygotowuję od nowa (2.8.3)")
+        R.meta_set(c, "migracja_283", R.stamp(ctx))
+        c.commit()
+
+
 def worker(ctx, stop):
     import fcntl
     lock = open(ctx.folder() / ".praca.lock", "w")
@@ -467,6 +510,7 @@ def worker(ctx, stop):
     with contextlib.suppress(Exception):
         migrate_281(ctx)
         migrate_282(ctx)
+        migrate_283(ctx)
     while not stop.is_set():
         try:
             work_once(ctx)
@@ -530,6 +574,8 @@ def make_app(ctx, hosts=None):
     app.jinja_env.globals.update(STATUS=R.STATUS, STEPS=STEPS, TOOLS=R.TOOLS, LEVELS=R.LEVELS, WANT=R.WANT, AVOID=R.AVOID)
     app.jinja_env.filters["loads"] = lambda s: json.loads(s or "[]")
     app.jinja_env.filters["dzien"] = lambda s: (s or "")[:16].replace("T", " ")
+    app.jinja_env.filters["czysty"] = P.clean_text
+    app.jinja_env.filters["host"] = lambda u: (re.sub(r"^https?://(www\.)?", "", u or "").split("/")[0])[:60]
     allowed = hosts                                                           # None = bez sprawdzania (testy)
 
     def csrf():
@@ -976,10 +1022,13 @@ def make_app(ctx, hosts=None):
 
     @app.route("/odpowiedzi")
     def replies():
-        rows = g.db.execute("SELECT w.*, a.firma, a.stanowisko FROM wiadomosci w LEFT JOIN aplikacje a ON a.id=w.aplikacja_id "
+        everything = bool(request.args.get("wszystkie"))
+        quiet = "" if everything else f"WHERE w.rodzaj NOT IN ({','.join(repr(k) for k in A.QUIET)}) "
+        rows = g.db.execute("SELECT w.*, a.firma, a.stanowisko FROM wiadomosci w LEFT JOIN aplikacje a ON a.id=w.aplikacja_id " + quiet +
                             "ORDER BY (w.status='nowa' AND w.wazne=1) DESC, w.id DESC LIMIT 200").fetchall()
+        hidden = 0 if everything else g.db.execute(f"SELECT COUNT(*) FROM wiadomosci WHERE rodzaj IN ({','.join('?' * len(A.QUIET))})", A.QUIET).fetchone()[0]
         qs = g.db.execute("SELECT p.*, a.firma FROM pytania p LEFT JOIN aplikacje a ON a.id=p.aplikacja_id WHERE p.status='otwarte' ORDER BY p.id").fetchall()
-        return render_template("odpowiedzi.html", rows=rows, qs=qs, tab="odp", KINDS=A.KINDS)
+        return render_template("odpowiedzi.html", rows=rows, qs=qs, tab="odp", KINDS=A.KINDS, hidden=hidden, everything=everything)
 
     @app.route("/wiadomosc/<int:wid>", methods=["GET", "POST"])
     def message(wid):
@@ -1019,7 +1068,10 @@ def make_app(ctx, hosts=None):
                 g.db.commit()
             return redirect(url_for("message", wid=wid))
         qs = g.db.execute("SELECT * FROM pytania WHERE wiadomosc_id=? ORDER BY id", (wid,)).fetchall()
-        return render_template("wiadomosc.html", m=m, qs=qs, tab="odp", KINDS=A.KINDS)
+        from urllib.parse import quote
+        gmail = ("https://mail.google.com/mail/u/0/#search/" + quote("rfc822msgid:" + m["message_id"].strip("<>"))) if m["message_id"] else ""
+        return render_template("wiadomosc.html", m=m, qs=qs, tab="odp", KINDS=A.KINDS, gmail=gmail,
+                               links=[x for x in json.loads(m["linki"] or "[]") if str(x.get("url", "")).lower().startswith(("http://", "https://"))])
 
     @app.route("/import-wiedzy", methods=["GET", "POST"])
     def knowledge():

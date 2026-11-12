@@ -111,6 +111,51 @@ def _dec(value):
     return str(value or "")
 
 
+def clean_text(text):
+    """Czytelna treść: encje HTML (&nbsp; itd.) zamienione, bez pustych ciągów linii i spacji."""
+    import html as _h
+    t = _h.unescape(_h.unescape(str(text or ""))).replace("\xa0", " ").replace("\u200b", "").replace("\r", "")
+    lines = [re.sub(r"[ \t]+", " ", l).strip() for l in t.split("\n")]
+    t = "\n".join(lines)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
+
+
+def links(msg, limit=8):
+    """Przyciski i linki z treści HTML: [{"tekst", "url"}] — najpierw te, które wyglądają na działanie (potwierdź, aplikacja)."""
+    from html.parser import HTMLParser
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.out, self.href, self.buf = [], None, []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                self.href, self.buf = dict(attrs).get("href"), []
+
+        def handle_data(self, d):
+            if self.href is not None:
+                self.buf.append(d)
+
+        def handle_endtag(self, tag):
+            if tag == "a" and self.href:
+                label = clean_text(" ".join(self.buf)).replace("\n", " ")[:80]
+                if re.match(r"^https?://", self.href) and label and not re.search(r"(?i)wypisz|unsubscribe|polityk|privacy|regulamin|facebook|linkedin\.com/(company|in)|instagram", label + " " + self.href):
+                    self.out.append({"tekst": label, "url": self.href[:1500]})
+            self.href = None if tag == "a" else self.href
+
+    found = []
+    for part in (msg.walk() if msg.is_multipart() else [msg]):
+        if part.get_content_type() == "text/html" and not part.get_filename():
+            with contextlib.suppress(Exception):
+                p = P()
+                p.feed(part.get_content())
+                found += p.out
+    uniq = list({x["url"]: x for x in found}.values())
+    act = re.compile(r"(?i)potwierd|aplikac|tak|moja|zgod|akceptuj|zobacz|przejd|kliknij|konto|odpowiedz|formularz|test|zadanie|termin|umów")
+    return (sorted(uniq, key=lambda x: 0 if act.search(x["tekst"]) else 1))[:limit]
+
+
 def _text(msg, limit=12000):
     parts = []
     for part in (msg.walk() if msg.is_multipart() else [msg]):
@@ -129,7 +174,7 @@ def _text(msg, limit=12000):
     text = (plain or [b for _, b in parts] or [""])[0]
     text = re.split(r"\n(?:-{2,}\s*Original Message|W dniu .{5,80} napisał|On .{5,80} wrote:|Od: .{3,80}\nWysłano:)", text)[0]
     text = "\n".join(l for l in text.splitlines() if not l.startswith(">"))
-    return re.sub(r"\n{3,}", "\n\n", text).strip()[:limit]
+    return clean_text(text)[:limit]
 
 
 def fetch_new(address, pwd, after_uid=0, since_days=30, limit=200):
@@ -164,7 +209,7 @@ def fetch_new(address, pwd, after_uid=0, since_days=30, limit=200):
                         "references": " ".join((msg.get("References") or "").split()), "nasza": bool(msg.get("X-Sebastian-Rekrutacja")),
                         "auto": bool(msg.get("Auto-Submitted", "no") != "no"
                         or msg.get("X-Autoreply") or msg.get("X-Autorespond") or "auto-reply" in (msg.get("Precedence") or "")),
-                        "tresc": _text(msg)})
+                        "tresc": _text(msg), "linki": links(msg)})
     finally:
         with contextlib.suppress(Exception):
             box.logout()
