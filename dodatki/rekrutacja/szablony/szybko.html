@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Wyślij do Sebastiana</h1>
+{% if dup %}<div class="note">Ta oferta już jest w panelu. <a href="{{ url_for('detail', aid=dup) }}">Otwórz aplikację</a></div>{% endif %}
+<div class="card">
+  <form method="post" action="{{ url_for('add') }}">
+    <input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="rodzaj" value="oferta">
+    <label>Link do ogłoszenia</label><input type="text" name="url" value="{{ url }}">
+    <label>Treść ogłoszenia (z oglądanej strony)</label><textarea name="tresc" rows="12">{{ text }}</textarea>
+    <p class="small soft">Sprawdź tylko, czy to właściwa oferta — Sebastian sam wyciągnie firmę, stanowisko i wymagania, a potem przygotuje CV i list.</p>
+    <div class="actions"><button class="btn big">Dodaj i przygotuj dokumenty</button></div>
+  </form>
+</div>
+{% endblock %}

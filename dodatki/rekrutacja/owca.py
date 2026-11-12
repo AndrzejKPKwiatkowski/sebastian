@@ -131,6 +131,9 @@ def due(ctx, c, now=None):
     if not st.get("owca", True) or st.get("wstrzymane") or not working_day(ctx, day) or R.meta_get(c, "onboarding") != "gotowe":
         return None
     sent = json.loads(R.meta_get(c, f"owca_{day.isoformat()}") or "[]")
+    morning0 = R.hm(st.get("owca_rano", "07:45"), (7, 45))
+    if pending_idea(c, day) and "pomysl" not in sent and morning0 <= now.time() < dt.time(18, 0):
+        return "pomysl"                                                # jednorazowy mail „Mam pomysł!” (więcej ofert)
     g, _ = goal(c, ctx, day)
     p = progress(c, day)
     if "brawo" not in sent and p["zrobione"] >= g:
@@ -303,7 +306,7 @@ def tick(ctx, send, now=None):
         if not kind:
             return None
         me, seb = R.mailboxes(c)
-        subject, text, html, art = compose(ctx, c, kind, now)
+        subject, text, html, art = compose_idea(ctx, c) if kind == "pomysl" else compose(ctx, c, kind, now)
     sender, key = (seb, "sebastian") if seb and R.secret(ctx, "sebastian") else (me, "aga")
     pwd = R.secret(ctx, key)
     if not me or not pwd:
@@ -315,6 +318,9 @@ def tick(ctx, send, now=None):
         return None
     with R.db(ctx) as c:
         mark(c, now.date(), kind)
+        if kind == "pomysl":
+            R.meta_set(c, "owca_pomysl", R.stamp(ctx))
+            c.commit()
     return kind
 
 
@@ -543,3 +549,74 @@ def stage_action(ctx, c, aid, action):
     return {"rozmowa": "Zapisane: po rozmowie, czekasz na decyzję. Trzymam kciuki!",
             "oferta": "Wspaniale! Zaraz dostaniesz mail z tym, co sprawdzić w ofercie.",
             "odmowa": "Szkoda, ale to też doświadczenie. Jedziemy dalej — kolejne oferty czekają."}[action]
+
+
+# ================================================================ „Mam pomysł!” — więcej ofert z alertów portali
+
+PHRASES = ["asystentka biura", "sekretarka", "specjalistka ds. administracji", "pracownik biurowy", "asystentka zarządu",
+           "recepcjonistka", "rejestratorka medyczna", "koordynatorka", "office manager", "obsługa klienta"]
+
+MORE_STEPS = [
+    ("pracuj", "Pracuj.pl — alerty", [
+        "Zaloguj się na pracuj.pl tym samym Gmailem, który czyta Sebastian.",
+        "Wpisz frazę (np. „asystentka biura”), miejsce: Kraków + 20 km. Filtry: umowa o pracę, pełny etat.",
+        "Kliknij „Zapisz wyszukiwanie” / „Powiadomienia” i wybierz codziennie.",
+        "Powtórz dla 4–5 fraz z listy poniżej."]),
+    ("olx", "OLX Praca — obserwowane wyszukiwania", [
+        "Wejdź na olx.pl → Praca, lokalizacja Kraków (+20 km).",
+        "Kategorie: Administracja biurowa, Obsługa klienta i call center, Sprzedaż (jeśli chcesz).",
+        "Kliknij „Obserwuj wyszukiwanie” i włącz powiadomienia e-mail."]),
+    ("indeed", "Indeed — alerty e-mail", [
+        "Na pl.indeed.com wpisz frazę i „Kraków”.",
+        "Pod wynikami włącz „Otrzymuj nowe oferty e-mailem” (podaj swój Gmail).",
+        "Zrób to dla 3–4 fraz."]),
+    ("linkedin", "LinkedIn — alerty i „Otwarta na pracę”", [
+        "Praca → wyszukaj frazę, lokalizacja Kraków → włącz przełącznik „Alert o ofertach” (e-mail, codziennie).",
+        "W profilu ustaw „Otwarta na pracę” — widoczne tylko dla rekruterów.",
+        "Rekruterzy z LinkedIna często piszą sami — zaglądaj czasem do wiadomości na LinkedInie."]),
+    ("inne", "Aplikuj.pl, GoWork, Praca.pl, RocketJobs", [
+        "Na każdym z tych portali: wyszukaj frazę + Kraków i zapisz alert e-mail.",
+        "RocketJobs ma też oferty biurowe i administracyjne, nie tylko IT."]),
+    ("widocznosc", "CV widoczne dla pracodawców", [
+        "Pracuj.pl: Profil → ustaw CV jako widoczne dla pracodawców.",
+        "Indeed: wgraj CV i ustaw jako publiczne. OLX: uzupełnij profil kandydata.",
+        "Wtedy to pracodawcy znajdują Ciebie — bez wysyłania."]),
+    ("agencje", "Agencje pracy w Krakowie", [
+        "Zarejestruj CV raz w: Randstad, Adecco, Hays, ManpowerGroup, Grafton (biura obsługi i administracji).",
+        "Dla kandydatki jest to bezpłatne, a agencje mają oferty, których nie ma na portalach."]),
+    ("zakladka", "Zakładka „Wyślij do Sebastiana” (laptop)", [
+        "Otwórz w panelu stronę „Więcej ofert” i przeciągnij przycisk „Wyślij do Sebastiana” na pasek zakładek.",
+        "Gdy oglądasz ogłoszenie na dowolnym portalu, kliknij zakładkę — Sebastian dostanie całą treść i przygotuje CV i list."]),
+]
+
+
+def pending_idea(c, day=None):
+    """„czeka:RRRR-MM-DD” — mail czeka i może wyjść od tego dnia (jutro rano po instalacji)."""
+    v = R.meta_get(c, "owca_pomysl") or ""
+    if not v.startswith("czeka"):
+        return False
+    when = v.partition(":")[2]
+    return not when or day is None or day.isoformat() >= when
+
+
+def compose_idea(ctx, c):
+    f = R.load_facts(ctx)
+    name = f["osoba"].get("imie") or "Aga"
+    hi = "Aga" if name.lower().startswith("agn") or name.lower() == "aga" else name
+    base = R.meta_get(c, "adres_panelu") or ""
+    email = R.mailboxes(c)[0] or "Twój Gmail"
+    how = (f'<p style="margin:0 0 12px">Portale z ogłoszeniami same wysyłają maile z nowymi ofertami — wystarczy zapisać się na alerty '
+           f'na adres <b>{H.escape(email)}</b>. Ja czytam te maile, wyciągam z nich oferty, odsiewam to, czego nie chcesz, i przygotowuję '
+           f'CV z listem. Ty tylko zatwierdzasz.</p><p style="margin:0 0 6px">Zajmie Ci to około <b>30 minut, jeden raz</b>. Lista kroków:</p>')
+    steps = "".join(_section(f"{i + 1}. {title}", [H.escape(x) for x in items]) for i, (_, title, items) in enumerate(MORE_STEPS))
+    phrases = _section("Frazy, które warto wpisać", [H.escape(", ".join(PHRASES))])
+    tip = ('<p style="margin:18px 0 0;color:#6e6e73;font-size:14px">Oferty z portali, które wymagają kliknięcia „Aplikuj”, przygotuję jako '
+           '„do wysłania przez formularz” — z gotowym CV, listem i polami do skopiowania. To 1–2 minuty na ofertę. A jeśli firma ma adres '
+           'e-mail na swojej stronie, wyślę aplikację mailem sama.</p>')
+    cta = f'<p style="margin:22px 0 0">{_button(base + "/wiecej-ofert", "Otwórz listę kroków w panelu")}</p>' if base else ""
+    title = f"{hi}! Mam pomysł"
+    lead = "jak zrobić, żeby było dużo więcej ofert. Zrobimy to tak…"
+    text = (f"{hi}! Mam pomysł, jak zrobić, żeby było więcej ofert.\n\nZapisz się na alerty e-mail na portalach (na adres {email}), "
+            "a ja będę z nich brać oferty.\n\n" + "\n\n".join(f"{i + 1}. {t}\n- " + "\n- ".join(items) for i, (_, t, items) in enumerate(MORE_STEPS))
+            + f"\n\nFrazy: {', '.join(PHRASES)}\n\n" + (f"{base}/wiecej-ofert\n\n" if base else "") + "Owca Sebastian")
+    return f"🐑 {hi}! Mam pomysł, jak zrobić, żeby było więcej ofert!", text, _page(title, lead, how + steps + phrases + tip + cta, "motywacja"), "motywacja"

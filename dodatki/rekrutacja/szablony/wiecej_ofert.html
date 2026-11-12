@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Więcej ofert</h1>
+<p class="soft">Zapisz się na alerty e-mail na portalach — na adres, który czyta Sebastian. Oferty z alertów same trafią do panelu.
+  Odhaczaj kroki, gdy je zrobisz.</p>
+{% if week %}<div class="note ok">Z alertów w ostatnim tygodniu: <b>{{ week }}</b> nowych pasujących ofert.</div>{% endif %}
+
+{% for key, title, items in steps %}
+<div class="card" id="{{ key }}">
+  <form method="post" style="display:flex;gap:12px;align-items:flex-start">
+    <input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="krok" value="{{ key }}">
+    <button class="btn {{ '' if key in done else 'ghost' }} small" title="Oznacz jako zrobione">{{ '✓' if key in done else '○' }}</button>
+    <div style="flex:1"><h2 style="margin:0 0 6px{{ ';color:var(--soft);text-decoration:line-through' if key in done }}">{{ loop.index }}. {{ title }}</h2>
+      <ul class="small" style="margin:0;padding-left:18px">{% for x in items %}<li>{{ x }}</li>{% endfor %}</ul>
+      {% if key == 'zakladka' %}
+      <p style="margin:12px 0 4px"><a class="btn small" href="{{ js }}" onclick="alert('Przeciągnij ten przycisk na pasek zakładek. Potem klikaj go na stronie ogłoszenia.');return false;">Wyślij do Sebastiana</a></p>
+      <p class="small soft">Działa na laptopie (Chrome, Edge, Safari). Na telefonie wygodniej wkleić link na stronie „Dziś”.</p>
+      {% endif %}
+    </div>
+  </form>
+</div>
+{% endfor %}
+
+<div class="card"><h2>Frazy do alertów</h2><p>asystentka biura · sekretarka · specjalistka ds. administracji · pracownik biurowy · asystentka zarządu · recepcjonistka · rejestratorka medyczna · koordynatorka · office manager · obsługa klienta</p></div>
+
+<div class="card"><h2>Urzędy pracy (CBOP)</h2>
+  <p class="small soft">{% if partner %}{{ cbop or 'Pierwsze pobranie dziś wieczorem.' }}{% else %}Czeka na nazwę partnera z ministerstwa — Andrzej wpisze ją w Ustawieniach → Klucze.{% endif %}</p></div>
+
+{% if stats %}<div class="card"><h2>Ostatnie alerty</h2><ul class="small soft">{% for s in stats %}<li>{{ s.data|dzien }} — {{ s.streszczenie }}</li>{% endfor %}</ul></div>{% endif %}
+{% endblock %}

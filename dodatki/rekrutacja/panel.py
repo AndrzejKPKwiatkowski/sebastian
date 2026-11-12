@@ -6,7 +6,7 @@ dane dodatku Rekrutacja.
 import contextlib, datetime as dt, hmac, json, os, random, re, secrets, subprocess, threading, time
 from pathlib import Path
 
-from . import dokumenty as D, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, owca as OW, poczta as P, rdzen as R, wiedza as Wd, zrodla as Z
+from . import cbop as CB, dokumenty as D, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, owca as OW, poczta as P, rdzen as R, wiedza as Wd, zrodla as Z
 
 HERE = Path(__file__).resolve().parent
 STEPS = ["Powitanie", "Twoja skrzynka", "Skrzynka Sebastiana", "Twoje dane", "Narzędzia", "Czego szukasz", "Jak mam pracować", "Gotowe"]
@@ -397,6 +397,8 @@ def work_once(ctx):
             refresh_match(ctx)                                        # w wolnej chwili: lepsze wyjaśnienia dopasowania
     send_one(ctx)
     with contextlib.suppress(Exception):
+        CB.run(ctx)                                                   # CBOP: raz na dobę wieczorem, gdy jest nazwa partnera
+    with contextlib.suppress(Exception):
         OW.stage_tick(ctx, P.send) or OW.tick(ctx, P.send)            # owca: najpierw etapy rekrutacji, potem cel dnia
     if inbox:
         try:
@@ -519,6 +521,17 @@ def migrate_283(ctx):
         c.commit()
 
 
+def migrate_290(ctx):
+    """2.10: owca wyśle jutro rano (jednorazowo) „Mam pomysł!” z instrukcją alertów."""
+    with R.db(ctx) as c:
+        if not R.meta_get(c, "owca_pomysl"):
+            day = ctx.now().date() + __import__("datetime").timedelta(days=1)
+            while not OW.working_day(ctx, day):
+                day += __import__("datetime").timedelta(days=1)
+            R.meta_set(c, "owca_pomysl", f"czeka:{day.isoformat()}")     # najbliższy dzień roboczy rano
+            c.commit()
+
+
 def worker(ctx, stop):
     import fcntl
     lock = open(ctx.folder() / ".praca.lock", "w")
@@ -536,6 +549,7 @@ def worker(ctx, stop):
         migrate_281(ctx)
         migrate_282(ctx)
         migrate_283(ctx)
+        migrate_290(ctx)
     while not stop.is_set():
         try:
             work_once(ctx)
@@ -684,6 +698,37 @@ def make_app(ctx, hosts=None):
         if msg is None:
             abort(404)
         return sheep_page("Zapisane", msg, "brawo" if action in ("oferta", "przyjmuje") else "rano")
+
+    @app.route("/szybko")
+    def quick_add():
+        """Zakładka „Wyślij do Sebastiana”: adres i tekst oglądanego ogłoszenia → formularz do potwierdzenia (bez automatów na portalu)."""
+        url = request.args.get("u", "").strip()[:2000]
+        text = request.args.get("t", "").strip()[:15000]
+        if url and not re.match(r"^https?://", url):
+            url = ""
+        dup = R.find_duplicate(g.db, "", "", url) if url else 0
+        return render_template("szybko.html", url=url, text=text, dup=dup, tab="")
+
+    @app.route("/wiecej-ofert")
+    def more_offers():
+        base = request.host_url.rstrip("/")
+        js = ("javascript:(function(){var t=(document.body.innerText||'').slice(0,12000);"
+              "window.open('" + base + "/szybko?u='+encodeURIComponent(location.href)+'&t='+encodeURIComponent(t),'_blank');})()")
+        stats = g.db.execute("SELECT streszczenie, data FROM wiadomosci WHERE rodzaj='alert' ORDER BY id DESC LIMIT 12").fetchall()
+        week = g.db.execute("SELECT COUNT(*) FROM historia WHERE co LIKE 'znaleziona: alert%' AND kiedy >= ?",
+                            ((ctx.now() - __import__('datetime').timedelta(days=7)).isoformat(),)).fetchone()[0]
+        done = json.loads(R.meta_get(g.db, "wiecej_ofert_zrobione") or "[]")
+        return render_template("wiecej_ofert.html", js=js, stats=stats, week=week, done=done, steps=OW.MORE_STEPS, tab="",
+                               cbop=R.meta_get(g.db, "cbop_wynik"), partner=bool(ctx.settings().get("cbop_partner")))
+
+    @app.route("/wiecej-ofert", methods=["POST"])
+    def more_offers_tick():
+        done = set(json.loads(R.meta_get(g.db, "wiecej_ofert_zrobione") or "[]"))
+        k = request.form.get("krok", "")
+        done.symmetric_difference_update({k}) if k in {x[0] for x in OW.MORE_STEPS} else None
+        R.meta_set(g.db, "wiecej_ofert_zrobione", json.dumps(sorted(done)))
+        g.db.commit()
+        return redirect(url_for("more_offers") + "#" + k)
 
     @app.route("/owca/cel", methods=["POST"])
     def owca_set():
@@ -1268,6 +1313,8 @@ def make_app(ctx, hosts=None):
                     val = request.form.get(field, "").strip()
                     if val:
                         R.set_secret(ctx, name, val)
+                ctx.set_setting("cbop_partner", re.sub(r"[<>&\r\n]", "", request.form.get("cbop_partner", "")).strip()[:80])
+                ctx.set_setting("alerty", "tak" if request.form.get("alerty") else "nie")
                 frazy = request.form.get("frazy", "").strip()
                 if frazy:
                     ctx.set_setting("frazy", frazy[:600])
@@ -1289,7 +1336,7 @@ def make_app(ctx, hosts=None):
         sources = g.db.execute("SELECT * FROM zrodla ORDER BY id").fetchall()
         firms = g.db.execute("SELECT COUNT(*) n, SUM(uzyta) u FROM firmy").fetchone()
         keys = {k: bool(R.secret(ctx, k)) for k in ("adzuna_id", "adzuna_key", "jooble", "brave")}
-        return render_template("ustawienia.html", f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)), has_signature=bool(signature_path(ctx)), writer=D.writer_model(ctx),
+        return render_template("ustawienia.html", f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)), has_signature=bool(signature_path(ctx)), writer=D.writer_model(ctx), cbop_wynik=R.meta_get(g.db, "cbop_wynik"),
                                sources=sources, firms=firms, keys=keys)
 
     return app

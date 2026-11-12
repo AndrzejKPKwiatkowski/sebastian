@@ -1341,5 +1341,130 @@ class Sheep290(RekrutacjaBase):
         self.assertIsNone(self.OW.stage_tick(self.ctx, self.fake_send, self.at(14, 0, day=21)))
         self.assertEqual(cl.get(f"/owca/etap/zly/{aid}/oferta").status_code, 403)
 
+
+
+class MoreOffers2100(RekrutacjaBase):
+    ALERT_TEXT = ("Nowe oferty pracy dla Ciebie\n\nAsystentka biura\nBiuro Rachunkowe Lex\nKraków\n6000–7000 zł\n\n"
+                  "Kierowca kat. C\nTrans-Pol\nKraków\n\nRecepcjonistka w klinice\nMedica Plus\nBochnia\n\n"
+                  "Sekretarka medyczna\nCentrum Zdrowia\nWieliczka\n\nZobacz wszystkie oferty\nWypisz się z alertów")
+    LINKS = [{"tekst": "Asystentka biura", "url": "https://www.pracuj.pl/praca/asystentka-biura-krakow,oferta,1001"},
+             {"tekst": "Kierowca kat. C", "url": "https://www.pracuj.pl/praca/kierowca,oferta,1002"},
+             {"tekst": "Recepcjonistka w klinice", "url": "https://www.pracuj.pl/praca/recepcjonistka,oferta,1003"},
+             {"tekst": "Sekretarka medyczna", "url": "https://www.pracuj.pl/praca/sekretarka,oferta,1004"},
+             {"tekst": "Zobacz wszystkie oferty", "url": "https://www.pracuj.pl/praca"},
+             {"tekst": "Wypisz się z alertów", "url": "https://www.pracuj.pl/alerty/wypisz"}]
+
+    def setUp(self):
+        super().setUp()
+        self.A = importlib.import_module(self.mod.__name__ + ".odpowiedzi")
+        self.AL = importlib.import_module(self.mod.__name__ + ".alerty")
+        self.CB = importlib.import_module(self.mod.__name__ + ".cbop")
+        self.OW = importlib.import_module(self.mod.__name__ + ".owca")
+        self.ready()
+        f = self.R.load_facts(self.ctx)
+        f["warunki"]["dojazd_km"] = 20
+        self.R.save_facts(self.ctx, f)
+
+    def alert(self, uid=50, **kw):
+        m = {"uid": uid, "message_id": f"<a{uid}@pracuj>", "od": "powiadomienia@pracuj.pl", "od_nazwa": "Pracuj.pl", "temat": "4 nowe oferty: asystentka",
+             "data": "2026-11-12T08:00:00", "in_reply_to": "", "references": "", "auto": False, "tresc": self.ALERT_TEXT, "linki": self.LINKS[:3],
+             "linki_wszystkie": self.LINKS}
+        m.update(kw)
+        return m
+
+    def test_alert_email_becomes_offers(self):
+        m = self.alert()
+        self.assertTrue(self.AL.is_alert(m))
+        titles = [x["tytul"] for x in self.AL.offers(m)]
+        self.assertEqual(titles, ["Asystentka biura", "Kierowca kat. C", "Recepcjonistka w klinice", "Sekretarka medyczna"])
+        self.assertEqual(self.AL.offers(m)[0]["firma"], "Biuro Rachunkowe Lex")
+        self.A.check_inbox(self.ctx, send=self.fake_send, fetch=lambda *a, **k: [m])
+        with self.R.db(self.ctx) as c:
+            rows = [dict(r) for r in c.execute("SELECT stanowisko, firma, miasto, zrodlo, status FROM aplikacje ORDER BY id")]
+            alert = c.execute("SELECT rodzaj, status, streszczenie FROM wiadomosci").fetchone()
+        self.assertEqual([r["stanowisko"] for r in rows], ["Asystentka biura", "Sekretarka medyczna"])   # bez kierowcy i bez Bochni (20 km)
+        self.assertEqual({r["zrodlo"] for r in rows} | {r["status"] for r in rows}, {"auto", "nowa"})
+        self.assertEqual((alert["rodzaj"], alert["status"]), ("alert", "zalatwiona"))
+        self.assertIn("nowych pasujących: 2", alert["streszczenie"])
+        self.A.check_inbox(self.ctx, send=self.fake_send, fetch=lambda *a, **k: [self.alert(uid=51, message_id="<a51@pracuj>")])
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM aplikacje").fetchone()[0], 2)                # te same oferty drugi raz nie wchodzą
+        self.assertEqual(self.sent, [])                                                                  # alert nie budzi Agi
+
+    def test_portal_confirmation_is_not_an_alert(self):
+        m = self.alert(temat="Twoja aplikacja została wysłana", tresc="Dziękujemy za aplikację na stanowisko Asystentka biura.",
+                       linki=[], linki_wszystkie=[{"tekst": "Moje aplikacje", "url": "https://www.pracuj.pl/konto/aplikacje"}])
+        self.assertFalse(self.AL.is_alert(m))
+        self.assertFalse(self.AL.is_alert(dict(self.alert(), od="hr@firma.pl", od_nazwa="Kadry")))
+
+    def cbop_response(self, status="Poprawny"):
+        import base64, io, zipfile
+        offers = [{"stanowisko": "Pracownik biurowy", "pracodawca": "Urząd Gminy Zielonki", "miejscowosc": "Zielonki", "email": "kadry@zielonki.pl",
+                   "zakresObowiazkow": "obsługa sekretariatu, obieg dokumentów", "wynagrodzenieBrutto": "5200", "typOferty": "OFERTA_PRACY",
+                   "statusOferty": "P", "link": "https://oferty.praca.gov.pl/portal/lista-ofert/szczegoly-oferty/abc"},
+                  {"stanowisko": "Magazynier", "pracodawca": "X", "miejscowosc": "Kraków", "typOferty": "OFERTA_PRACY", "statusOferty": "P"},
+                  {"stanowisko": "Asystentka", "pracodawca": "Y", "miejscowosc": "Tarnów", "typOferty": "OFERTA_PRACY", "statusOferty": "P"}]
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("12_2026_11_12_20_00.json", json.dumps({"oferty": offers}, ensure_ascii=False))
+        blob = base64.b64encode(buf.getvalue()).decode()
+        return f"<soap:Envelope><soap:Body><odpowiedz><status>{status}</status><plik>{blob}</plik></odpowiedz></soap:Body></soap:Envelope>"
+
+    def test_cbop_needs_partner_runs_in_evening(self):
+        calls = []
+
+        def post(url, data, headers):
+            calls.append(data)
+            return 200, self.cbop_response()
+        evening = dt.datetime(2026, 11, 12, 20, 0, tzinfo=s.TZ)
+        self.assertEqual(self.CB.run(self.ctx, post=post, now=evening), "")                          # bez nazwy partnera — nic
+        self.ctx.set_setting("cbop_partner", "Sebastian-Kwiatkowska")
+        self.assertEqual(self.CB.run(self.ctx, post=post, now=evening.replace(hour=12)), "")          # poza godzinami udostępniania
+        self.assertIn("nowych pasujących 1", self.CB.run(self.ctx, post=post, now=evening))
+        self.assertIn("<Wojewodztwo>12</Wojewodztwo>", calls[0])
+        self.assertIn("<Partner>Sebastian-Kwiatkowska</Partner>", calls[0])
+        with self.R.db(self.ctx) as c:
+            a = dict(c.execute("SELECT * FROM aplikacje").fetchone())
+        self.assertEqual((a["firma"], a["email"], a["miasto"]), ("Urząd Gminy Zielonki", "kadry@zielonki.pl", "Zielonki"))
+        self.assertIn("obieg dokumentów", a["tresc"])
+        self.assertEqual(self.CB.run(self.ctx, post=post, now=evening), "")                          # raz na dobę
+        self.assertEqual(self.CB.fetch("zly", post=lambda *a: (200, "<x>Niepoprawna autoryzacja</x>")), ("Niepoprawna autoryzacja", []))
+
+    def test_quick_add_and_more_offers_pages(self):
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        page = cl.get("/szybko?u=https://www.pracuj.pl/praca/x,oferta,1&t=Asystentka+biura+w+Krakowie").data.decode()
+        self.assertIn("https://www.pracuj.pl/praca/x,oferta,1", page)
+        self.assertIn("Asystentka biura w Krakowie", page)
+        more = cl.get("/wiecej-ofert").data.decode()
+        for part in ("Pracuj.pl — alerty", "Wyślij do Sebastiana", "javascript:(function()", "/szybko?u="):
+            self.assertIn(part, more)
+        cl.post("/wiecej-ofert", data={"csrf": "t", "krok": "pracuj"})
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(json.loads(self.R.meta_get(c, "wiecej_ofert_zrobione")), ["pracuj"])
+        self.assertIn("Więcej ofert", cl.get("/").data.decode())
+
+    def test_sheep_sends_the_idea_tomorrow_morning(self):
+        self.P.migrate_290(self.ctx)                                           # dziś (wtorek 10.11 w testach)
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "adres_panelu", "http://mac:8790")
+            when = self.R.meta_get(c, "owca_pomysl")
+        self.assertEqual(when, "czeka:2026-11-11")
+        self.assertNotEqual(self.OW.tick(self.ctx, self.fake_send, dt.datetime(2026, 11, 10, 8, 0, tzinfo=s.TZ)), "pomysl")
+        self.assertEqual(self.OW.tick(self.ctx, self.fake_send, dt.datetime(2026, 11, 11, 7, 50, tzinfo=s.TZ)), "pomysl")
+        mail = self.sent[-1]
+        self.assertIn("Mam pomysł, jak zrobić, żeby było więcej ofert", mail["subject"])
+        for part in ("Pracuj.pl", "OLX", "Indeed", "LinkedIn", "anna.testowa@gmail.com", "/wiecej-ofert", "asystentka biura"):
+            self.assertIn(part, mail["html"])
+        self.assertEqual(self.OW.tick(self.ctx, self.fake_send, dt.datetime(2026, 11, 11, 7, 55, tzinfo=s.TZ)), "rano")   # potem zwykły poranek
+        self.assertNotEqual(self.OW.tick(self.ctx, self.fake_send, dt.datetime(2026, 11, 12, 7, 50, tzinfo=s.TZ)), "pomysl")
+
 if __name__ == "__main__":
     unittest.main()

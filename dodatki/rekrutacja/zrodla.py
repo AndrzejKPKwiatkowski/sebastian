@@ -364,3 +364,26 @@ def spontaneous_fill(ctx, need):
             made += 1
         c.commit()
     return made
+
+
+def add_found(c, ctx, f, it, label):
+    """Jedna znaleziona oferta (z alertu, CBOP itd.) do kolejki — z tymi samymi filtrami co przegląd źródeł.
+    it: {url, tytul, firma, miasto, tresc, email}. Zwraca id aplikacji albo 0."""
+    url = R.http_url(it.get("url"))
+    key = R.norm_url(url) if url else ""
+    if key and c.execute("SELECT 1 FROM widziane WHERE url=?", (key,)).fetchone():
+        return 0
+    if key:
+        c.execute("INSERT OR IGNORE INTO widziane(url,kiedy,zrodlo_id,tytul) VALUES(?,?,?,?)", (key, R.stamp(ctx), 0, (it.get("tytul") or "")[:200]))
+    if not looks_relevant(f, it.get("tytul", ""), it.get("tresc", "")):
+        return 0
+    if it.get("miasto") and not R.in_area(it["miasto"], int(f["warunki"].get("dojazd_km") or 50)):
+        return 0
+    if R.find_duplicate(c, it.get("firma", ""), it.get("tytul", ""), url):
+        return 0
+    now = R.stamp(ctx)
+    cur = c.execute("INSERT INTO aplikacje(utworzono,zmieniono,status,zrodlo,url,firma,stanowisko,miasto,email,tresc,kanal) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (now, now, "nowa", "auto", url or "", it.get("firma", ""), (it.get("tytul") or "")[:160],
+                     it.get("miasto", ""), (it.get("email") or "").lower(), it.get("tresc", ""), "{}"))
+    R.note(c, ctx, cur.lastrowid, f"znaleziona: {label}")
+    return cur.lastrowid

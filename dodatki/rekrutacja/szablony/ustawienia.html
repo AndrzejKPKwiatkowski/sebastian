@@ -72,6 +72,9 @@
     <div class="row"><div><label>Jooble — klucz API {{ '✓ zapisany' if keys.jooble }}</label><input type="password" name="jooble" autocomplete="off"></div>
       <div><label>Brave Search — klucz API {{ '✓ zapisany' if keys.brave }}</label><input type="password" name="brave" autocomplete="off"></div></div>
     <label>Czego szukać (frazy oddzielone przecinkami)</label><input type="text" name="frazy" value="{{ st.frazy }}">
+    <label>CBOP (urzędy pracy) — nazwa partnera nadana przez MRPiPS</label><input type="text" name="cbop_partner" value="{{ st.cbop_partner }}" placeholder="wpisz, gdy ministerstwo ją przyśle">
+    <p class="small soft">{{ cbop_wynik or 'Pobieram raz na dobę wieczorem (województwo małopolskie), gdy nazwa partnera jest wpisana.' }}</p>
+    <label class="check"><input type="checkbox" name="alerty" value="1" {{ 'checked' if st.alerty }}> Czytam alerty z portali (Pracuj.pl, OLX, Indeed, LinkedIn…) i dodaję z nich oferty</label>
     <p class="small soft">Klucze: <a href="https://developer.adzuna.com/" target="_blank" rel="noopener">developer.adzuna.com</a> ·
       <a href="https://jooble.org/api/about" target="_blank" rel="noopener">jooble.org/api/about</a> ·
       <a href="https://api-dashboard.search.brave.com/" target="_blank" rel="noopener">api-dashboard.search.brave.com</a></p>

@@ -214,7 +214,7 @@ def fetch_new(address, pwd, after_uid=0, since_days=30, limit=200):
                         "references": " ".join((msg.get("References") or "").split()), "nasza": bool(msg.get("X-Sebastian-Rekrutacja")),
                         "auto": bool(msg.get("Auto-Submitted", "no") != "no"
                         or msg.get("X-Autoreply") or msg.get("X-Autorespond") or "auto-reply" in (msg.get("Precedence") or "")),
-                        "tresc": _text(msg), "linki": links(msg)})
+                        "tresc": _text(msg), "linki": links(msg), "linki_wszystkie": links(msg, limit=120)})
     finally:
         with contextlib.suppress(Exception):
             box.logout()

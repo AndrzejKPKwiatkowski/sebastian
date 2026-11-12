@@ -15,8 +15,8 @@ from . import dokumenty as D, poczta as P, rdzen as R
 
 KINDS = {"zaproszenie": "zaproszenie na rozmowę", "oferta": "propozycja pracy", "pytanie": "pytanie lub prośba",
          "zadanie": "zadanie rekrutacyjne", "do_potwierdzenia": "potwierdź aplikację", "odmowa": "odmowa",
-         "potwierdzenie": "potwierdzenie otrzymania", "reklama": "reklama portalu", "inne": "inna wiadomość"}
-QUIET = ("potwierdzenie", "reklama", "inne")                             # bez powiadomień, bez maila, nie w raporcie
+         "potwierdzenie": "potwierdzenie otrzymania", "reklama": "reklama portalu", "alert": "alert z ofertami", "inne": "inna wiadomość"}
+QUIET = ("potwierdzenie", "reklama", "alert", "inne")                             # bez powiadomień, bez maila, nie w raporcie
 AUTO_SENDER = r"(no.?reply|do.?not.?reply|nie.?odpowiadaj|system@|mailer|notification|powiadomien|newsletter|erecruiter|recruitee|" \
               r"smartrecruiters|teamtailor|workday|greenhouse|lever\.co|pracuj\.pl|olx|linkedin|indeed|jooble|adzuna|rocketjobs|justjoin|nofluff)"
 INVITE_RE = (r"(zaprasza\w* (pania |cie |ciebie )?na (rozmow|spotkan|wideorozmow|wywiad)|zapraszamy (do|na) (biura|siedziby|rozmow|spotkan)|"
@@ -277,7 +277,8 @@ def check_inbox(ctx, send=None, fetch=None):
         after = int(R.meta_get(c, "imap_uid", "0") or 0)
         any_sent = c.execute(f"SELECT COUNT(*) FROM aplikacje WHERE status IN ({','.join('?' * len(R.SENT))})", R.SENT).fetchone()[0]
     pwd = R.secret(ctx, "aga")
-    if not me or not pwd or not any_sent:
+    alerts_only = not any_sent                                        # przed pierwszą wysyłką czytam tylko alerty z portali
+    if not me or not pwd or (alerts_only and not ctx.settings().get("alerty", True)):
         return 0
     with R.db(ctx) as c:
         first = c.execute("SELECT MIN(wyslano) FROM aplikacje WHERE wyslano<>''").fetchone()[0] or ""
@@ -297,6 +298,26 @@ def check_inbox(ctx, send=None, fetch=None):
             skip = (m.get("nasza") or (m["od"] or "").lower() in own or
                     (m["message_id"] and c.execute("SELECT 1 FROM wiadomosci WHERE message_id=?", (m["message_id"],)).fetchone()))
             aid = 0 if skip else match(c, m)
+        if not skip and not aid and ctx.settings().get("alerty", True):
+            from . import alerty as AL
+            fresh = True
+            with contextlib.suppress(Exception):
+                fresh = (ctx.now() - dt.datetime.fromisoformat(m["data"]).astimezone(ctx.now().tzinfo)).days <= 5
+            if AL.is_alert(m):                                      # alert z portalu: oferty do kolejki, mail tylko do statystyk
+                portal, added, total = AL.import_alert(ctx, m) if fresh else (AL.portal_of(m), 0, 0)
+                with R.db(ctx) as c:
+                    c.execute("INSERT INTO wiadomosci(uid,message_id,od,od_nazwa,temat,data,tresc,aplikacja_id,rodzaj,wazne,streszczenie,status,utworzono,linki) "
+                              "VALUES(?,?,?,?,?,?,?,0,'alert',0,?,'zalatwiona',?,'[]')",
+                              (m["uid"], m["message_id"], m["od"], m["od_nazwa"], m["temat"], m["data"], m["tresc"][:4000],
+                               f"{portal}: {total} ofert w alercie, nowych pasujących: {added}.", R.stamp(ctx)))
+                    c.commit()
+                done()
+                handled += 1
+                continue
+        if alerts_only:
+            done()
+            continue
+        with R.db(ctx) as c:
             if skip or (not aid and not looks_recruiting(m)) or (first and m.get("data") and not _after(m["data"], first)):
                 done()
                 continue                                            # własna wiadomość, powtórka albo zwykła poczta Agi — nie zapisuję

@@ -24,6 +24,7 @@
   <div class="stat"><b>{{ n.zaproszenia }}</b><span>zaproszenia</span></div>
 </div>
 
+<p class="small" style="margin:-8px 0 16px"><a href="{{ url_for('more_offers') }}">🐑 Więcej ofert: alerty z portali i zakładka „Wyślij do Sebastiana” ›</a></p>
 {% if problem_poczty %}<div class="note err">{{ problem_poczty }} <a href="{{ url_for('settings') }}">Ustawienia</a></div>{% endif %}
 {% if n.odpowiedzi %}<div class="note ok">Masz {{ n.odpowiedzi }} {{ 'ważną sprawę' if n.odpowiedzi == 1 else 'ważne sprawy' }} od pracodawców. <a href="{{ url_for('replies') }}">Otwórz „Odpowiedzi”</a></div>{% endif %}
 {% if n.do_zrobienia %}<div class="note">Masz {{ n.do_zrobienia }} {{ 'aplikację' if n.do_zrobienia == 1 else 'aplikacje' }} do przejrzenia. <a href="{{ url_for('todo') }}">Otwórz „Do zrobienia”</a></div>{% endif %}
