@@ -497,14 +497,43 @@ def render_letter(f, text, out_path, firma="", stanowisko="", today=None, rodo=N
     return out_path
 
 
+def clean_reason(text, requirement=""):
+    """Wyjaśnienie dopasowania po ludzku: bez powtórzonego wymagania, bez „FAKTY potwierdzają”, cudzysłowów i „kandydatki”."""
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    head, sep, rest = t.partition(";")
+    rw = {w[:5] for w in re.findall(r"[a-z]{4,}", R.plain(requirement))}
+    hw = [w[:5] for w in re.findall(r"[a-z]{4,}", R.plain(head))]
+    if sep and rest.strip() and (re.search(r"(?i)wymagan|kluczow", head) or (hw and sum(w in rw for w in hw) >= len(hw) / 2)):
+        t = rest.strip()                                     # „Wymagany pakiet MS Office; …” → bez powtórzenia wymagania
+    t = re.sub(r"(?i)\b(fakty|w faktach|baza faktów)\b\s*(potwierdzaj\w*|zawieraj\w*|wskazuj\w*|podaj\w*|mówi\w*)?\s*(to)?\s*(stanowisk\w*)?\s*:?\s*", "", t)
+    t = re.sub(r"(?i)\bw sekcji [A-ZŁŚŻŹĆĄĘÓŃ]+\b", "", t)
+    t = re.sub(r"(?i)\bkandydatka\s+(wskazuje|ma|posiada|podaje)\b", "masz", t)
+    t = re.sub(r"(?i)\bkandydatk\w*\b", "Ty", t)
+    t = re.sub(r"['\"„”‘’]", "", t)
+    t = re.sub(r"\s{2,}", " ", t).strip(" ;:,.")
+    return (t[:1].upper() + t[1:] + ".") if t else ""
+
+
 def match_report(ctx, f, app, wymagania):
     """Co z wymagań oferty kandydatka ma, a czego nie — na podstawie faktów. [{wymaganie, ocena: mam|czesciowo|brak, dlaczego}]"""
-    reqs = [str(x).strip() for x in (wymagania or []) if str(x).strip()][:14]
+    offer = R.plain(app.get("tresc") or "")
+    reqs = []
+    for x in (wymagania or []):
+        x = re.sub(r"\s+", " ", str(x)).strip(" •-–")
+        words = [w for w in re.findall(r"[a-z]{4,}", R.plain(x))]
+        if x and (not offer or not words or sum(w[:5] in offer for w in words) >= max(1, len(words) // 2)):
+            reqs.append(x)                                   # wymaganie musi być z ogłoszenia, nie przekręcone przez model
+    reqs = reqs[:14]
     if not reqs:
         return []
     listing = "\n".join(f"{i + 1}. {r}" for i, r in enumerate(reqs))
-    prompt = f"""Porównaj WYMAGANIA z oferty pracy z FAKTAMI o kandydatce. Bądź uczciwa i konkretna: „mam” tylko wtedy,
-gdy FAKTY wprost to potwierdzają; „czesciowo”, gdy jest coś pokrewnego; „brak”, gdy FAKTY nic o tym nie mówią.
+    prompt = f"""Pomagasz Adze ocenić, na ile spełnia wymagania z ogłoszenia o pracę. Porównaj WYMAGANIA z FAKTAMI o niej.
+„mam” — tylko gdy FAKTY wprost to potwierdzają; „czesciowo” — gdy jest coś pokrewnego; „brak” — gdy FAKTY nic o tym nie mówią.
+
+Pole „dlaczego”: jedno krótkie, naturalne zdanie do Agi, w drugiej osobie, najwyżej 14 słów.
+Nie powtarzaj wymagania, nie pisz „FAKTY”, „kandydatka”, „w sekcji”, bez cudzysłowów.
+Dobre przykłady: „Angielski masz na poziomie zaawansowanym.” · „Prowadziłaś dokumentację medyczną w ZZOZ.” ·
+„Word i Excel znasz bardzo dobrze.” · „Znasz podstawy z kursu PARP, ale bez praktyki.” · „Nie pracowałaś przy przetargach.”
 
 WYMAGANIA:
 {listing}
@@ -512,10 +541,10 @@ WYMAGANIA:
 FAKTY:
 {R.facts_brief(f, ids=False)}
 
-Zwróć JSON {{"dopasowanie": [{{"nr": 1, "ocena": "mam|czesciowo|brak", "dlaczego": "krótko, z odwołaniem do konkretnego faktu albo czego brakuje"}}]}}"""
+Zwróć JSON {{"dopasowanie": [{{"nr": 1, "ocena": "mam|czesciowo|brak", "dlaczego": "..."}}]}}"""
     out = None
     with contextlib.suppress(Exception):
-        out = ctx.ask(prompt, as_json=True, max_tokens=900, temperature=0.1)
+        out = write(ctx, prompt, max_tokens=900, temperature=0.1)
     rows = (out or {}).get("dopasowanie") if isinstance(out, dict) else None
     res = []
     for r in rows if isinstance(rows, list) else []:
@@ -524,7 +553,7 @@ Zwróć JSON {{"dopasowanie": [{{"nr": 1, "ocena": "mam|czesciowo|brak", "dlacze
             grade = R.plain(str(r.get("ocena") or ""))
             grade = "mam" if grade.startswith("mam") else "czesciowo" if grade.startswith("czesc") else "brak" if grade.startswith("brak") else ""
             if 0 <= n < len(reqs) and grade and all(x["wymaganie"] != reqs[n] for x in res):
-                res.append({"wymaganie": reqs[n], "ocena": grade, "dlaczego": re.sub(r"\s+", " ", str(r.get("dlaczego") or "")).strip()[:240]})
+                res.append({"wymaganie": reqs[n], "ocena": grade, "dlaczego": clean_reason(r.get("dlaczego"), reqs[n])[:200]})
     return res
 
 

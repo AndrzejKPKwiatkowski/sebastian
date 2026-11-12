@@ -141,7 +141,7 @@ def prepare(ctx, aid):
         profile = D.tailored_profile(ctx, f, a)
         if profile:
             selection.update(profil_tekst=profile, profil_zrodlo="model", profil_model=profile)
-        a["analiza"] = json.dumps(dict(analysis(a), dopasowanie=D.match_report(ctx, f, a, analysis(a).get("wymagania"))), ensure_ascii=False)
+        a["analiza"] = json.dumps(dict(analysis(a), dopasowanie=D.match_report(ctx, f, a, analysis(a).get("wymagania")), v=2), ensure_ascii=False)
         letter, mail, by_model = D.compose(ctx, f, a, selection)
         notes += D.check(ctx, f, a, letter + ("\n\nOpis w CV: " + profile if profile else ""), mail, by_model=by_model)
         if not by_model:
@@ -390,6 +390,9 @@ def work_once(ctx):
             row = c.execute("SELECT id FROM aplikacje WHERE status='nowa' ORDER BY id LIMIT 1").fetchone()
     if row:
         prepare(ctx, row["id"])
+    elif not busy:
+        with contextlib.suppress(Exception):
+            refresh_match(ctx)                                        # w wolnej chwili: lepsze wyjaśnienia dopasowania
     send_one(ctx)
     if inbox:
         try:
@@ -449,6 +452,24 @@ def migrate_282(ctx):
                 c.commit()
     with R.db(ctx) as c:
         R.meta_set(c, "migracja_282", R.stamp(ctx))
+
+
+def refresh_match(ctx):
+    """Jedna czekająca aplikacja ze starym opisem dopasowania → nowe, czytelne wyjaśnienia (2.8.5)."""
+    with R.db(ctx) as c:
+        rows = c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(R.OPEN))}) AND analiza<>'' AND analiza NOT LIKE '%\"v\": 2%' "
+                         "ORDER BY id DESC LIMIT 20", R.OPEN).fetchall()
+    for r in rows:
+        a = dict(r)
+        info = analysis(a)
+        if info.get("wymagania"):
+            info["dopasowanie"] = D.match_report(ctx, R.load_facts(ctx), a, info["wymagania"])
+        info["v"] = 2
+        with R.db(ctx) as c:
+            c.execute("UPDATE aplikacje SET analiza=? WHERE id=?", (json.dumps(info, ensure_ascii=False), a["id"]))
+            c.commit()
+        return a["id"]
+    return None
 
 
 def migrate_283(ctx):
@@ -575,6 +596,7 @@ def make_app(ctx, hosts=None):
     app.jinja_env.filters["loads"] = lambda s: json.loads(s or "[]")
     app.jinja_env.filters["dzien"] = lambda s: (s or "")[:16].replace("T", " ")
     app.jinja_env.filters["czysty"] = P.clean_text
+    app.jinja_env.filters["powod"] = lambda t: D.clean_reason(t)
     app.jinja_env.filters["host"] = lambda u: (re.sub(r"^https?://(www\.)?", "", u or "").split("/")[0])[:60]
     allowed = hosts                                                           # None = bez sprawdzania (testy)
 

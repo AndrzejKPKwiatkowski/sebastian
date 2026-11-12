@@ -159,8 +159,8 @@ JSON:
   "tylko_prowizja": true/false (czy wynagrodzenie jest wyłącznie prowizyjne, bez stałej podstawy),
   "adres": "adres miejsca pracy (ulica, miasto), jeśli podany",
   "wynagrodzenie": "widełki lub kwota wynagrodzenia dokładnie jak w ogłoszeniu (np. „6500–7500 zł brutto”), pusty tekst, gdy nie podano",
-  "wymagania": ["krótkie punkty: czego pracodawca wymaga, tak jak w ogłoszeniu"],
-  "obowiazki": ["krótkie punkty: co będzie się robić na tym stanowisku"],
+  "wymagania": ["punkty: czego pracodawca wymaga — PRZEPISANE DOSŁOWNIE z ogłoszenia, bez zmieniania słów"],
+  "obowiazki": ["punkty: co będzie się robić na tym stanowisku — PRZEPISANE DOSŁOWNIE z ogłoszenia"],
   "oferujemy": ["krótkie punkty: co oferuje pracodawca (umowa, etat, benefity)"],
   "ocena": liczba 0-100 (jak dobrze oferta pasuje do tego, czego kandydatka szuka i co umie),
   "uzasadnienie": "1–2 krótkie zdania po polsku do Agi, w drugiej osobie (np. „Pasuje do Ciebie, bo… Uważaj na…”)"}}"""

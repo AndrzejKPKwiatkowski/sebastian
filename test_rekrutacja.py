@@ -1069,7 +1069,7 @@ class LettersAndOffers282(RekrutacjaBase):
             return orig(prompt, **kw)
         with patch.object(W, "ask", model):
             self.ready()
-            aid = self.add(tresc=OFFER + " Oferujemy 6000-7000 zł brutto.")
+            aid = self.add(tresc=OFFER + " Wymagane prawo jazdy kat. C. Oferujemy 6000-7000 zł brutto.")
             self.P.prepare(self.ctx, aid)
         info = json.loads(self.row(aid)["analiza"])
         self.assertEqual(info["wynagrodzenie"], "6000-7000 zł brutto")          # kwoty spoza ogłoszenia model nie wstawi
@@ -1195,6 +1195,31 @@ class RealMail283(RekrutacjaBase):
         self.assertEqual(kinds, ["do_potwierdzenia", "potwierdzenie"])
         a = self.row(aid)
         self.assertEqual((a["status"], a["podziekowanie"]), ("wyslana", ""))
+
+
+
+class MatchWording285(RekrutacjaBase):
+    def test_reasons_are_short_and_addressed_to_aga(self):
+        self.assertEqual(self.D.clean_reason("Wymagany pakiet MS Office; w sekcji NARZĘDZIA kandydatka wskazuje 'Word (bardzo dobry)'", "Znajomość MS Office"),
+                         "Masz Word (bardzo dobry).")
+        self.assertNotIn("FAKTY", self.D.clean_reason("Doświadczenie jest kluczowe; FAKTY potwierdzają: 'Sekretarka medyczna'", "Doświadczenie w administracji"))
+        self.assertEqual(self.D.clean_reason("Angielski masz na poziomie zaawansowanym."), "Angielski masz na poziomie zaawansowanym.")
+
+    def test_garbled_requirements_dropped_and_old_analyses_refreshed(self):
+        a = {"tresc": "Wymagania: dobra znajomość pakietu MS Office, prawo jazdy kat. B."}
+        with patch.object(W, "ask", lambda prompt, **kw: json.dumps({"dopasowanie": [{"nr": 1, "ocena": "mam", "dlaczego": "Word i Excel znasz bardzo dobrze."}]})):
+            got = self.D.match_report(self.ctx, self.facts, a, ["Dobra znajomość pakietu MS Office", "Znajomość języka chińskiego i SAP"])
+            self.assertEqual([x["wymaganie"] for x in got], ["Dobra znajomość pakietu MS Office"])
+            self.ready()
+            aid = self.add()
+            with self.R.db(self.ctx) as c:
+                c.execute("UPDATE aplikacje SET status='do_zatwierdzenia', analiza=? WHERE id=?",
+                          (json.dumps({"wymagania": ["prowadzenie dokumentacji"], "dopasowanie": [{"wymaganie": "x", "ocena": "mam", "dlaczego": "FAKTY: x"}]}), aid))
+                c.commit()
+            self.assertEqual(self.P.refresh_match(self.ctx), aid)
+            self.assertIsNone(self.P.refresh_match(self.ctx))
+        info = json.loads(self.row(aid)["analiza"])
+        self.assertEqual((info["v"], info["dopasowanie"][0]["dlaczego"]), (2, "Word i Excel znasz bardzo dobrze."))
 
 if __name__ == "__main__":
     unittest.main()

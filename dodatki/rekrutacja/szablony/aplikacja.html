@@ -39,7 +39,7 @@
     {% if fit %}
     <label>Co się zgadza z ofertą{% if a.ocena is not none %} · dopasowanie {{ a.ocena }}%{% endif %}</label>
     <p class="small soft">masz: {{ fit_count.mam }} · częściowo: {{ fit_count.czesciowo }} · brakuje: {{ fit_count.brak }}</p>
-    <ul class="fit">{% for x in fit %}<li class="fit-{{ x.ocena }}"><b>{{ {'mam': '✓', 'czesciowo': '◐', 'brak': '✗'}[x.ocena] }}</b> {{ x.wymaganie }}{% if x.dlaczego %}<br><span class="small soft">{{ x.dlaczego }}</span>{% endif %}</li>{% endfor %}</ul>
+    <ul class="fit">{% for x in fit %}<li class="fit-{{ x.ocena }}"><b>{{ {'mam': '✓', 'czesciowo': '◐', 'brak': '✗'}[x.ocena] }}</b> {{ x.wymaganie }}{% if x.dlaczego %}<br><span class="small soft">{{ x.dlaczego|powod }}</span>{% endif %}</li>{% endfor %}</ul>
     {% elif info.wymagania %}
     <label>Wymagania</label><ul>{% for x in info.wymagania %}<li>{{ x }}</li>{% endfor %}</ul>
     {% endif %}

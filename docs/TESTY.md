@@ -309,3 +309,8 @@ Przypadki z prawdziwej skrzynki: list „Droga Agnieszko… przygotowywałaś”
 aplikacja?” → potwierdź aplikację (mimo że model mówi „zaproszenie”); „Twoje zgłoszenie trafiło…” → potwierdzenie; „skontaktujemy się
 wyłącznie z wybranymi” → potwierdzenie (nie odmowa); Pracuj.pl „sprawdź kompetencje innych kandydatów” → reklama; prawdziwe zaproszenie
 z adresu no-reply i prawdziwa odmowa rozpoznane; „&nbsp;” usunięte, przycisk potwierdzenia wyciągnięty; migracja poprawia zapisane wiadomości.
+
+
+# Weryfikacja 2.8.5
+
+Data: 2026-11-12. `test_rekrutacja` — 65 testów zaliczonych; pozostałe zestawy zaliczone. Wyjaśnienia ze zrzutu Agi porządkowane (bez „FAKTY”, „kandydatka”, powtórzeń wymagania); wymaganie spoza treści ogłoszenia pomijane; stara analiza odświeżana raz.
