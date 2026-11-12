@@ -1,6 +1,6 @@
 """Dodatek Rekrutacja (Sebastian 2.8).
 
-Osobny panel dla Agi w sieci Tailscale: baza faktów z CV, dopasowane CV i list przewodni z kontrolą prawdy,
+Osobny panel dla Agi w sieci Tailscale: baza faktów z CV, dopasowane CV i list motywacyjny z kontrolą prawdy,
 wysyłka mailem po zatwierdzeniu, raport wieczorny. Panel i praca w tle działają jako własna usługa
 (pl.sebastian.rekrutacja), żeby nie blokować pętli WhatsAppa.
 
@@ -199,6 +199,13 @@ def apply_patch(ctx, patch):
         if j is not None and n(p["tekst"]) not in {n(x) for x in j["punkty"]}:
             j["punkty"].append(p["tekst"])
             added += 1
+    for rule in patch.get("punkty_zmien", []):                           # doprecyzowanie istniejącego punktu (np. z liczbą)
+        j = next((j for j in jobs if n(rule["firma"]) in n(j.get("firma", ""))), None)
+        if j is not None:
+            hit = [i for i, x in enumerate(j["punkty"]) if n(rule["zawiera"]) in n(x)]
+            if hit and n(rule["na"]) not in {n(x) for x in j["punkty"]}:
+                j["punkty"][hit[0]] = rule["na"]
+                added += 1
     f["doswiadczenie"] = jobs
     tools = [{"nazwa": t["nazwa"], "poziom": t["poziom"]} for t in f["narzedzia"]]
     tools = [t for t in tools if not any(n(x) in n(t["nazwa"]) for x in patch.get("narzedzia_usun", []))]

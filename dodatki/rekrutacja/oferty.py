@@ -118,10 +118,21 @@ def sales_hits(text):
     return sum(low.count(w) for w in SALES)
 
 
+SALARY_RE = re.compile(r"(\d{1,2}[ .\u00a0]?\d{3}(?:[,.]\d{2})?\s*(?:-|–|—|do)\s*\d{1,2}[ .\u00a0]?\d{3}(?:[,.]\d{2})?|\b(?:od|do)\s+\d{1,2}[ .\u00a0]?\d{3})"
+                       r"\s*(?:zł|zl|pln)(?:\s*(?:brutto|netto|/\s*(?:mies\w*|mc|msc|h|godz\w*)))*", re.I)
+
+
+def salary(text):
+    """Widełki z treści ogłoszenia (bez modelu)."""
+    m = SALARY_RE.search(text or "")
+    return re.sub(r"\s+", " ", m.group(0)).strip() if m else ""
+
+
 def analyze(ctx, f, text, title="", url=""):
     """Dane oferty i ocena dopasowania. Bez modelu zwraca to, co da się ustalić regułami."""
     out = {"firma": "", "stanowisko": "", "miasto": "", "email": "", "ocena": None, "uzasadnienie": "", "rodo": "", "ostrzezenia": [],
-           "social_media": False, "niedziele_wieczory": False, "tylko_prowizja": False}
+           "social_media": False, "niedziele_wieczory": False, "tylko_prowizja": False,
+           "adres": "", "wynagrodzenie": salary(text), "wymagania": [], "obowiazki": [], "oferujemy": []}
     no_sales = any(x in R.SALES_AVOID for x in f["kryteria"].get("nie_chce", []))
     if no_sales and sales_hits(text) >= 3:
         out["ostrzezenia"].append("W ogłoszeniu często pojawia się sprzedaż albo obsługa klienta — sprawdź zakres obowiązków.")
@@ -146,11 +157,16 @@ JSON:
   "social_media": true/false (czy główną częścią pracy jest prowadzenie mediów społecznościowych lub tworzenie treści na nie),
   "niedziele_wieczory": true/false (czy ogłoszenie wymaga regularnej pracy w niedziele albo wieczorami/nocą),
   "tylko_prowizja": true/false (czy wynagrodzenie jest wyłącznie prowizyjne, bez stałej podstawy),
+  "adres": "adres miejsca pracy (ulica, miasto), jeśli podany",
+  "wynagrodzenie": "widełki lub kwota wynagrodzenia dokładnie jak w ogłoszeniu (np. „6500–7500 zł brutto”), pusty tekst, gdy nie podano",
+  "wymagania": ["krótkie punkty: czego pracodawca wymaga, tak jak w ogłoszeniu"],
+  "obowiazki": ["krótkie punkty: co będzie się robić na tym stanowisku"],
+  "oferujemy": ["krótkie punkty: co oferuje pracodawca (umowa, etat, benefity)"],
   "ocena": liczba 0-100 (jak dobrze oferta pasuje do tego, czego kandydatka szuka i co umie),
   "uzasadnienie": "jedno zdanie po polsku"}}"""
     got = None
     try:
-        got = ctx.ask(prompt, as_json=True, max_tokens=500, temperature=0.1)
+        got = ctx.ask(prompt, as_json=True, max_tokens=1100, temperature=0.1)
     except Exception as e:
         ctx.log.warning(f"Rekrutacja: analiza oferty bez modelu ({type(e).__name__})")
     if isinstance(got, dict):
@@ -163,6 +179,13 @@ JSON:
             out["ocena"] = max(0, min(100, int(float(got.get("ocena")))))
         except (TypeError, ValueError):
             pass
+        out["adres"] = re.sub(r"\s+", " ", str(got.get("adres") or "")).strip()[:200]
+        pay = re.sub(r"\s+", " ", str(got.get("wynagrodzenie") or "")).strip()[:160]
+        if pay and re.search(r"\d", pay) and re.sub(r"\D", "", pay)[:3] in re.sub(r"\D", "", text):
+            out["wynagrodzenie"] = pay                                 # kwota musi być w ogłoszeniu
+        for k in ("wymagania", "obowiazki", "oferujemy"):
+            items = got.get(k) if isinstance(got.get(k), list) else []
+            out[k] = [re.sub(r"\s+", " ", str(x)).strip(" •-–")[:220] for x in items if str(x).strip()][:14]
         out["social_media"] = got.get("social_media") is True
         out["niedziele_wieczory"] = got.get("niedziele_wieczory") is True
         out["tylko_prowizja"] = got.get("tylko_prowizja") is True

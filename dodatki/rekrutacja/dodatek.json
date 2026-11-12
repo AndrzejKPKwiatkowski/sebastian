@@ -1,7 +1,7 @@
 {
   "id": "rekrutacja",
   "nazwa": "Rekrutacja — aplikacje o pracę dla Agi",
-  "wersja": "1.1.0",
+  "wersja": "1.2.0",
   "rdzen": "2.7",
   "opis": "Osobny panel dla Agi (przez Tailscale): szukanie ofert, dopasowane CV i list z kontrolą prawdy, wysyłka mailem i przez formularze Recruitee, czytanie odpowiedzi, podziękowania, przypomnienia, powiadomienia na WhatsAppie, raport wieczorny.",
   "domyslnie_wlaczony": true,
@@ -83,6 +83,8 @@
     "jooble_co_godzin": 24,
     "frazy": "asystentka, sekretarka, administracja biuro, pracownik biurowy, koordynatorka, recepcja, specjalistka obsługi klienta, doradca klienta, back office, referentka",
     "bez_niedziel_wieczorow": false,
-    "bez_prowizji": false
+    "bez_prowizji": false,
+    "dojazd_skad": "Kraków",
+    "model_pisania": "auto"
   }
 }

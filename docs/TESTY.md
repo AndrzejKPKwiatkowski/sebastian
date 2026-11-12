@@ -277,3 +277,26 @@ Data: 2026-11-11. Wynik: `test_rekrutacja` — 46 testów zaliczonych; `test_seb
 - Import wiedzy: z eksportu tylko wiadomości użytkowniczki z rozmów o pracy; niepewne i zarobki nigdy nie trafiają do bazy; dopisywanie bez duplikatów; uzupełnienia z pliku idempotentne.
 
 Nie sprawdzono tu: prawdziwych odpowiedzi Jooble, Adzuny i Brave, prawdziwych stron firm.
+
+
+# Weryfikacja 2.8.2
+
+Data: 2026-11-12. Wynik: `test_rekrutacja` — 50 testów zaliczonych; `test_sebastian`, `test_dodatki`, `test_whatsapp` zaliczone.
+
+- Najwyżej 3 punkty przy stanowisku, w kolejności od modelu; kursy od najnowszego (bez roku na końcu).
+- Profil pod ofertę: przechodzi tylko tekst bez liczb i narzędzi spoza faktów; zapisany jako wersja Sebastiana.
+- Edycja CV: własne punkty i opis, ukrycie stanowiska, przywrócenie wersji Sebastiana; brak zmian nie tworzy „własnej wersji”; zatwierdzona aplikacja wraca do zatwierdzenia; wysłanej nie można zmienić.
+- Podgląd: CV z prawdziwymi danymi mieści się na jednej stronie i jest wypełnione.
+
+
+# Weryfikacja 2.8.3
+
+Data: 2026-11-12. Wynik: `test_rekrutacja` — 57 testów zaliczonych; `test_sebastian`, `test_dodatki`, `test_whatsapp` zaliczone.
+
+- Klauzula RODO: luka po „stanowisko” uzupełniona, dwie zgody w jednym zdaniu, bez stanowiska — bez „na stanowisko”.
+- Język: formy męskie, przesadne obietnice i zdania bez sensu wykrywane; „działem”, „jestem gotowa” nie są błędem.
+- List z formami męskimi → druga próba → list z faktów (bez błędów); mail zawsze z szablonu, „list motywacyjny”.
+- List PDF: dane nadawczyni nad treścią, „Dotyczy”, „Z poważaniem”, klauzula RODO; jedna strona (sprawdzone wizualnie).
+- Oferta: wynagrodzenie tylko z treści ogłoszenia, dopasowanie wymagań (mam/częściowo/brak), strona aplikacji z dojazdem i pobieraniem.
+- Migracja: czekające aplikacje przygotowane od nowa, jednorazowo.
+- Izolacja: przy `SEBASTIAN_TESTY=1` kontekst dodatku nie wywołuje `security` (ani odczytu, ani zapisu); próbne hasła z dawnych testów są ignorowane; brak hasła skrzynki nie psuje kolejki (zatwierdzone czekają).

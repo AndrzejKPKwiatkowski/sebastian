@@ -19,19 +19,48 @@
   {% if a.blad %}<div class="note err">{{ a.blad }}</div>{% endif %}
   {% if a.notatka and a.status == 'duplikat' %}<div class="note info">{{ a.notatka }}</div>{% endif %}
   {% if uwagi %}<div class="note"><b>Sprawdź przed wysłaniem:</b><ul>{% for u in uwagi %}<li>{{ u }}</li>{% endfor %}</ul></div>{% endif %}
-  {% if a.url and a.url.lower().startswith(('http://', 'https://')) %}<p class="small"><a href="{{ a.url }}" target="_blank" rel="noopener noreferrer">Otwórz ogłoszenie ↗</a></p>{% endif %}
+  {% if a.cv_plik %}
+  <div class="actions" style="margin:4px 0 14px">
+    <a class="btn ghost small" href="{{ url_for('file', aid=a.id, which='cv', pobierz=1) }}">Pobierz CV</a>
+    <a class="btn ghost small" href="{{ url_for('file', aid=a.id, which='list', pobierz=1) }}">Pobierz list motywacyjny</a>
+    {% if editable %}<a class="btn ghost small" href="{{ url_for('edit_cv', aid=a.id) }}">Edytuj CV</a>{% endif %}
+    {% if a.url and a.url.lower().startswith(('http://', 'https://')) %}<a class="btn plain small" href="{{ a.url }}" target="_blank" rel="noopener noreferrer">Otwórz ogłoszenie ↗</a>{% endif %}
+  </div>
+  {% elif a.url and a.url.lower().startswith(('http://', 'https://')) %}<p class="small"><a href="{{ a.url }}" target="_blank" rel="noopener noreferrer">Otwórz ogłoszenie ↗</a></p>{% endif %}
+
+  {% if a.tresc %}
+  <div class="card">
+    <h2>Oferta</h2>
+    <div class="row">
+      <div><label>Wynagrodzenie</label><p>{{ info.wynagrodzenie or 'nie podano w ogłoszeniu' }}</p></div>
+      <div><label>Dojazd</label><p>{{ where or 'miejsce nie podane' }}{% if km == -1 %} · praca zdalna{% elif km %} · ok. {{ km }} km od Krakowa{% endif %}
+        {% if maps %}<br><a class="small" href="{{ maps }}" target="_blank" rel="noopener noreferrer">Sprawdź dojazd komunikacją ↗</a>{% endif %}</p></div>
+    </div>
+    {% if fit %}
+    <label>Co się zgadza z ofertą{% if a.ocena is not none %} · dopasowanie {{ a.ocena }}%{% endif %}</label>
+    <p class="small soft">masz: {{ fit_count.mam }} · częściowo: {{ fit_count.czesciowo }} · brakuje: {{ fit_count.brak }}</p>
+    <ul class="fit">{% for x in fit %}<li class="fit-{{ x.ocena }}"><b>{{ {'mam': '✓', 'czesciowo': '◐', 'brak': '✗'}[x.ocena] }}</b> {{ x.wymaganie }}{% if x.dlaczego %}<br><span class="small soft">{{ x.dlaczego }}</span>{% endif %}</li>{% endfor %}</ul>
+    {% elif info.wymagania %}
+    <label>Wymagania</label><ul>{% for x in info.wymagania %}<li>{{ x }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if info.obowiazki %}<label>Co będziesz robić</label><ul>{% for x in info.obowiazki %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    {% if info.oferujemy %}<label>Co oferują</label><ul>{% for x in info.oferujemy %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    {% if not info %}<p class="small soft">Szczegóły (wymagania, wynagrodzenie, dopasowanie) pojawią się po kliknięciu „Przygotuj ponownie”.</p>{% endif %}
+    <details><summary>Pełna treść ogłoszenia</summary><div class="small" style="white-space:pre-wrap;margin-top:8px">{{ a.tresc }}</div></details>
+  </div>
+  {% endif %}
 
   {% if kit %}
   <div class="card">
     <h2>Wyślij przez formularz</h2>
     <ol class="steps">
       <li>{% if a.url.lower().startswith(('http://', 'https://')) %}<a href="{{ a.url }}" target="_blank" rel="noopener noreferrer">Otwórz ogłoszenie ↗</a>{% else %}Otwórz ogłoszenie{% endif %} i kliknij „Aplikuj”.</li>
-      <li>Pobierz <a href="{{ url_for('file', aid=a.id, which='cv', pobierz=1) }}">CV</a> i <a href="{{ url_for('file', aid=a.id, which='list', pobierz=1) }}">list przewodni</a>, a potem dołącz je w formularzu.</li>
+      <li>Pobierz <a href="{{ url_for('file', aid=a.id, which='cv', pobierz=1) }}">CV</a> i <a href="{{ url_for('file', aid=a.id, which='list', pobierz=1) }}">list motywacyjny</a>, a potem dołącz je w formularzu.</li>
       <li>Pola przepisz stąd jednym kliknięciem.</li>
       <li>Po wysłaniu wróć tutaj i kliknij „Wysłałam sama”.</li>
     </ol>
     {% for k, v in kit %}<div class="kit"><span>{{ k }}</span><code id="kit{{ loop.index }}">{{ v }}</code><button type="button" class="btn ghost small" data-copy="kit{{ loop.index }}">Kopiuj</button></div>{% endfor %}
-    <div class="kit"><span>List przewodni</span><code id="kitlist">{{ a.list }}</code><button type="button" class="btn ghost small" data-copy="kitlist">Kopiuj</button></div>
+    <div class="kit"><span>List motywacyjny</span><code id="kitlist">{{ a.list }}</code><button type="button" class="btn ghost small" data-copy="kitlist">Kopiuj</button></div>
   </div>
   {% endif %}
 
@@ -54,8 +83,8 @@
   {% if a.cv_plik %}
   <div class="card">
     <h2>Dokumenty</h2>
-    <p><a href="{{ url_for('file', aid=a.id, which='cv') }}" target="_blank">CV (PDF)</a> · <a href="{{ url_for('file', aid=a.id, which='list') }}" target="_blank">List przewodni (PDF)</a></p>
-    <label>List przewodni</label><textarea name="list" rows="14" {{ 'readonly' if not editable }}>{{ a.list }}</textarea>
+    <p><a href="{{ url_for('file', aid=a.id, which='cv') }}" target="_blank">CV (PDF)</a> · <a href="{{ url_for('file', aid=a.id, which='list') }}" target="_blank">List motywacyjny (PDF)</a>{% if editable %} · <a href="{{ url_for('edit_cv', aid=a.id) }}"><b>Edytuj CV</b></a>{% endif %}</p>
+    <label>List motywacyjny</label><textarea name="list" rows="14" {{ 'readonly' if not editable }}>{{ a.list }}</textarea>
     <p class="small soft">Po zmianie listu kliknij „Zapisz”, a PDF ułoży się na nowo.</p>
     <label>Temat maila</label><input type="text" name="temat" value="{{ a.temat }}" {{ 'readonly' if not editable }}>
     <label>Treść maila</label><textarea name="mail" rows="7" {{ 'readonly' if not editable }}>{{ a.mail }}</textarea>

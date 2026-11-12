@@ -69,10 +69,56 @@ def is_consent(text):
     return bool(len(p) >= 60 and re.search(r"\b(wyrazam|udzielam) zgod", p) and "przetwarz" in p and re.search(r"danych osobowych|moich danych", p))
 
 
-def consent_clause(firma="", custom=""):
+BLANK = r"(?:_{3,}|\.{4,}|…{2,}|\[[^\]]{0,40}\]|\([^)]{0,6}\.\.\.[^)]{0,6}\)|<[^>]{0,30}>)"
+
+
+def fill_clause(text, stanowisko=""):
+    """Klauzula z ogłoszenia gotowa do CV: luki uzupełnione nazwą stanowiska, dwie prawie identyczne zgody (obecna i przyszłe
+    rekrutacje) połączone w jedno zdanie."""
+    t = re.sub(r"\s+", " ", text or "").strip()
+    job = (stanowisko or "").strip()
+    if job:
+        t = re.sub(rf"(stanowisk\w*)\s*:?\s*{BLANK}", lambda m: f"{m.group(1)} {job}", t, flags=re.I)
+    else:
+        t = re.sub(rf"(?:\s+na)?\s+stanowisk\w*\s*:?\s*{BLANK}", "", t, flags=re.I)
+    t = re.sub(rf"\s*{BLANK}\s*", " ", t)                                 # pozostałe luki — bez śladu
+    t = re.sub(r"\s+([.,;])", r"\1", re.sub(r"\s{2,}", " ", t)).strip()
+    parts = [x.strip() for x in re.split(r"(?<=[.])\s+(?=Wyrażam|Wyrazam|Udzielam)", t) if x.strip()]
+    if len(parts) == 2:
+        a, b = parts
+        wa, wb = set(plain(a).split()), set(plain(b).split())
+        fut = [x for x in (a, b) if "przyszl" in plain(x)]
+        now = [x for x in (a, b) if "przyszl" not in plain(x)]
+        if len(fut) == 1 and len(now) == 1 and len(wa & wb) / max(1, len(wa | wb)) >= 0.55:
+            t = now[0].rstrip(". ") + ", a także dla celów przyszłych procesów rekrutacyjnych."
+    return t
+
+
+def format_phone(tel):
+    """+48 669 579 733 — polski numer zawsze z kierunkowym."""
+    d = re.sub(r"\D", "", tel or "")
+    if len(d) == 9:
+        d = "48" + d
+    if len(d) == 11 and d.startswith("48"):
+        return f"+48 {d[2:5]} {d[5:8]} {d[8:]}"
+    return (tel or "").strip()
+
+
+def km_from_krakow(place):
+    """Przybliżona odległość od Krakowa (km) z tabeli okolic; None, gdy nie wiadomo; 0 dla Krakowa, -1 dla pracy zdalnej."""
+    p = plain(place)
+    if not p.strip():
+        return None
+    if any(w in p for w in REMOTE):
+        return -1
+    hits = [d for w, d in AREA_KM.items() if w in p]
+    return min(hits) if hits else None
+
+
+def consent_clause(firma="", custom="", stanowisko=""):
     """Klauzula do CV: zgoda pracodawcy, jeśli to naprawdę zgoda; w przeciwnym razie szeroka klauzula domyślna."""
     if custom and is_consent(custom):
-        return custom.strip()
+        return fill_clause(custom, stanowisko)
     who = f" przez {firma.strip()}" if firma and firma.strip() else ""
     return (f"Wyrażam zgodę na przetwarzanie moich danych osobowych{who} dla potrzeb niezbędnych do realizacji obecnego procesu "
             "rekrutacji, a także przyszłych procesów rekrutacyjnych, zgodnie z Rozporządzeniem Parlamentu Europejskiego i Rady (UE) "
@@ -119,7 +165,7 @@ def migrate(c):
         odpowiedz TEXT DEFAULT '', status TEXT DEFAULT 'otwarte', utworzono TEXT, zamknieto TEXT DEFAULT '');
     """)
     cols = {r[1] for r in c.execute("PRAGMA table_info(aplikacje)")}
-    for col in ("kanal", "przypomnienie", "odpowiedz_kiedy", "podziekowanie"):
+    for col in ("kanal", "przypomnienie", "odpowiedz_kiedy", "podziekowanie", "analiza"):
         if col not in cols:
             c.execute(f"ALTER TABLE aplikacje ADD COLUMN {col} TEXT DEFAULT ''")
     c.commit()
@@ -306,10 +352,13 @@ def facts_brief(f, ids=True):
 
 # ================================================================ sekrety (pęk kluczy macOS; poza Makiem plik — tylko do prób)
 
+TEST_VALUES = {"a" * 16, "s" * 16, "abcdefghijklmnop"}               # próbne hasła z testów sprzed 2.8.3 — nigdy prawdziwe
+
+
 def secret(ctx, name):
     with contextlib.suppress(Exception):
         v = ctx.secret(name)
-        if v:
+        if v and v not in TEST_VALUES:
             return v
     with contextlib.suppress(Exception):
         return json.loads((ctx.folder() / "sekrety-proba.json").read_text(encoding="utf-8")).get(name)

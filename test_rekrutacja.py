@@ -1,5 +1,7 @@
 """Testy dodatku Rekrutacja (część A). Bez Gmaila, bez Ollamy, bez Tailscale — wszystko udawane."""
 import contextlib, datetime as dt, importlib, json, re, unittest
+import os
+os.environ["SEBASTIAN_TESTY"] = "1"          # testy nie dotykają prawdziwego pęku kluczy macOS (hasła Gmaila, klucze API)
 from pathlib import Path
 from unittest.mock import patch
 
@@ -38,6 +40,7 @@ class FakeModel:
                        "najlepiej odnajduję się tam, gdzie liczy się porządek, terminowość i dobra komunikacja z zespołem.\n\n"
                        "Chętnie opowiem więcej podczas rozmowy.\n\nZ poważaniem\nAnna")
         self.truth = []
+        self.profile = None
 
     def __call__(self, prompt, as_json=False, max_tokens=1200, temperature=0.4):
         if "Dobierasz" in prompt:
@@ -51,6 +54,8 @@ class FakeModel:
             return json.dumps({"list": self.letter, "mail": "Dzień dobry,\n\nw odpowiedzi na ogłoszenie przesyłam w załączniku CV i list "
                                "przewodni. Praca z dokumentacją i koordynacja terminów to obszar, w którym czuję się pewnie. "
                                "Będę wdzięczna za informację zwrotną."})
+        if "sekcji „Profil zawodowy”" in prompt:
+            return json.dumps({"profil": self.profile}) if self.profile else None
         if "kontrolerem prawdy" in prompt:
             return json.dumps({"niepotwierdzone": self.truth})
         return None
@@ -69,6 +74,8 @@ class RekrutacjaBase(Base):
         self.mod, self.ctx = DH.load(DH.discover()["rekrutacja"])
         pkg = self.mod.__name__
         self.extra.append(patch.object(importlib.import_module(pkg + ".poczta"), "send", self.fake_send))
+        self.extra[-1].start()
+        self.extra.append(patch.object(importlib.import_module(pkg + ".dokumenty"), "writer_model", lambda ctx: None))  # bez prawdziwego Ollamy
         self.extra[-1].start()
         self.extra.append(patch.object(importlib.import_module(pkg + ".kontakty"), "find_email", lambda *a, **k: {}))   # bez internetu
         self.extra[-1].start()
@@ -841,8 +848,8 @@ class Corrections281(RekrutacjaBase):
         self.R.save_facts(self.ctx, f)
         f = self.R.load_facts(self.ctx)
         sel = self.D.clean_selection(f, {"kolejnosc": ["d1", "d2", "d3"]})
-        self.assertEqual(len(sel["punkty"]["d5"]), 2)
-        self.assertEqual(len(self.D.default_selection(f)["punkty"]["d5"]), 4)
+        self.assertEqual(len(sel["punkty"]["d5"]), 3)                     # zawsze 3 punkty przy stanowisku
+        self.assertEqual(len(self.D.default_selection(f)["punkty"]["d5"]), 3)
         self.mod.apply_patch(self.ctx, {"osoba": {"adres": "", "miasto": "Kraków"}, "warunki": {"dojazd_km": 20}, "ustawienia": {"bez_prowizji": "tak"}})
         import fitz
         out = self.ctx.folder() / "cv3.pdf"
@@ -884,6 +891,222 @@ class Corrections281(RekrutacjaBase):
         self.assertNotIn("7000", texts)
         self.assertIn("Dostępność: od zaraz", texts)
 
+
+
+
+class Improvements282(RekrutacjaBase):
+    def jobs_with(self, n=5):
+        f = self.R.load_facts(self.ctx)
+        jobs = [dict(j, punkty=[p["tekst"] for p in j["punkty"]] + [f"dodatkowy punkt {i}" for i in range(n)]) for j in f["doswiadczenie"]]
+        f["doswiadczenie"] = jobs
+        f["kursy"] = ["Kurs A (2022)", "Kurs B (2026)", "Kurs bez roku", "Kurs C (2024)"]
+        self.R.save_facts(self.ctx, f)
+        return self.R.load_facts(self.ctx)
+
+    def pdf_text(self, f, sel):
+        import fitz
+        out = self.ctx.folder() / "cv_test.pdf"
+        self.D.render_cv(f, sel, out)
+        doc = fitz.open(out)
+        self.assertEqual(len(doc), 1)
+        return doc[0].get_text()
+
+    def test_three_points_in_model_order_and_courses_newest_first(self):
+        f = self.jobs_with()
+        d1 = [p["id"] for p in f["doswiadczenie"][0]["punkty"]]
+        sel = self.D.clean_selection(f, {"kolejnosc": ["d1"], "punkty": {"d1": [d1[4], d1[0]]}})
+        self.assertEqual(sel["punkty"]["d1"], [d1[4], d1[0], d1[1]])
+        self.assertTrue(all(len(v) <= 3 for v in sel["punkty"].values()))
+        text = self.pdf_text(f, sel)
+        pos = [text.find(x) for x in ("Kurs B", "Kurs C", "Kurs A", "Kurs bez roku")]
+        self.assertTrue(all(p >= 0 for p in pos) and pos == sorted(pos), pos)
+
+    def test_tailored_profile_only_from_facts(self):
+        a = {"stanowisko": "Asystentka biura", "firma": "X", "tresc": OFFER, "zrodlo": "oferta"}
+        self.model.profile = ("Specjalistka ds. administracji z doświadczeniem w prowadzeniu i archiwizacji dokumentacji. "
+                              "Koordynuje terminy, przygotowuje raporty i dba o porządek w obiegu dokumentów.")
+        self.assertTrue(self.D.tailored_profile(self.ctx, self.facts, a).startswith("Specjalistka"))
+        self.model.profile = "Specjalistka z 12-letnim doświadczeniem w SAP, która zarządzała zespołem 40 osób w dziale administracji firmy."
+        self.assertEqual(self.D.tailored_profile(self.ctx, self.facts, a), "")      # liczby i narzędzie spoza faktów — odrzucone
+        self.ready()
+        self.model.profile = ("Specjalistka ds. administracji z doświadczeniem w prowadzeniu i archiwizacji dokumentacji. "
+                              "Koordynuje terminy i przygotowuje raporty.")
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        sel = json.loads(self.row(aid)["wybor"])
+        self.assertEqual((sel["profil_zrodlo"], sel["profil_model"][:12]), ("model", "Specjalistka"))
+        self.assertIn("Koordynuje terminy", self.pdf_text(self.R.load_facts(self.ctx), sel))
+
+    def test_cv_edit_own_points_hide_and_restore(self):
+        f = self.jobs_with(2)
+        sel = self.D.clean_selection(f, {"kolejnosc": ["d1", "d2"], "profil_tekst": "Opis od Sebastiana o dokumentacji.", "profil_zrodlo": "model"})
+        new = self.D.apply_cv_edit(f, sel, "Mój własny opis do tej oferty.", {"d1": ["Mój punkt jeden", "", "Mój punkt dwa"]}, ["d1"])
+        prof, pts = self.D.cv_content(f, new)
+        self.assertEqual(prof, "Mój własny opis do tej oferty.")
+        self.assertEqual(pts["d1"], ["Mój punkt jeden", "Mój punkt dwa"])
+        self.assertEqual(new["kolejnosc"], ["d1"])
+        text = self.pdf_text(f, new)
+        self.assertIn("Mój punkt jeden", text)
+        self.assertNotIn(f["doswiadczenie"][1]["stanowisko"], text)
+        back = self.D.reset_cv_edit(f, new)
+        prof, pts = self.D.cv_content(f, back)
+        self.assertEqual(prof, "Opis od Sebastiana o dokumentacji.")
+        self.assertNotIn("Mój punkt jeden", pts["d1"])
+        self.assertIn("d2", back["kolejnosc"])
+        unchanged = self.D.apply_cv_edit(f, sel, prof, pts, back["kolejnosc"])         # bez zmian = bez „własnej wersji”
+        self.assertNotIn("wlasne_punkty", unchanged)
+        with self.assertRaises(ValueError):
+            self.D.apply_cv_edit(f, sel, "", {}, [])
+
+    def test_patch_replaces_point_with_concrete_one(self):
+        f = self.R.load_facts(self.ctx)
+        job = f["doswiadczenie"][0]
+        first = job["punkty"][0]["tekst"]
+        rule = {"firma": job["firma"], "zawiera": first[:12], "na": "ok. 80 dokumentów miesięcznie"}
+        self.mod.apply_patch(self.ctx, {"punkty_zmien": [rule]})
+        self.mod.apply_patch(self.ctx, {"punkty_zmien": [rule]})
+        texts = [p["tekst"] for p in self.R.load_facts(self.ctx)["doswiadczenie"][0]["punkty"]]
+        self.assertEqual(texts.count("ok. 80 dokumentów miesięcznie"), 1)
+        self.assertNotIn(first, texts)
+
+    def test_edit_cv_page(self):
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        with self.R.db(self.ctx) as c:
+            self.R.set_status(c, self.ctx, aid, "zatwierdzona")
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        self.assertIn("Edytuj CV".encode(), cl.get(f"/aplikacja/{aid}").data)
+        page = cl.get(f"/aplikacja/{aid}/cv").data.decode()
+        self.assertIn("Profil zawodowy", page)
+        f = self.R.load_facts(self.ctx)
+        form = {"csrf": "t", "co": "zapisz", "profil": "Opis poprawiony przez Agę.", "pokaz": ["d1", "d2"], "p_d1": ["Punkt Agi", "", ""]}
+        self.assertEqual(cl.post(f"/aplikacja/{aid}/cv", data=form).status_code, 302)
+        a = self.row(aid)
+        self.assertEqual(a["status"], "do_zatwierdzenia")                       # zatwierdzona wraca do sprawdzenia
+        sel = json.loads(a["wybor"])
+        self.assertEqual((sel["profil_tekst"], sel["wlasne_punkty"]["d1"]), ("Opis poprawiony przez Agę.", ["Punkt Agi"]))
+        self.assertTrue((self.P.app_dir(self.ctx, aid) / a["cv_plik"]).exists())
+        with self.R.db(self.ctx) as c:
+            self.R.set_status(c, self.ctx, aid, "wyslana")
+        cl.post(f"/aplikacja/{aid}/cv", data=dict(form, profil="Po wysłaniu."))
+        self.assertEqual(json.loads(self.row(aid)["wybor"])["profil_tekst"], "Opis poprawiony przez Agę.")   # wysłane się nie zmienia
+
+
+
+class LettersAndOffers282(RekrutacjaBase):
+    CLAUSE = ("Wyrażam zgodę na przetwarzanie moich danych osobowych przez 5 Wojskowy Szpital Kliniczny z siedzibą ul. Wrocławska 1-3, "
+              "30-901 Kraków, w zakresie objętym przekazanym przeze mnie CV dla celów przeprowadzenia procesu rekrutacyjnego na "
+              "stanowisko______________________. Wyrażam zgodę na przetwarzanie moich danych osobowych przez 5 Wojskowy Szpital "
+              "Kliniczny z siedzibą ul. Wrocławska 1-3, 30-901 Kraków, w zakresie objętym przekazanym przeze mnie CV dla celów "
+              "przeprowadzenia przyszłych procesów rekrutacyjnych.")
+
+    def test_clause_gets_job_title_and_one_sentence(self):
+        out = self.R.consent_clause("Szpital", self.CLAUSE, "Referent")
+        self.assertIn("na stanowisko Referent, a także dla celów przyszłych procesów rekrutacyjnych.", out)
+        self.assertEqual(out.count("Wyrażam zgodę"), 1)
+        self.assertNotIn("___", out)
+        bare = self.R.consent_clause("Szpital", self.CLAUSE, "")
+        self.assertNotIn("stanowisko", bare)
+        self.assertNotIn("na,", bare)
+        self.assertEqual(self.R.format_phone("669579733"), "+48 669 579 733")
+
+    def test_language_rules(self):
+        bad = ("Szanowni Państwo,\n\ndostaję się aplikacja na stanowisko. Potrafiłbym szybko przejść przez procesy bez zbędnej nauki podstaw. "
+               "Jestem gotowy do pracy.")
+        issues = " ".join(self.D.language_issues(bad))
+        for word in ("potrafiłbym", "jestem gotowy", "bez zbędnej nauki", "dostaję się"):
+            self.assertIn(word, issues.lower())
+        self.assertEqual(self.D.language_issues("Kierowałam działem obsługi i pracowałam z zespołem. Jestem gotowa do rozmowy."), [])
+
+    def test_masculine_letter_is_retried_then_replaced(self):
+        a = {"stanowisko": "Asystentka biura", "firma": "Firma", "tresc": OFFER, "zrodlo": "oferta", "url": ""}
+        self.model.letter = ("Z zainteresowaniem przeczytałem ogłoszenie. " * 3 + "Pracowałem z dokumentacją i byłem odpowiedzialny za terminy. " * 6)
+        letter, mail, by_model = self.D.compose(self.ctx, self.facts, a)
+        self.assertFalse(by_model)
+        self.assertEqual(self.D.language_issues(letter), [])
+        self.assertTrue(letter.startswith("Szanowni Państwo,"))
+        self.assertIn("na stanowisko Asystentka biura", mail)
+        self.assertIn("list motywacyjny", mail)
+        self.assertNotIn("przewodni", letter + mail)
+
+    def test_good_letter_kept_and_mail_from_facts(self):
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        a = self.row(aid)
+        self.assertTrue(a["list"].startswith("Szanowni Państwo,"))
+        self.assertIn("Z poważaniem", a["list"])
+        self.assertIn("Do moich zadań należały tam m.in. ", a["mail"])
+        self.assertIn("List_motywacyjny", a["list_plik"])
+        import fitz
+        text = fitz.open(self.P.app_dir(self.ctx, aid) / a["list_plik"])[0].get_text()
+        for part in ("Klauzula RODO", "Z poważaniem", "Dotyczy:", a["firma"]):
+            self.assertIn(part, text)
+        self.assertLess(text.find(self.facts["osoba"]["email"]), text.find("Szanowni"))      # dane nadawczyni na górze
+
+    def test_offer_details_and_match(self):
+        O = self.O
+        self.assertEqual(O.salary("Wynagrodzenie 6 500 - 7 500 zł brutto miesięcznie"), "6 500 - 7 500 zł brutto")
+        orig = self.model
+
+        def model(prompt, **kw):
+            if "Przeczytaj ogłoszenie" in prompt:
+                return json.dumps({"firma": "Biuro Testowe", "stanowisko": "Asystentka", "miasto": "Wieliczka", "email": "rekrutacja@testowe.pl",
+                                   "ocena": 80, "uzasadnienie": "ok", "adres": "ul. Długa 1, Wieliczka", "wynagrodzenie": "9999 zł",
+                                   "wymagania": ["obsługa Excela", "prawo jazdy kat. C"], "obowiazki": ["obieg dokumentów"], "oferujemy": ["umowa o pracę"]})
+            if "Porównaj WYMAGANIA" in prompt:
+                return json.dumps({"dopasowanie": [{"nr": 1, "ocena": "mam", "dlaczego": "Excel w narzędziach"},
+                                                   {"nr": 2, "ocena": "brak", "dlaczego": "tylko kat. B"}, {"nr": 9, "ocena": "mam"}]})
+            return orig(prompt, **kw)
+        with patch.object(W, "ask", model):
+            self.ready()
+            aid = self.add(tresc=OFFER + " Oferujemy 6000-7000 zł brutto.")
+            self.P.prepare(self.ctx, aid)
+        info = json.loads(self.row(aid)["analiza"])
+        self.assertEqual(info["wynagrodzenie"], "6000-7000 zł brutto")          # kwoty spoza ogłoszenia model nie wstawi
+        self.assertEqual([x["ocena"] for x in info["dopasowanie"]], ["mam", "brak"])
+        self.assertEqual(info["obowiazki"], ["obieg dokumentów"])
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        page = cl.get(f"/aplikacja/{aid}").data.decode()
+        for part in ("Pobierz CV", "Pobierz list motywacyjny", "6000-7000 zł brutto", "ok. 15 km od Krakowa", "prawo jazdy kat. C", "brakuje: 1", "Sprawdź dojazd"):
+            self.assertIn(part, page)
+
+    def test_migration_prepares_waiting_again(self):
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        self.assertEqual(self.row(aid)["status"], "do_zatwierdzenia")
+        self.P.migrate_282(self.ctx)
+        self.assertEqual(self.row(aid)["status"], "nowa")
+        self.P.migrate_282(self.ctx)                                             # tylko raz
+        self.P.prepare(self.ctx, aid)
+        self.assertEqual(self.row(aid)["status"], "do_zatwierdzenia")
+
+
+
+class KeychainIsolation283(RekrutacjaBase):
+    def test_tests_never_touch_the_real_keychain(self):
+        with patch.object(DH.subprocess, "run", side_effect=AssertionError("security wywołane w teście")) as run, \
+                patch.object(DH.sys, "platform", "darwin"):
+            self.R.set_secret(self.ctx, "aga", "x" * 16)
+            self.assertEqual(self.R.secret(self.ctx, "aga"), "x" * 16)          # zapis do pliku próbnego w folderze testu
+            self.assertIsNone(self.ctx.secret("jooble"))
+            run.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

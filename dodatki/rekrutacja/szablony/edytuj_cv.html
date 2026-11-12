@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="small"><a href="{{ url_for('detail', aid=a.id) }}">‹ Wróć do aplikacji</a></p>
+<h1>Edytuj CV</h1>
+<p class="soft">{{ a.firma }}{% if a.stanowisko %} · {{ a.stanowisko }}{% endif %}</p>
+
+{% if locked %}
+  <div class="note info">{{ 'To CV zostało już wysłane — tu tylko je zobaczysz.' if a.status in ('wyslana','wyslana_recznie','pytanie','zaproszenie','rozmowa','oferta','odmowa') else 'CV nie jest jeszcze gotowe.' }}</div>
+{% endif %}
+<p><a class="btn ghost small" href="{{ url_for('file', aid=a.id, which='cv') }}" target="_blank">Zobacz CV (PDF) ↗</a></p>
+<p class="small soft">Sebastian dobrał opis i po {{ n }} punkty pod tę ofertę. Możesz je przepisać po swojemu, wybrać inne z listy
+  (kliknij w pole i zacznij pisać — podpowie punkty z Twojej bazy) albo ukryć stanowisko. Twoje zmiany dotyczą tylko tej aplikacji.</p>
+
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf() }}">
+  <div class="card">
+    <h2>Profil zawodowy</h2>
+    {% if zrodlo == 'model' %}<p class="small soft">Opis napisany pod tę ofertę z Twoich faktów.</p>{% elif zrodlo == 'aga' %}<p class="small soft">Twoja wersja opisu.</p>{% endif %}
+    <textarea name="profil" rows="5" {{ 'readonly' if locked }}>{{ profil }}</textarea>
+  </div>
+
+  {% for r in rows %}
+  <div class="card">
+    <label style="display:flex;gap:10px;align-items:center;margin:0">
+      <input type="checkbox" name="pokaz" value="{{ r.j.id }}" {{ 'checked' if r.w_cv }} {{ 'disabled' if locked }} style="width:auto">
+      <span><b>{{ r.j.stanowisko }}</b> · {{ r.j.firma }} <span class="soft small">{{ r.j.od }} – {{ r.j.do }}</span>
+      {% if r.wlasne %}<span class="pill">Twoja wersja</span>{% endif %}{% if r.j.opcjonalne %}<span class="small soft"> · opcjonalne</span>{% endif %}</span>
+    </label>
+    <datalist id="dl{{ r.j.id }}">{% for t in r.wszystkie %}<option value="{{ t }}">{% endfor %}</datalist>
+    {% for i in range(n) %}
+      <input type="text" name="p_{{ r.j.id }}" list="dl{{ r.j.id }}" value="{{ r.punkty[i] if i < r.punkty|length else '' }}" {{ 'readonly' if locked }} style="margin-top:8px" placeholder="punkt {{ i + 1 }}">
+    {% endfor %}
+  </div>
+  {% endfor %}
+
+  {% if not locked %}
+  <div class="actions">
+    <button class="btn big" name="co" value="zapisz">Zapisz i ułóż CV</button>
+    {% if edited %}<button class="btn plain" name="co" value="przywroc">Przywróć wersję Sebastiana</button>{% endif %}
+  </div>
+  <p class="small soft">Puste pole = mniej punktów przy tym stanowisku. Stałe zmiany (np. nowy obowiązek) dopisz w Ustawieniach → Twoje dane i CV, wtedy Sebastian będzie go używał we wszystkich aplikacjach.</p>
+  {% endif %}
+</form>
+{% endblock %}

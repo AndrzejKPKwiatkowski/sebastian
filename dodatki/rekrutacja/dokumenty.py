@@ -1,4 +1,4 @@
-"""Rekrutacja — dokumenty: CV, list przewodni, mail i kontroler prawdy.
+"""Rekrutacja — dokumenty: CV, list motywacyjny, mail i kontroler prawdy.
 
 Zasada: CV NIE jest pisane przez model. Model wybiera tylko numery faktów (co wyeksponować i w jakiej kolejności),
 a tekst zawsze pochodzi z bazy faktów zatwierdzonej przez Agę. List i mail pisze model, ale zanim trafią do Agi,
@@ -60,9 +60,18 @@ def chronological(f, ids):
     return sorted(ids, key=lambda i: (_ym(by[i].get("do")), _ym(by[i].get("od"))), reverse=True)
 
 
+POINTS_PER_JOB = 3
+
+
+def courses_newest_first(kursy):
+    """Kursy od najnowszego (rok w nawiasie); bez roku na końcu, w kolejności z bazy."""
+    return sorted(kursy, key=lambda k: _ym(k["tekst"]), reverse=True)
+
+
 def default_selection(f):
     return {"kolejnosc": chronological(f, [j["id"] for j in f["doswiadczenie"] if not j.get("opcjonalne")]),
-            "punkty": {j["id"]: [p["id"] for p in j["punkty"]] for j in f["doswiadczenie"]},
+            "z_modelu": False,
+            "punkty": {j["id"]: [p["id"] for p in j["punkty"]][:POINTS_PER_JOB] for j in f["doswiadczenie"]},
             "profil": [p["id"] for p in f["profil"]][:4],
             "umiejetnosci": [u["id"] for u in f["umiejetnosci"]][:6],
             "narzedzia": [t["id"] for t in f["narzedzia"]][:7]}
@@ -80,21 +89,96 @@ def clean_selection(f, sel):
 
     jobs = [j["id"] for j in f["doswiadczenie"]]
     optional = {j["id"] for j in f["doswiadczenie"] if j.get("opcjonalne")}
-    ranking = [x for x in dict.fromkeys(sel.get("kolejnosc") or []) if x in jobs]
-    picked = bool(ranking)
+    ranking = [x for x in dict.fromkeys(sel.get("ranking") or sel.get("kolejnosc") or []) if x in jobs]
+    picked = sel["z_modelu"] if isinstance(sel.get("z_modelu"), bool) else bool(ranking)
     ranking += [x for x in jobs if x not in ranking and x not in optional]  # stanowiska opcjonalne tylko, gdy pasują do oferty
     order = chronological(f, ranking)                                      # w CV zawsze od najnowszego
-    key_jobs = set(ranking[:3])
     points = {}
     for j in f["doswiadczenie"]:
         ids = [p["id"] for p in j["punkty"]]
         got = [x for x in dict.fromkeys((sel.get("punkty") or {}).get(j["id"]) or []) if x in ids]
-        full = got + [x for x in ids if x not in got]                      # kolejność od modelu, komplet z bazy
-        points[j["id"]] = full if (not picked or j["id"] in key_jobs) else full[:2]   # mniej ważne stanowiska — krócej
-    return {"kolejnosc": order, "ranking": ranking, "punkty": points,
-            "profil": pick("profil", [p["id"] for p in f["profil"]], 4, 2),
-            "umiejetnosci": pick("umiejetnosci", [u["id"] for u in f["umiejetnosci"]], 6, 3),
-            "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 7, 1)}
+        points[j["id"]] = (got + [x for x in ids if x not in got])[:POINTS_PER_JOB]   # 3 najważniejsze dla oferty
+    hidden = [x for x in dict.fromkeys(sel.get("ukryte") or []) if x in jobs]
+    if hidden and len(hidden) < len(order):
+        order = [x for x in order if x not in hidden]
+    extra = [x for x in dict.fromkeys(sel.get("pokazane") or []) if x in jobs and x not in order]
+    if extra:
+        order = chronological(f, order + extra)
+    out = {"kolejnosc": order, "ranking": ranking, "z_modelu": picked, "punkty": points,
+           "profil": pick("profil", [p["id"] for p in f["profil"]], 4, 2),
+           "umiejetnosci": pick("umiejetnosci", [u["id"] for u in f["umiejetnosci"]], 6, 3),
+           "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 7, 1)}
+    if hidden:
+        out["ukryte"] = hidden
+    if extra:
+        out["pokazane"] = extra
+    prof = re.sub(r"\s+", " ", str(sel.get("profil_tekst") or "")).strip()
+    if prof:
+        out["profil_tekst"] = prof[:900]                                   # opis pod ofertę (sprawdzony) albo poprawiony przez Agę
+        out["profil_zrodlo"] = sel.get("profil_zrodlo") if sel.get("profil_zrodlo") in ("model", "aga") else "aga"
+    model_prof = re.sub(r"\s+", " ", str(sel.get("profil_model") or (prof if sel.get("profil_zrodlo") == "model" else ""))).strip()
+    if model_prof:
+        out["profil_model"] = model_prof[:900]                             # wersja Sebastiana — do przywrócenia po edycji
+    own = sel.get("wlasne_punkty") if isinstance(sel.get("wlasne_punkty"), dict) else {}
+    own = {k: [re.sub(r"\s+", " ", str(t)).strip()[:300] for t in v if str(t).strip()][:5]
+           for k, v in own.items() if k in jobs and isinstance(v, list)}
+    own = {k: v for k, v in own.items() if v}
+    if own:
+        out["wlasne_punkty"] = own                                         # punkty poprawione ręcznie przez Agę
+    return out
+
+
+def cv_content(f, sel):
+    """Co faktycznie stoi w CV: (opis, {stanowisko: [punkty]}) — z uwzględnieniem poprawek Agi."""
+    sel = clean_selection(f, sel)
+    profile = sel.get("profil_tekst") or " ".join(p["tekst"] for p in f["profil"] if p["id"] in sel["profil"])
+    by_id = {j["id"]: j for j in f["doswiadczenie"]}
+    points = {}
+    for jid in sel["kolejnosc"]:
+        if jid in sel.get("wlasne_punkty", {}):
+            points[jid] = sel["wlasne_punkty"][jid]
+        else:
+            texts = {p["id"]: p["tekst"] for p in by_id[jid]["punkty"]}
+            points[jid] = [texts[x] for x in sel["punkty"].get(jid, []) if x in texts]
+    return profile, points
+
+
+def apply_cv_edit(f, sel, form_profile, form_points, shown):
+    """Poprawki Agi z ekranu „Edytuj CV”. form_points: {stanowisko: [teksty]}, shown: stanowiska zaznaczone do CV."""
+    sel = clean_selection(f, sel)
+    base = {k: v for k, v in sel.items() if k not in ("wlasne_punkty", "ukryte", "pokazane")}
+    base_prof, base_points = cv_content(f, dict(base, profil_tekst=sel.get("profil_model") or "", profil_zrodlo="model"))
+    jobs = [j["id"] for j in f["doswiadczenie"]]
+    shown = [x for x in shown if x in jobs]
+    if not shown:
+        raise ValueError("W CV musi zostać przynajmniej jedno stanowisko.")
+    new = dict(base)
+    new["ukryte"] = [x for x in base["kolejnosc"] if x not in shown]
+    new["pokazane"] = [x for x in shown if x not in base["kolejnosc"]]
+    by_id = {j["id"]: j for j in f["doswiadczenie"]}
+    own = {}
+    for jid in shown:
+        texts = [re.sub(r"\s+", " ", t).strip() for t in form_points.get(jid, []) if t and t.strip()]
+        default = base_points.get(jid) or [p["tekst"] for p in by_id[jid]["punkty"]][:POINTS_PER_JOB]
+        if texts and texts != default:
+            own[jid] = texts
+    new["wlasne_punkty"] = own
+    prof = re.sub(r"\s+", " ", form_profile or "").strip()
+    if prof and prof != base_prof:
+        new.update(profil_tekst=prof, profil_zrodlo="aga")
+    elif sel.get("profil_model"):
+        new.update(profil_tekst=sel["profil_model"], profil_zrodlo="model")
+    else:
+        new.pop("profil_tekst", None)
+    return clean_selection(f, new)
+
+
+def reset_cv_edit(f, sel):
+    sel = clean_selection(f, sel)
+    new = {k: v for k, v in sel.items() if k not in ("wlasne_punkty", "ukryte", "pokazane", "profil_tekst", "profil_zrodlo")}
+    if sel.get("profil_model"):
+        new.update(profil_tekst=sel["profil_model"], profil_zrodlo="model")
+    return clean_selection(f, new)
 
 
 def select_for_offer(ctx, f, app):
@@ -110,7 +194,8 @@ FAKTY:
 Zwróć JSON:
 {{"kolejnosc": [numery stanowisk d… od NAJLEPIEJ PASUJĄCEGO do oferty (np. przy ofercie pedagogicznej najpierw praca z dziećmi i praktyki,
      przy gastronomii najpierw gastronomia, przy biurze najpierw administracja); stanowiska oznaczone (opcjonalne) dodaj tylko, gdy pasują],
-  "punkty": {{"d1": [numery punktów tego stanowiska, najważniejsze dla oferty pierwsze]}},
+  "punkty": {{"d1": [DOKŁADNIE 3 numery punktów tego stanowiska, które najbardziej zwiększą szansę na tę pracę; najważniejszy pierwszy;
+     punkty z liczbami i konkretnymi efektami mają pierwszeństwo, gdy pasują do oferty]}},
   "profil": [3 albo 4 numery zdań p…, w kolejności czytania],
   "umiejetnosci": [do 6 numerów u…],
   "narzedzia": [do 7 numerów n…]}}"""
@@ -119,6 +204,35 @@ Zwróć JSON:
     except Exception as e:
         ctx.log.warning(f"Rekrutacja: wybór faktów bez modelu ({type(e).__name__})")
         return default_selection(f)
+
+
+def tailored_profile(ctx, f, app):
+    """Opis na górę CV pisany pod ofertę, wyłącznie z faktów. Pusty tekst, gdy model nie odpowie albo dopisze coś spoza faktów."""
+    if not (app.get("tresc") or "").strip() and not app.get("stanowisko"):
+        return ""
+    prompt = f"""Napisz opis do sekcji „Profil zawodowy” w CV kandydatki, dopasowany do tej oferty. Po polsku, w formach żeńskich.
+
+ŻELAZNA ZASADA: wyłącznie to, co jest w FAKTACH. Żadnych nowych umiejętności, narzędzi, lat doświadczenia, liczb ani certyfikatów.
+Wybierz z FAKTÓW to, co najbardziej odpowiada wymaganiom oferty, i nazwij to słowami bliskimi ogłoszeniu.
+Jeśli w FAKTACH jest liczba, która pasuje do oferty (np. ile dokumentów miesięcznie), możesz ją podać dokładnie tak jak w faktach.
+
+FORMA: 2 albo 3 zdania, razem 35–65 słów. Styl CV, bez „ja”, bez nazwy firmy, bez frazesów („z pasją”, „dynamiczny”),
+bez myślników. Pierwsze zdanie mówi, kim jest kandydatka w kontekście tej roli (np. „Specjalistka ds. …”, „Pedagożka …”).
+
+OFERTA: {app.get('stanowisko') or '(zapytanie o współpracę)'} — {app.get('firma') or ''}
+{(app.get('tresc') or '')[:3000]}
+
+FAKTY:
+{R.facts_brief(f, ids=False)}
+
+Zwróć JSON {{"profil": "..."}}"""
+    with contextlib.suppress(Exception):
+        out = ctx.ask(prompt, as_json=True, max_tokens=300, temperature=0.3)
+        text = re.sub(r"\s+", " ", re.sub(r"[ \t]*[—–][ \t]*", ", ", str((out or {}).get("profil") or ""))).strip()
+        words = len(text.split())
+        if 15 <= words <= 90 and not rule_check(f, app, text):
+            return text
+    return ""
 
 
 # ================================================================ CV (ReportLab) — układ jak w dotychczasowym CV Agi
@@ -227,7 +341,7 @@ def _draw_cv(c, f, sel, photo, rodo, kl, kr=None):
     x0 = LW + 20
     RW = W - x0 - 24
     y = _heading(c, "Profil zawodowy", x0, H - HH - 30, RW * 0.94, head)
-    profil = " ".join(p["tekst"] for p in f["profil"] if p["id"] in sel["profil"])
+    profil, chosen = cv_content(f, sel)
     y = _flow(c, [(_para(escape(profil), FR, body), 0)], x0, y - 4, RW)
 
     rodo_items = [(_para("<b>KLAUZULA RODO</b>", FB, 5.9, leading=7.6), 0), (_para(escape(rodo), FI, 5.9, leading=7.6), 0)]
@@ -242,13 +356,12 @@ def _draw_cv(c, f, sel, photo, rodo, kl, kr=None):
     blocks = []
     for jid in sel["kolejnosc"]:
         j = by_id[jid]
-        pts = {p["id"]: p["tekst"] for p in j["punkty"]}
         place = ", ".join(x for x in (j.get("firma", ""), j.get("miejsce", "")) if x)
         items = [(_para(f"<b>{escape(j['stanowisko'])}</b>", FB, body), 0)]
         if place:
             items.append((_para(f"<b>{escape(place)}</b>", FB, body), 1))
         items.append((_para(escape(f"{j.get('od', '')} - {j.get('do', '')}"), FR, body * 0.94), 2.5))
-        items += [(_para(escape(pts[pid]), FR, body, bullet=True), 0.6) for pid in sel["punkty"].get(jid, []) if pid in pts]
+        items += [(_para(escape(t), FR, body, bullet=True), 0.6) for t in chosen.get(jid, [])]
         blocks.append((items, top - _flow(c, items, 0, top, col_w, draw=False) + 9 * k))
     heights = [h for _, h in blocks]
     split = min(range(len(blocks) + 1), key=lambda i: max(sum(heights[:i]), sum(heights[i:]))) if blocks else 0
@@ -274,7 +387,7 @@ def _draw_cv(c, f, sel, photo, rodo, kl, kr=None):
         yy = _heading(c, title, lx, yy, lw * 0.92, head)
         return _flow(c, paragraphs, lx - 2, yy - 2, lw + 2) - 21 * k
 
-    y = section("Kursy i kwalifikacje", [(_para(escape(x["tekst"]), FL, body, bullet=True), 1.5) for x in f["kursy"]], y)
+    y = section("Kursy i kwalifikacje", [(_para(escape(x["tekst"]), FL, body, bullet=True), 1.5) for x in courses_newest_first(f["kursy"])], y)
     skills = [u for u in f["umiejetnosci"] if u["id"] in sel["umiejetnosci"]]
     y = section("Umiejętności", [(_para(escape(x["tekst"]), FL, body, bullet=True), 0.5) for x in skills], y)
     tools = [t for t in f["narzedzia"] if t["id"] in sel["narzedzia"]]
@@ -310,49 +423,109 @@ def _draw_cv(c, f, sel, photo, rodo, kl, kr=None):
     return fits, right_fits
 
 
-# ================================================================ list przewodni (PDF)
+# ================================================================ list motywacyjny (PDF)
 
 def polish_date(d):
     return f"{d.day} {MONTHS[d.month - 1]} {d.year}"
 
 
-def render_letter(f, text, out_path, firma="", stanowisko="", today=None, rodo=None):
+def render_letter(f, text, out_path, firma="", stanowisko="", today=None, rodo=None, adres_firmy="", podpis=None):
+    """List motywacyjny jak oficjalne pismo: nadawczyni po lewej, data po prawej, adresat po prawej, treść,
+    „Z poważaniem” z podpisem, klauzula RODO na dole strony."""
     from reportlab.lib.colors import HexColor
-    from reportlab.lib.enums import TA_RIGHT
+    from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_RIGHT
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
-    from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer
+    from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     FR, FB, FI, FL = fonts()
     o = f["osoba"]
     today = today or dt.date.today()
-    ink, soft = HexColor(INK), HexColor("#6b6b6b")
+    ink, soft = HexColor(INK), HexColor("#555555")
     st = lambda **kw: ParagraphStyle("s", **kw)
-    story = [Paragraph(escape(R.full_name(f)), st(fontName=FL, fontSize=24, leading=30, textColor=ink)),
-             Paragraph(escape("  ·  ".join(x for x in (o.get("telefon", ""), o.get("email", ""), o.get("miasto", "")) if x)),
-                       st(fontName=FR, fontSize=8.8, leading=13, textColor=soft)),
-             Spacer(1, 7), HRFlowable(width="100%", thickness=0.7, color=ink), Spacer(1, 20),
-             Paragraph(escape(f"{(o.get('miasto') or 'Kraków').split(',')[0].split()[-1]}, {polish_date(today)}"),
-                       st(fontName=FR, fontSize=9.5, leading=13, textColor=soft, alignment=TA_RIGHT)), Spacer(1, 16)]
-    if firma:
-        story += [Paragraph(f"<b>{escape(firma)}</b>", st(fontName=FB, fontSize=10.5, leading=14, textColor=ink)), Spacer(1, 3)]
+    W_ = A4[0] - 124 - 12                                                # szerokość ramki (bez wewnętrznych marginesów)
+    city = (o.get("miasto") or "Kraków").split(",")[0].strip() or "Kraków"
+    me = [f'<font name="{FB}">{escape(R.full_name(f))}</font>', escape(city)]
+    me += [escape(x) for x in (o.get("email", ""), R.format_phone(o.get("telefon", ""))) if x]
+    left = Paragraph("<br/>".join(me), st(fontName=FR, fontSize=10, leading=14.5, textColor=ink))
+    right = Paragraph(escape(f"{city}, {polish_date(today)}"), st(fontName=FR, fontSize=10, leading=14.5, textColor=ink, alignment=TA_RIGHT))
+    head = Table([[left, right]], colWidths=[W_ * 0.6, W_ * 0.4])
+    head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    story = [head, Spacer(1, 30)]
+    to = [f'<font name="{FB}">{escape(firma)}</font>'] if firma else []
+    to += [escape(x.strip()) for x in re.split(r",\s*(?=\d{2}-\d{3}|\D)", adres_firmy or "") if x.strip()][:3]
+    if to:
+        box = Paragraph("<br/>".join(to), st(fontName=FR, fontSize=10, leading=14.5, textColor=ink))
+        t = Table([["", box]], colWidths=[W_ * 0.55, W_ * 0.45])
+        t.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+        story += [t, Spacer(1, 28)]
     if stanowisko:
-        story += [Paragraph(escape(f"Dotyczy: rekrutacji na stanowisko {stanowisko}"), st(fontName=FR, fontSize=9.5, leading=13, textColor=soft))]
-    story.append(Spacer(1, 22))
-    body = st(fontName=FR, fontSize=10.3, leading=15.6, textColor=ink, spaceAfter=10)
-    for para in re.split(r"\n\s*\n", text.strip()):
-        story.append(Paragraph(escape(para.strip()).replace("\n", "<br/>"), body))
+        story += [Paragraph(f'<font name="{FB}">Dotyczy:</font> {escape("aplikacji na stanowisko " + stanowisko)}',
+                            st(fontName=FR, fontSize=10, leading=14, textColor=ink)), Spacer(1, 16)]
+    body_text = text.strip()
+    closing = ""
+    m = re.search(r"(?is)\n\s*(z poważaniem|z wyrazami szacunku)\s*,?\s*\n.*$", body_text)
+    if m:
+        closing, body_text = m.group(1).strip().capitalize(), body_text[:m.start()].strip()
+    body = st(fontName=FR, fontSize=10.5, leading=16, textColor=ink, spaceAfter=10, alignment=TA_LEFT)
+    paras = [x.strip() for x in re.split(r"\n\s*\n", body_text) if x.strip()]
+    for i, para in enumerate(paras):
+        style = st(fontName=FR, fontSize=10.5, leading=16, textColor=ink, spaceAfter=12, alignment=TA_LEFT) if i == 0 and len(para) < 40 else body
+        story.append(Paragraph(escape(para).replace("\n", "<br/>"), style))
+    sign = [Spacer(1, 14), Paragraph(escape(closing or "Z poważaniem"), st(fontName=FR, fontSize=10.5, leading=15, textColor=ink, alignment=TA_RIGHT))]
+    if podpis and Path(podpis).exists():
+        with contextlib.suppress(Exception):
+            from reportlab.lib.utils import ImageReader
+            iw, ih = ImageReader(str(podpis)).getSize()
+            h = 38.0
+            img = Image(str(podpis), width=h * iw / ih, height=h)
+            img.hAlign = "RIGHT"
+            sign += [Spacer(1, 4), img]
+    sign += [Spacer(1, 2 if podpis and Path(podpis).exists() else 22),
+             Paragraph(escape(R.full_name(f)), st(fontName=FR, fontSize=10.5, leading=15, textColor=ink, alignment=TA_RIGHT))]
+    story.append(KeepTogether(sign))
     note = rodo or f.get("rodo") or R.RODO
 
     def footer(canvas_, doc):
-        p = Paragraph(escape(note), st(fontName=FI, fontSize=6.4, leading=8.2, textColor=soft))
-        _, h = p.wrap(A4[0] - 124, 200)
-        p.drawOn(canvas_, 62, 26)
+        p = Paragraph(f'<font name="{FB}">Klauzula RODO</font><br/>' + escape(note), st(fontName=FI, fontSize=6.6, leading=8.4, textColor=soft))
+        _, h = p.wrap(W_, 200)
+        p.drawOn(canvas_, 68, 30)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    doc = SimpleDocTemplate(str(out_path), pagesize=A4, leftMargin=62, rightMargin=62, topMargin=56, bottomMargin=78,
-                            title=f"List przewodni — {R.full_name(f)}", author=R.full_name(f))
+    doc = SimpleDocTemplate(str(out_path), pagesize=A4, leftMargin=62, rightMargin=62, topMargin=56, bottomMargin=100,
+                            title=f"List motywacyjny — {R.full_name(f)}", author=R.full_name(f))
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return out_path
+
+
+def match_report(ctx, f, app, wymagania):
+    """Co z wymagań oferty kandydatka ma, a czego nie — na podstawie faktów. [{wymaganie, ocena: mam|czesciowo|brak, dlaczego}]"""
+    reqs = [str(x).strip() for x in (wymagania or []) if str(x).strip()][:14]
+    if not reqs:
+        return []
+    listing = "\n".join(f"{i + 1}. {r}" for i, r in enumerate(reqs))
+    prompt = f"""Porównaj WYMAGANIA z oferty pracy z FAKTAMI o kandydatce. Bądź uczciwa i konkretna: „mam” tylko wtedy,
+gdy FAKTY wprost to potwierdzają; „czesciowo”, gdy jest coś pokrewnego; „brak”, gdy FAKTY nic o tym nie mówią.
+
+WYMAGANIA:
+{listing}
+
+FAKTY:
+{R.facts_brief(f, ids=False)}
+
+Zwróć JSON {{"dopasowanie": [{{"nr": 1, "ocena": "mam|czesciowo|brak", "dlaczego": "krótko, z odwołaniem do konkretnego faktu albo czego brakuje"}}]}}"""
+    out = None
+    with contextlib.suppress(Exception):
+        out = ctx.ask(prompt, as_json=True, max_tokens=900, temperature=0.1)
+    rows = (out or {}).get("dopasowanie") if isinstance(out, dict) else None
+    res = []
+    for r in rows if isinstance(rows, list) else []:
+        with contextlib.suppress(Exception):
+            n = int(r.get("nr")) - 1
+            grade = R.plain(str(r.get("ocena") or ""))
+            grade = "mam" if grade.startswith("mam") else "czesciowo" if grade.startswith("czesc") else "brak" if grade.startswith("brak") else ""
+            if 0 <= n < len(reqs) and grade and all(x["wymaganie"] != reqs[n] for x in res):
+                res.append({"wymaganie": reqs[n], "ocena": grade, "dlaczego": re.sub(r"\s+", " ", str(r.get("dlaczego") or "")).strip()[:240]})
+    return res
 
 
 # ================================================================ list i mail (model) + wersja awaryjna bez modelu
@@ -365,45 +538,215 @@ def subject(f, app):
 
 def signature(f):
     o = f["osoba"]
-    return "Z poważaniem\n" + R.full_name(f) + (f"\ntel. {o['telefon']}" if o.get("telefon") else "")
+    return "Z poważaniem\n" + R.full_name(f) + (f"\ntel. {R.format_phone(o['telefon'])}" if o.get("telefon") else "")
 
 
-def fallback_texts(f, app):
-    prof = " ".join(p["tekst"] for p in f["profil"][:3])
-    where = f" w firmie {app['firma']}" if app["firma"] else ""
-    if app["zrodlo"] == "spontaniczna" or not app["stanowisko"]:
-        opening = (f"piszę z pytaniem, czy{where} znalazłoby się miejsce dla osoby do wsparcia administracyjnego "
-                   "i organizacyjnego. Nie odpowiadam na konkretne ogłoszenie, dlatego krótko się przedstawię.")
-        mail_open = "przesyłam swoje CV i list przewodni z pytaniem o możliwość współpracy."
+# ---------------------------------------------------------------- model do pisania (polski) i kontrola języka
+
+_WRITER = {"at": 0.0, "name": None}
+
+
+def writer_model(ctx):
+    """Model do listów: ustawienie „model_pisania” albo (auto) zainstalowany Bielik — polski model, pisze dużo lepiej po polsku."""
+    import time
+    want = str(ctx.settings().get("model_pisania") or "auto").strip()
+    if want.lower() in ("", "glowny", "główny", "sebastian"):
+        return None
+    if time.time() - _WRITER["at"] < 600:
+        return _WRITER["name"]
+    name = None
+    with contextlib.suppress(Exception):
+        import requests
+        tags = [m["name"] for m in requests.get("http://127.0.0.1:11434/api/tags", timeout=3).json().get("models", [])]
+        if want.lower() == "auto":
+            name = next((t for t in tags if "bielik" in t.lower()), None)
+        else:
+            name = want if want in tags or any(t.startswith(want + ":") for t in tags) else None
+    _WRITER.update(at=time.time(), name=name)
+    return name
+
+
+def write(ctx, prompt, max_tokens=1100, temperature=0.4):
+    """Zapytanie o tekst (JSON) do modelu piszącego; gdy go nie ma albo nie odpowie — główny model Sebastiana."""
+    m = writer_model(ctx)
+    if m:
+        with contextlib.suppress(Exception):
+            import requests
+            r = requests.post("http://127.0.0.1:11434/api/chat", timeout=600, json={
+                "model": m, "stream": False, "keep_alive": "20m", "format": "json", "messages": [{"role": "user", "content": prompt}],
+                "options": {"temperature": temperature, "num_ctx": 12288, "num_predict": max_tokens, "repeat_penalty": 1.1}})
+            if r.ok:
+                raw = r.json()["message"]["content"]
+                with contextlib.suppress(ValueError):
+                    return json.loads(raw)
+                hit = re.search(r"\{.*\}", raw, re.S)
+                if hit:
+                    with contextlib.suppress(ValueError):
+                        return json.loads(hit.group(0))
+    return ctx.ask(prompt, as_json=True, max_tokens=max_tokens, temperature=temperature)
+
+
+NOT_VERBS = {"działem", "udziałem", "oddziałem", "wydziałem", "podziałem", "przydziałem", "materiałem", "kanałem", "zapałem",
+             "ciałem", "personelem", "aniołem", "kościołem", "stołem", "popiołem", "dołem", "orłem", "węgłem", "szczegółem",
+             "zespołem", "przemysłem", "pomysłem", "zmysłem", "upadłem", "sensem", "celem", "modelem", "hotelem", "szpitalem",
+             "portalem", "kapitałem", "potencjałem", "rozdziałem", "sygnałem", "arsenałem", "tunelem", "panelem", "kanałem",
+             "przedziałem", "ideałem", "finałem", "lokalem", "regałem", "posiłkiem", "plenerem", "kołem", "mułem", "postulatem"}
+MASC_ADJ = r"(?:gotowy|zainteresowany|zmotywowany|przekonany|pewny|zadowolony|zdeterminowany|otwarty|przygotowany|chętny|świadomy|" \
+           r"doświadczony|zaangażowany|wdzięczny|skłonny|zdolny|dyspozycyjny|samodzielny|odpowiedzialny|komunikatywny|sumienny)"
+OVERCLAIM = [r"bez (zbędnej |dodatkowej |długiej )?nauki", r"bez (żadnego )?wdrożeni", r"od pierwszego dnia", r"eksper(t|tka) w", r"perfekcyjn",
+             r"bezbłędn", r"potrafi(łabym|łbym) szybko przejść", r"list polecaj"]
+
+
+def language_issues(text):
+    """Błędy, których list Agi mieć nie może: formy męskie, przesadne obietnice, powtórzenia, niedokończone zdania."""
+    out = []
+    low = text.lower()
+    for w in dict.fromkeys(re.findall(r"\b[a-ząćęłńóśźż]{2,}(?:łbym|łem)\b", low)):
+        if w not in NOT_VERBS:
+            out.append(f"Forma męska „{w}” — list pisze kobieta.")
+    for m in re.finditer(rf"\b(jestem|będę|byłbym|czuję się|pozostaję|zostałem)\s+(bardzo\s+)?{MASC_ADJ}\b", low):
+        out.append(f"Forma męska „{m.group(0)}”.")
+    for pat in OVERCLAIM:
+        m = re.search(pat, low)
+        if m:
+            out.append(f"Przesadne albo niezgodne sformułowanie „{m.group(0)}”.")
+    sentences = [x.strip().lower() for x in re.split(r"(?<=[.!?])\s+", text) if len(x.strip()) > 25]
+    if len(sentences) != len(set(sentences)):
+        out.append("To samo zdanie powtarza się dwa razy.")
+    if re.search(r"\b(dostaję się|dostaje się|aplikacja na stanowisko\s*\.)", low):
+        out.append("Zdanie bez sensu („dostaję się…”).")
+    if re.search(r"[a-ząćęłńóśźż]{3,}\s*$", text.strip()) and not text.strip().endswith((".", "!", "?")):
+        out.append("Tekst kończy się w pół zdania.")
+    return list(dict.fromkeys(out))
+
+
+def proofread(ctx, f, app, text):
+    """Korekta językowa przez model: tylko poprawki, bez nowych treści. Zwraca tekst poprawiony albo oryginał."""
+    prompt = f"""Jesteś korektorką tekstów po polsku. Autorką tekstu jest kobieta (pisze o sobie w formach żeńskich).
+Popraw WYŁĄCZNIE: błędy gramatyczne i odmianę, interpunkcję, literówki, niezręczne powtórzenia i formy męskie (na żeńskie).
+Nie dodawaj żadnych nowych informacji, liczb ani obietnic. Nie usuwaj faktów. Zachowaj akapity (pusta linia między nimi).
+
+TEKST:
+{text}
+
+Zwróć JSON {{"tekst": "poprawiony tekst"}}"""
+    with contextlib.suppress(Exception):
+        out = write(ctx, prompt, max_tokens=1200, temperature=0.0)
+        fixed = str((out or {}).get("tekst") or "").strip()
+        if fixed and 0.8 <= len(fixed) / max(1, len(text)) <= 1.25 and len(rule_check(f, app, fixed)) <= len(rule_check(f, app, text)):
+            return fixed
+    return text
+
+
+def ranked_jobs(f, sel, app=None):
+    """Stanowiska od najważniejszego dla oferty: kolejność od modelu, a bez niej — wspólne słowa z ogłoszeniem."""
+    sel = clean_selection(f, sel)
+    order = sel.get("ranking") or sel["kolejnosc"]
+    if sel.get("z_modelu") or not app:
+        return order
+    words = {w for w in re.findall(r"[a-z]{5,}", R.plain(f"{app.get('stanowisko', '')} {app.get('tresc', '')}"))}
+    by_id = {j["id"]: j for j in f["doswiadczenie"]}
+
+    def score(jid):
+        j = by_id[jid]
+        text = R.plain(" ".join([j["stanowisko"]] + [p["tekst"] for p in j["punkty"]]))
+        return sum(1 for w in set(re.findall(r"[a-z]{5,}", text)) if any(w[:6] == x[:6] for x in words))
+    return sorted(order, key=lambda x: -score(x))
+
+
+def best_job_points(f, sel, n=2, app=None):
+    """Najlepiej pasujące stanowisko i jego najważniejsze punkty (do maila)."""
+    sel = clean_selection(f, sel)
+    by_id = {j["id"]: j for j in f["doswiadczenie"]}
+    for jid in ranked_jobs(f, sel, app):
+        j = by_id[jid]
+        _, pts = cv_content(f, dict(sel, kolejnosc=[jid] + [x for x in sel["kolejnosc"] if x != jid]))
+        if pts.get(jid):
+            return j, pts[jid][:n]
+    return None, []
+
+
+def enumerate_pl(items):
+    """„A oraz B” albo „A; B; C” (gdy punkty same mają przecinki, średnik czyta się czytelniej)."""
+    items = [x for x in items if x]
+    if len(items) <= 1:
+        return "".join(items)
+    if len(items) == 2:
+        return f"{items[0]} oraz {items[1]}"
+    return "; ".join(items[:-1]) + "; " + items[-1]
+
+
+def mail_text(f, app, sel=None):
+    """Mail z aplikacją: krótki, zawsze poprawny — składany z faktów, bez modelu."""
+    spont = app.get("zrodlo") == "spontaniczna" or not app.get("stanowisko")
+    job = app.get("stanowisko") or ""
+    if spont:
+        first = "zwracam się z pytaniem o możliwość współpracy. W załączniku przesyłam CV oraz list motywacyjny."
+    elif app.get("z_sieci"):
+        first = (f"w nawiązaniu do ogłoszenia Państwa firmy na stanowisko {job}" + (f" ({app['url']})" if app.get("url") else "")
+                 + " przesyłam w załączniku CV oraz list motywacyjny.")
     else:
-        opening = f"z zainteresowaniem przeczytałam ogłoszenie na stanowisko {app['stanowisko']}{where} i chciałabym zgłosić swoją kandydaturę."
-        mail_open = (f"w nawiązaniu do ogłoszenia Państwa firmy na stanowisko {app['stanowisko']}"
-                     + (f" ({app['url']})" if app.get("url") else "") + " przesyłam swoje CV i list przewodni.") if app.get("z_sieci") else \
-                    f"w odpowiedzi na ogłoszenie na stanowisko {app['stanowisko']} przesyłam swoje CV i list przewodni."
+        first = f"w odpowiedzi na ogłoszenie na stanowisko {job} przesyłam w załączniku CV oraz list motywacyjny."
+    j, pts = best_job_points(f, sel, app=app)
+    why = ""
+    if j and pts:
+        place = f" ({j['firma']})" if j.get("firma") else ""
+        prose = [re.sub(r"\s*;\s*", ", ", p).rstrip(". ") for p in pts]
+        why = (f"Najbliższe tej roli jest moje doświadczenie na stanowisku {j['stanowisko']}{place}. "
+               f"Do moich zadań należały tam m.in. {enumerate_pl(prose)}.")
+    avail = (f["warunki"].get("dostepnosc") or "").strip().rstrip(".")
+    start = "" if not avail else (f"Pracę mogę rozpocząć {avail}." if avail.lower().startswith(("od ", "po ", "w ", "z ", "za ", "natychmiast", "od razu"))
+                                  else f"Dostępność: {avail}.")
+    body = "\n\n".join(x for x in (first, why, start, "Będę wdzięczna za informację zwrotną i chętnie odpowiem na pytania podczas rozmowy.") if x)
+    return "Dzień dobry,\n\n" + body + "\n\n" + signature(f)
+
+
+def fallback_texts(f, app, sel=None):
+    """List bez modelu: z punktów najlepiej pasujących stanowisk (konkrety z bazy faktów)."""
+    spont = app["zrodlo"] == "spontaniczna" or not app["stanowisko"]
+    where = f" w firmie {app['firma']}" if app["firma"] else ""
+    if spont:
+        opening = (f"zwracam się z pytaniem, czy{where} znalazłoby się miejsce dla osoby do wsparcia administracyjnego "
+                   "i organizacyjnego. Nie odpowiadam na konkretne ogłoszenie, dlatego krótko się przedstawię.")
+    else:
+        opening = f"z zainteresowaniem przeczytałam Państwa ogłoszenie na stanowisko {app['stanowisko']} i chciałabym zgłosić swoją kandydaturę."
+    sel = clean_selection(f, sel)
+    by_id = {j["id"]: j for j in f["doswiadczenie"]}
+    _, pts = cv_content(f, sel)
+    paras = []
+    for jid in ranked_jobs(f, sel, app)[:2]:
+        if jid in pts and pts[jid]:
+            j = by_id[jid]
+            paras.append(f"Na stanowisku {j['stanowisko']}" + (f" ({j['firma']})" if j.get("firma") else "")
+                         + " do moich zadań należały m.in. " + enumerate_pl([re.sub(r"\s*;\s*", ", ", p).rstrip(". ") for p in pts[jid]]) + ".")
     avail = f["warunki"].get("dostepnosc", "")
-    letter = (f"Szanowni Państwo,\n\n{opening}\n\n{prof}\n\n"
-              + (f"Pracę mogę rozpocząć w terminie: {avail}. " if avail else "")
+    letter = (f"Szanowni Państwo,\n\n{opening}\n\n" + "\n\n".join(paras or [" ".join(p["tekst"] for p in f["profil"][:3])])
+              + "\n\n" + (f"Pracę mogę rozpocząć {avail}. " if avail.lower().startswith(("od ", "po ", "w ", "z ", "za ")) else (f"Dostępność: {avail}. " if avail else ""))
               + "Chętnie opowiem więcej podczas rozmowy.\n\n" + signature(f))
-    mail = (f"Dzień dobry,\n\n{mail_open} Będę wdzięczna za informację zwrotną i chętnie odpowiem na dodatkowe pytania.\n\n"
-            + signature(f))
-    return letter, mail
+    return letter, mail_text(f, app, sel)
 
 
 def tidy(text, f):
     text = re.sub(r"[ \t]*[—–][ \t]*", ", ", str(text or "")).replace(" ,", ",")
     text = re.sub(r"\n{3,}", "\n\n", text.replace("\r", "")).strip()
     text = re.sub(r"(?is)\n*(z poważaniem|z wyrazami szacunku|pozdrawiam serdecznie|pozdrawiam)[\s,]*.*$", "", text).strip()
+    text = re.sub(r"(?i)list(u|em|owi)?\s+(polecając|przewodni)\w*", lambda m: "list" + (m.group(1) or "") + " motywacyjn" +
+                  {"": "y", "u": "ego", "em": "ym", "owi": "emu"}[(m.group(1) or "").lower()], text)
+    if not re.match(r"(?i)szanown", text):
+        text = "Szanowni Państwo,\n\n" + text
     return text + "\n\n" + signature(f)
 
 
-def compose(ctx, f, app):
-    """(list, mail) — pisane przez model wyłącznie z faktów; gdy model nie odpowie, wersja z szablonu."""
+def compose(ctx, f, app, sel=None):
+    """(list, mail, czy_model) — list pisany przez model wyłącznie z faktów, sprawdzony i poprawiony językowo; mail z szablonu.
+    Gdy list nie przejdzie kontroli po dwóch próbach — wersja z faktów bez modelu."""
     spont = app["zrodlo"] == "spontaniczna" or not app["stanowisko"]
-    prompt = f"""Piszesz w imieniu kandydatki list przewodni i krótki mail do pracodawcy. Po polsku, w formach żeńskich.
+    base = f"""Piszesz w imieniu kandydatki LIST MOTYWACYJNY do pracodawcy. Po polsku, poprawną polszczyzną, w formach żeńskich
+(kandydatka pisze o sobie: „pracowałam”, „przygotowywałam”, „jestem gotowa”).
 
 ŻELAZNA ZASADA: o kandydatce wolno napisać WYŁĄCZNIE to, co jest w FAKTACH. Żadnych nowych umiejętności, narzędzi,
-lat doświadczenia, liczb, certyfikatów ani stanowisk. Jeśli oferta wymaga czegoś, czego nie ma w FAKTACH, pomiń to.
-Nie podawaj oczekiwań finansowych.
+lat doświadczenia, liczb, certyfikatów ani stanowisk. Nie obiecuj, że nie potrzebuje wdrożenia ani nauki. Jeśli oferta
+wymaga czegoś, czego nie ma w FAKTACH, pomiń to. Nie podawaj oczekiwań finansowych.
 
 STYL: naturalnie, ciepło i profesjonalnie; pewnie, ale bez zadęcia; po partnersku, nie służalczo. Bez rekrutacyjnych
 frazesów („dynamiczny zespół”, „z pasją”, „wychodząc naprzeciw”), bez myślników i wypunktowań, zdania różnej długości.
@@ -411,7 +754,6 @@ Doświadczenie sprzedażowe i w obsłudze klienta pokazuj jako atut, gdy oferta 
 jako źródło umiejętności organizacyjnych i komunikacyjnych.
 
 {'To aplikacja SPONTANICZNA: firma nie ogłosiła naboru. Zapytaj uprzejmie o możliwość współpracy przy administracji, dokumentacji lub koordynacji.' if spont else 'To odpowiedź na ogłoszenie.'}
-{('Adres e-mail nie pochodzi z ogłoszenia, tylko ze strony firmy. Mail MUSI zaczynać się od zdania: „Dzień dobry, w nawiązaniu do ogłoszenia Państwa firmy na stanowisko ' + (app['stanowisko'] or '') + ((' (' + app['url'] + ')') if app.get('url') else '') + ' przesyłam swoje CV i list przewodni.”') if app.get('z_sieci') else ''}
 FIRMA: {app['firma'] or '(nieznana — pisz bez nazwy)'}
 STANOWISKO: {app['stanowisko'] or '(brak)'}
 OGŁOSZENIE / OPIS FIRMY:
@@ -420,20 +762,34 @@ OGŁOSZENIE / OPIS FIRMY:
 FAKTY O KANDYDATCE:
 {R.facts_brief(f, ids=False)}
 
-Zwróć JSON {{"list": "...", "mail": "..."}}:
-- "list": 170–240 słów, zaczyna się od „Szanowni Państwo,”; 3–4 akapity oddzielone pustą linią; nawiązuje do 2–3 konkretnych
-  wymagań z ogłoszenia, na które FAKTY dają pokrycie; kończy się zdaniem o gotowości do rozmowy. BEZ podpisu.
-- "mail": 50–90 słów, zaczyna się od „Dzień dobry,”; mówi, że w załączniku jest CV i list przewodni; jedno zdanie, dlaczego
-  ta rola; prośba o informację zwrotną. BEZ podpisu."""
-    fb_letter, fb_mail = fallback_texts(f, app)
-    try:
-        out = ctx.ask(prompt, as_json=True, max_tokens=1100, temperature=0.5)
-    except Exception as e:
-        ctx.log.warning(f"Rekrutacja: list bez modelu ({type(e).__name__})")
-        out = None
-    if not isinstance(out, dict) or len(str(out.get("list", "")).split()) < 60 or len(str(out.get("mail", "")).split()) < 15:
-        return fb_letter, fb_mail, False
-    return tidy(out["list"], f), tidy(out["mail"], f), True
+Zwróć JSON {{"list": "..."}}:
+- "list": 170–240 słów, BEZ nagłówka „Szanowni Państwo”, BEZ podpisu i BEZ „Z poważaniem” (dodam je sama); 3–4 akapity
+  oddzielone pustą linią. Pierwszy akapit: o jakie stanowisko chodzi i dlaczego ta rola. Środkowe: 2–3 konkretne wymagania
+  z ogłoszenia, na które FAKTY dają pokrycie — każde poparte tym, co kandydatka faktycznie robiła (czynność, miejsce, efekt).
+  Jeśli FAKTY podają liczby (np. „ok. 80 historii choroby miesięcznie”, liczba wydarzeń, osób, dokumentów), użyj 2–3 najlepiej
+  pasujących do oferty, dokładnie w tym brzmieniu. Liczb spoza FAKTÓW nie wolno podawać ani szacować.
+  Ostatni akapit: gotowość do rozmowy."""
+    fb_letter, fb_mail = fallback_texts(f, app, sel)
+    mail = mail_text(f, app, sel)
+    feedback = ""
+    for attempt in range(2):
+        try:
+            out = write(ctx, base + feedback, max_tokens=1100, temperature=0.5 if attempt == 0 else 0.3)
+        except Exception as e:
+            ctx.log.warning(f"Rekrutacja: list bez modelu ({type(e).__name__})")
+            out = None
+        body = str((out or {}).get("list") or "").strip() if isinstance(out, dict) else ""
+        if len(body.split()) < 60:
+            feedback = "\n\nPOPRZEDNIA WERSJA BYŁA ZA KRÓTKA. Napisz pełny list (170–240 słów)."
+            continue
+        letter = tidy(body, f)
+        if language_issues(letter):
+            letter = tidy(proofread(ctx, f, app, letter.rsplit("\n\nZ poważaniem", 1)[0]), f)
+        problems = language_issues(letter) + rule_check(f, app, letter)
+        if not problems:
+            return letter, mail, True
+        feedback = "\n\nPOPRAW TE BŁĘDY Z POPRZEDNIEJ WERSJI (nie powtarzaj ich):\n- " + "\n- ".join(problems[:6])
+    return fb_letter, mail, False
 
 
 # ================================================================ kontroler prawdy

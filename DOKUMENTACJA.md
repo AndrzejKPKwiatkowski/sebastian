@@ -967,7 +967,7 @@ Statusy: `nowa → przygotowywanie → do_zatwierdzenia | do_sprawdzenia | do_uz
 CV składa się wyłącznie z faktów z bazy (model zwraca numery, `clean_selection()` odrzuca nieistniejące), list i mail przechodzą
 `rule_check()` i `model_check()`; autopilot zatwierdza tylko `do_zatwierdzenia` (bez uwag) z oceną od progu.
 
-Pełny opis, ustawienia, instalacja i problemy: `docs/aktualizacje/AKTUALIZACJA_2_8.md` i `AKTUALIZACJA_2_8_1.md` (kontakty.py — adres firmy w sieci, wiedza.py — import wiedzy z ChatGPT).
+Pełny opis, ustawienia, instalacja i problemy: `docs/aktualizacje/AKTUALIZACJA_2_8.md` `AKTUALIZACJA_2_8_1.md`, `AKTUALIZACJA_2_8_2.md` i `AKTUALIZACJA_2_8_3.md` (edycja CV; list motywacyjny; kontakty.py — adres firmy w sieci, wiedza.py — import wiedzy z ChatGPT).
 
 ---
 
@@ -1649,6 +1649,8 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2, 2.3):
 | 2.7 | 9.11.2026 | **Dodatki** (gniazdo `dodatki_host.py`, układ jak w Sebastianie 3) i pierwszy dodatek **Przypominacz**: głosówka „na później” → potwierdzenie → kontekst z poczty i WhatsAppa → wieczorem po ostatnim spotkaniu wiadomość i głos (albo połączenie Twilio) → drugi raz po godzinie → minka; odpowiedzi regułami i modelem; polecenia `dodatki`, `dodatek` |
 | 2.8 | 11.11.2026 | Dodatek Rekrutacja: panel Agi przez Tailscale z powitaniem, baza faktów, CV i list z kontrolą prawdy, źródła ofert, wysyłka (Gmail, Recruitee), odpowiedzi, podziękowania, przypomnienia, WhatsApp, raport wieczorny |
 | 2.8.1 | 11.11.2026 | Rekrutacja: prawdziwa klauzula RODO albo domyślna, CV chronologiczne i dopasowane do oferty (wypełniona strona), sprzedaż i obsługa klienta dozwolone, filtry (social media, prowizja, niedziele i wieczory), szukanie adresu firmy w sieci, Jooble i Adzuna, import wiedzy z ChatGPT |
+| 2.8.2 | 12.11.2026 | Rekrutacja: 3 punkty przy stanowisku dobierane pod ofertę, profil zawodowy pisany pod ofertę (tylko z faktów), kursy od najnowszego, konkretne liczby w listach, edycja CV w panelu |
+| 2.8.3 | 12.11.2026 | Rekrutacja: list motywacyjny jako oficjalne pismo, mail z faktów, kontrola języka i korekta (Bielik), RODO ze stanowiskiem i bez powtórzeń, karta oferty (wynagrodzenie, dojazd, co pasuje i czego brakuje), pobieranie CV i listu |
 | 2.5.2 | 20.10.2026 | Poprawka nauki z rozmów WhatsApp: w procesie nauki moduł WhatsAppa nie był podłączony (`AttributeError: 'NoneType' object has no attribute 'TZ'` co 2 minuty i zablokowana kolejka). Dodatkowo: pozycja, która 3 razy z rzędu kończy się błędem, dostaje status „błąd” i nauka idzie dalej (`learn-retry` przywraca) |
 | 2.5.1 | 20.10.2026 | Diagnostyka „żona pisze, a Sebastian milczy”: odrzucone numery w logu i w `wa-status` (nazwa profilu, zamaskowany numer, bez treści, raz na godzinę), ostrzeżenie, gdy Sebastian jest na numerze właściciela, a lista zawiera inne osoby; w `wa-status` poziom dostępu i czy osoba została przywitana |
 | 2.5 | 20.10.2026 | **WhatsApp — pamięć rozmów i dostęp pełny**: rozmowy przechowywane na stałe, czytanie załączników (PDF, Office, OCR zdjęć — także wysłanych przez Ciebie), zapis historii przesłanej przy połączeniu, akta osób (`kto to Jan`, `wa-watch ludzie`, panel), nauka z rozmów (zakres `whatsapp`, bez Open WebUI); lista dozwolonych numerów z poziomem dostępu `prywatny`/`pelny` (`wa-user dodaj --dostep pelny`) |

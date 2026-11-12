@@ -25,6 +25,22 @@ def app_dir(ctx, aid):
     return p
 
 
+def analysis(a):
+    with contextlib.suppress(Exception):
+        v = json.loads(a.get("analiza") or "{}")
+        if isinstance(v, dict):
+            return v
+    return {}
+
+
+def signature_path(ctx):
+    for name in ("podpis.png", "podpis.jpg"):
+        p = ctx.folder() / name
+        if p.exists():
+            return p
+    return None
+
+
 def photo_path(ctx, f):
     p = ctx.folder() / (f["osoba"].get("zdjecie") or "zdjecie.jpg")
     return p if p.exists() else None
@@ -37,11 +53,13 @@ def render_files(ctx, f, a, letter, selection, rodo=""):
         old.unlink()
     base = f"{R.slug(f['osoba'].get('imie', ''), 'CV')}_{R.slug(f['osoba'].get('nazwisko', ''), 'x')}"
     firm = R.slug(a["firma"], "aplikacja")
-    cv, li = f"{base}_CV_{firm}.pdf", f"{base}_List_{firm}.pdf"
-    rodo = R.consent_clause(a.get("firma", ""), rodo)                   # zgoda pracodawcy tylko, jeśli to naprawdę zgoda
+    cv, li = f"{base}_CV_{firm}.pdf", f"{base}_List_motywacyjny_{firm}.pdf"
+    job = "" if a["zrodlo"] == "spontaniczna" else (a.get("stanowisko") or "")
+    rodo = R.consent_clause(a.get("firma", ""), rodo, job)              # zgoda pracodawcy (z uzupełnionym stanowiskiem) albo domyślna
+    info = analysis(a)
     D.render_cv(f, selection, folder / cv, photo=photo_path(ctx, f), rodo=rodo)
-    D.render_letter(f, letter, folder / li, firma=a["firma"], stanowisko="" if a["zrodlo"] == "spontaniczna" else a["stanowisko"],
-                    today=ctx.now().date(), rodo=rodo)
+    D.render_letter(f, letter, folder / li, firma=a["firma"], stanowisko=job, today=ctx.now().date(), rodo=rodo,
+                    adres_firmy=info.get("adres", ""), podpis=signature_path(ctx))
     return cv, li
 
 
@@ -70,6 +88,7 @@ def prepare(ctx, aid):
                 a[k] = a[k].strip() or info[k]                          # to, co wpisała Aga, ma pierwszeństwo
             a["email"] = a["email"].strip() or info["email"] or (found_mails[0] if found_mails and a["zrodlo"] != "auto" else "")
             a["ocena"], a["ocena_opis"], a["rodo"] = info["ocena"], info["uzasadnienie"], info["rodo"]
+            a["analiza"] = json.dumps({k: info.get(k) for k in ("adres", "wynagrodzenie", "wymagania", "obowiazki", "oferujemy")}, ensure_ascii=False)
             warn = info["ostrzezenia"]
             st0 = ctx.settings()
             if info.get("social_media") and not _ok_social_f(f):
@@ -119,10 +138,14 @@ def prepare(ctx, aid):
                        "domysl": "na stronie, którą uznałem za stronę firmy"}.get(web["sposob"], "na stronie firmy")
                 notes.append(f"Ogłoszenie nie podaje adresu. Adres {web['email']} znalazłem {how}: {web['strona']} — sprawdź, czy to ta firma.")
         selection = D.select_for_offer(ctx, f, a) if a["tresc"].strip() else D.default_selection(f)
-        letter, mail, by_model = D.compose(ctx, f, a)
-        notes += D.check(ctx, f, a, letter, mail, by_model=by_model)
+        profile = D.tailored_profile(ctx, f, a)
+        if profile:
+            selection.update(profil_tekst=profile, profil_zrodlo="model", profil_model=profile)
+        a["analiza"] = json.dumps(dict(analysis(a), dopasowanie=D.match_report(ctx, f, a, analysis(a).get("wymagania"))), ensure_ascii=False)
+        letter, mail, by_model = D.compose(ctx, f, a, selection)
+        notes += D.check(ctx, f, a, letter + ("\n\nOpis w CV: " + profile if profile else ""), mail, by_model=by_model)
         if not by_model:
-            notes.append("Model nie odpowiedział, więc list i mail są z prostego szablonu. Warto je przeczytać i dopisać zdanie od siebie.")
+            notes.append("List ułożyłem z Twoich faktów bez modelu (model nie napisał wersji bez błędów). Jest poprawny, ale prostszy — możesz dopisać zdanie od siebie.")
         cv, li = render_files(ctx, f, a, letter, selection, a.get("rodo") or "")
         ch = F.channel(a)
         suspect = any(n.startswith(("Liczba", "Narzędzie", "Język", "Określenie", "Do sprawdzenia", "W tekście")) for n in notes)
@@ -145,7 +168,7 @@ def prepare(ctx, aid):
                          tresc=a["tresc"], klucz=a["klucz"], ocena=a.get("ocena"), ocena_opis=a.get("ocena_opis") or "",
                          rodo=a.get("rodo") or "", ostrzezenia=json.dumps(warn, ensure_ascii=False),
                          uwagi=json.dumps(notes, ensure_ascii=False), wybor=json.dumps(selection), temat=D.subject(f, a),
-                         mail=mail, list=letter, cv_plik=cv, list_plik=li, kanal=json.dumps(ch))
+                         mail=mail, list=letter, cv_plik=cv, list_plik=li, kanal=json.dumps(ch), analiza=a.get("analiza") or "")
         return status
     except Exception as e:
         ctx.log.exception("Rekrutacja: przygotowanie aplikacji %s", aid)
@@ -221,11 +244,16 @@ def send_one(ctx, send=None):
             return a["id"] if ok else None
         problem = ""
         pwd = R.secret(ctx, "aga")
-        if not me or not pwd:
-            problem = "Skrzynka Agi nie jest podłączona (Ustawienia → Skrzynki)."
-        elif not all(p.exists() for p in files):
+        if not me or not pwd:                                         # aplikacja wraca do kolejki, Aga widzi komunikat w panelu
+            ctx.log.warning("Rekrutacja: wysyłka wstrzymana — brak hasła skrzynki Agi")
+            with R.db(ctx) as c:
+                R.set_status(c, ctx, a["id"], "zatwierdzona")
+                R.meta_set(c, "problem_poczty", "Skrzynka Agi nie jest podłączona — podłącz ją w Ustawieniach (Skrzynki). Zatwierdzone aplikacje czekają w kolejce.")
+                R.meta_set(c, "nastepna_wysylka", time.time() + 600)
+            return None
+        if not all(p.exists() for p in files):
             problem = "Brakuje plików PDF — przygotuj dokumenty ponownie."
-        elif not R.EMAIL_OK.match(a["email"] or ""):
+        if not problem and not R.EMAIL_OK.match(a["email"] or ""):
             problem = "Brak adresu e-mail pracodawcy."
         if problem:
             with R.db(ctx) as c:
@@ -400,6 +428,29 @@ def migrate_281(ctx):
         R.meta_set(c, "migracja_281", R.stamp(ctx))
 
 
+def migrate_282(ctx):
+    """2.8.2: czekające aplikacje przygotowane od nowa (analiza oferty, nowy list i mail, klauzula ze stanowiskiem);
+    zatwierdzone — tylko PDF-y w nowym układzie, bez zmiany treści."""
+    with R.db(ctx) as c:
+        if R.meta_get(c, "migracja_282"):
+            return
+        again = [r["id"] for r in c.execute("SELECT id FROM aplikacje WHERE status IN ('do_zatwierdzenia','do_sprawdzenia','formularz') AND tresc<>''")]
+        for aid in again:
+            c.execute("UPDATE aplikacje SET status='nowa', uwagi='[]', zrodlo=CASE WHEN zrodlo='auto' THEN 'oferta' ELSE zrodlo END WHERE id=?", (aid,))
+            R.note(c, ctx, aid, "przygotowana od nowa po aktualizacji 2.8.2 (nowy list, analiza oferty)")
+        c.commit()
+        keep = [dict(r) for r in c.execute("SELECT * FROM aplikacje WHERE status='zatwierdzona' AND cv_plik<>''")]
+    f = R.load_facts(ctx)
+    for a in keep:
+        with contextlib.suppress(Exception):
+            cv, li = render_files(ctx, f, a, a["list"], json.loads(a["wybor"] or "null"), a["rodo"])
+            with R.db(ctx) as c:
+                c.execute("UPDATE aplikacje SET cv_plik=?, list_plik=? WHERE id=? AND status='zatwierdzona'", (cv, li, a["id"]))
+                c.commit()
+    with R.db(ctx) as c:
+        R.meta_set(c, "migracja_282", R.stamp(ctx))
+
+
 def worker(ctx, stop):
     import fcntl
     lock = open(ctx.folder() / ".praca.lock", "w")
@@ -415,6 +466,7 @@ def worker(ctx, stop):
         c.commit()
     with contextlib.suppress(Exception):
         migrate_281(ctx)
+        migrate_282(ctx)
     while not stop.is_set():
         try:
             work_once(ctx)
@@ -782,7 +834,16 @@ def make_app(ctx, hosts=None):
         a = get(aid)
         hist = g.db.execute("SELECT * FROM historia WHERE aplikacja_id=? ORDER BY id DESC LIMIT 30", (aid,)).fetchall()
         msgs = g.db.execute("SELECT * FROM wiadomosci WHERE aplikacja_id=? ORDER BY id DESC", (aid,)).fetchall()
+        info = analysis(dict(a))
+        where = info.get("adres") or a["miasto"] or ""
+        km = R.km_from_krakow(" ".join((where, a["miasto"] or "")))
+        from urllib.parse import quote
+        maps = ("https://www.google.com/maps/dir/?api=1&travelmode=transit&origin=" + quote(ctx.settings().get("dojazd_skad") or "Kraków")
+                + "&destination=" + quote(where)) if where and km != -1 else ""
+        fit = info.get("dopasowanie") or []
         return render_template("aplikacja.html", a=a, hist=hist, msgs=msgs, tab="", kit=F.kit(R.load_facts(ctx), a) if a["status"] == "formularz" else [],
+                               info=info, where=where, km=km, maps=maps, fit=fit,
+                               fit_count={k: sum(1 for x in fit if x["ocena"] == k) for k in ("mam", "czesciowo", "brak")},
                                KINDS=A.KINDS, editable=a["status"] in ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz", "blad", "zatwierdzona", "odrzucona"))
 
     @app.route("/aplikacja/<int:aid>", methods=["POST"])
@@ -840,6 +901,52 @@ def make_app(ctx, hosts=None):
             g.db.execute("UPDATE aplikacje SET notatka=? WHERE id=?", (request.form.get("notatka", "").strip()[:2000], aid))
             g.db.commit()
         return redirect(url_for("detail", aid=aid))
+
+    @app.route("/aplikacja/<int:aid>/cv", methods=["GET", "POST"])
+    def edit_cv(aid):
+        a = dict(get(aid))
+        f = R.load_facts(ctx)
+        sel = D.clean_selection(f, json.loads(a["wybor"] or "null"))
+        locked = a["status"] in R.SENT + ("wysylanie", "nowa", "przygotowywanie", "duplikat") or not a["cv_plik"]
+        if request.method == "POST":
+            if locked:
+                flash("Tego CV nie można już zmienić." if a["status"] in R.SENT else "CV nie jest jeszcze gotowe.")
+                return redirect(url_for("detail", aid=aid))
+            if a["status"] == "zatwierdzona":                               # nie podmieniamy plików pod ręką wysyłki
+                cur = g.db.execute("UPDATE aplikacje SET status='do_zatwierdzenia' WHERE id=? AND status='zatwierdzona'", (aid,))
+                g.db.commit()
+                if not cur.rowcount:
+                    flash("Ta aplikacja jest właśnie wysyłana — CV zostaje bez zmian.")
+                    return redirect(url_for("detail", aid=aid))
+                R.note(g.db, ctx, aid, "wstrzymana do ponownego zatwierdzenia (edycja CV)")
+                flash("Aplikacja wróciła do zatwierdzenia — po poprawkach kliknij „Zatwierdź i wyślij”.")
+            try:
+                if request.form.get("co") == "przywroc":
+                    sel = D.reset_cv_edit(f, sel)
+                    what = "CV: przywrócona wersja Sebastiana"
+                else:
+                    jobs = [j["id"] for j in f["doswiadczenie"]]
+                    pts = {j: request.form.getlist("p_" + j) for j in jobs}
+                    sel = D.apply_cv_edit(f, sel, request.form.get("profil", ""), pts, request.form.getlist("pokaz"))
+                    what = "CV: poprawki Agi"
+                cv, li = render_files(ctx, f, a, a["list"], sel, a["rodo"])
+            except ValueError as e:
+                flash(str(e))
+                return redirect(url_for("edit_cv", aid=aid))
+            g.db.execute("UPDATE aplikacje SET wybor=?, cv_plik=?, list_plik=?, zmieniono=? WHERE id=?",
+                         (json.dumps(sel, ensure_ascii=False), cv, li, R.stamp(ctx), aid))
+            R.note(g.db, ctx, aid, what)
+            g.db.commit()
+            flash("CV zapisane i ułożone na nowo.")
+            return redirect(url_for("edit_cv", aid=aid, ok=1))
+        profile, points = D.cv_content(f, sel)
+        jobs = [j for j in sorted(f["doswiadczenie"], key=lambda j: (D._ym(j.get("do")), D._ym(j.get("od"))), reverse=True)]
+        rows = [{"j": j, "w_cv": j["id"] in sel["kolejnosc"],
+                 "punkty": (points.get(j["id"]) or [p["tekst"] for p in j["punkty"]][:D.POINTS_PER_JOB]),
+                 "wszystkie": [p["tekst"] for p in j["punkty"]], "wlasne": j["id"] in sel.get("wlasne_punkty", {})} for j in jobs]
+        return render_template("edytuj_cv.html", a=a, tab="", profil=profile, rows=rows, locked=locked, n=D.POINTS_PER_JOB,
+                               zrodlo=sel.get("profil_zrodlo", ""), edited=bool(sel.get("wlasne_punkty") or sel.get("ukryte") or sel.get("pokazane")
+                                                                                or sel.get("profil_zrodlo") == "aga"))
 
     @app.route("/plik/<int:aid>/<which>")
     def file(aid, which):
@@ -974,6 +1081,23 @@ def make_app(ctx, hosts=None):
                 save_work()
                 for key in ("bez_niedziel_wieczorow", "bez_prowizji"):
                     ctx.set_setting(key, "tak" if request.form.get(key) else "nie")
+                for key in ("dojazd_skad", "model_pisania"):
+                    if key in request.form:
+                        ctx.set_setting(key, re.sub(r"[\r\n<>]", " ", request.form.get(key, "")).strip()[:120])
+            elif what == "podpis":
+                up = request.files.get("podpis")
+                for old in ("podpis.png", "podpis.jpg"):
+                    (ctx.folder() / old).unlink(missing_ok=True)
+                if up and up.filename and not request.form.get("usun"):
+                    ext = ".png" if up.filename.lower().endswith(".png") else ".jpg"
+                    data = up.read(5_000_000)
+                    try:
+                        from PIL import Image as _I
+                        import io as _io
+                        _I.open(_io.BytesIO(data)).verify()
+                        (ctx.folder() / ("podpis" + ext)).write_bytes(data)
+                    except Exception:
+                        error = "To nie wygląda na zdjęcie (PNG albo JPG)."
                 for key, lo, hi in (("prog_autopilota", 50, 100), ("prog_dopasowania", 0, 95), ("przypomnienie_po_dniach", 3, 30)):
                     with contextlib.suppress(ValueError):
                         ctx.set_setting(key, max(lo, min(hi, int(request.form.get(key, ctx.settings()[key])))))
@@ -1031,7 +1155,7 @@ def make_app(ctx, hosts=None):
         sources = g.db.execute("SELECT * FROM zrodla ORDER BY id").fetchall()
         firms = g.db.execute("SELECT COUNT(*) n, SUM(uzyta) u FROM firmy").fetchone()
         keys = {k: bool(R.secret(ctx, k)) for k in ("adzuna_id", "adzuna_key", "jooble", "brave")}
-        return render_template("ustawienia.html", f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)),
+        return render_template("ustawienia.html", f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)), has_signature=bool(signature_path(ctx)), writer=D.writer_model(ctx),
                                sources=sources, firms=firms, keys=keys)
 
     return app

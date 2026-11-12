@@ -10,12 +10,12 @@ w usłudze WhatsApp) i help_text (do „pomoc”). Dodatek dostaje `ctx` — jed
 z uprawnieniami z manifestu. Błąd w dodatku nigdy nie psuje WhatsAppa: jest zapisywany w logu, a po
 3 błędach z rzędu dodatek pauzuje na 10 minut.
 """
-import contextlib, datetime as dt, importlib.util, json, logging, re, sqlite3, subprocess, sys, time
+import contextlib, datetime as dt, importlib.util, json, logging, os, re, sqlite3, subprocess, sys, time
 from pathlib import Path
 
 W = None                      # moduł whatsapp (związany przez bind)
 log = logging.getLogger("sebastian.dodatki")
-HOST_VERSION = "2.8.1"
+HOST_VERSION = "2.8.3"
 PERMISSIONS = {
     "whatsapp.wysylanie": "wysyła Ci wiadomości i głosówki na WhatsAppie",
     "whatsapp.obserwacja": "czyta (tylko odczyt) Twoje rozmowy z obserwowanego WhatsAppa",
@@ -440,13 +440,15 @@ class Context:
 
     # ---------------------------------------------------------------- sekrety (pęk kluczy macOS)
     def secret(self, name):
-        if sys.platform != "darwin":
+        if sys.platform != "darwin" or os.environ.get("SEBASTIAN_TESTY") == "1":     # testy nigdy nie czytają prawdziwego pęku kluczy
             return None
         r = subprocess.run(["security", "find-generic-password", "-s", f"sebastian-{self.id}", "-a", name, "-w"],
                            capture_output=True, text=True)
         return r.stdout.strip() or None if r.returncode == 0 else None
 
     def set_secret(self, name, value):
+        if os.environ.get("SEBASTIAN_TESTY") == "1":                               # ani do niego nie piszą
+            raise AddonError("Testy: pęk kluczy wyłączony.")
         if sys.platform != "darwin":
             raise AddonError("Hasła zapisuję tylko w pęku kluczy macOS.")
         subprocess.run(["security", "add-generic-password", "-U", "-s", f"sebastian-{self.id}", "-a", name, "-w", value],
