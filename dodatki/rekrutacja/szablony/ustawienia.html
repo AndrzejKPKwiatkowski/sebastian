@@ -30,6 +30,9 @@
     <div class="row3"><div><label>Autopilot od (% dopasowania)</label><input type="number" name="prog_autopilota" value="{{ st.prog_autopilota }}" min="50" max="100"></div>
       <div><label>Pomijam oferty poniżej (%)</label><input type="number" name="prog_dopasowania" value="{{ st.prog_dopasowania }}" min="0" max="95"></div>
       <div><label>Przypomnienie po (dniach)</label><input type="number" name="przypomnienie_po_dniach" value="{{ st.przypomnienie_po_dniach }}" min="3" max="30"></div></div>
+    <label class="check"><input type="checkbox" name="owca" value="1" {{ 'checked' if st.owca }}> 🐑 Owca Sebastian: rano pyta o cel, w ciągu dnia motywuje, wspiera przy rozmowach i ofertach</label>
+    <div class="row"><div><label>Owca rano o</label><input type="text" name="owca_rano" value="{{ st.owca_rano }}"></div>
+      <div><label>Przypomnienia (gdy brakuje do celu)</label><input type="text" name="owca_przypomnienia" value="{{ st.owca_przypomnienia }}"></div></div>
     <div class="row"><div><label>Skąd dojeżdżasz (do liczenia dojazdu, nie trafia do CV)</label><input type="text" name="dojazd_skad" value="{{ st.dojazd_skad }}" placeholder="np. ul. Długa 1, Kraków"></div>
       <div><label>Model do pisania listów</label><input type="text" name="model_pisania" value="{{ st.model_pisania }}" placeholder="auto"><p class="small soft">„auto” = Bielik (polski model), jeśli jest zainstalowany{% if writer %} — teraz: <b>{{ writer }}</b>{% else %} — teraz: główny model Sebastiana{% endif %}.</p></div></div>
     <div class="actions"><button class="btn ghost">Zapisz</button></div></form>

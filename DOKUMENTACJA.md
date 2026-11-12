@@ -967,7 +967,7 @@ Statusy: `nowa → przygotowywanie → do_zatwierdzenia | do_sprawdzenia | do_uz
 CV składa się wyłącznie z faktów z bazy (model zwraca numery, `clean_selection()` odrzuca nieistniejące), list i mail przechodzą
 `rule_check()` i `model_check()`; autopilot zatwierdza tylko `do_zatwierdzenia` (bez uwag) z oceną od progu.
 
-Pełny opis, ustawienia, instalacja i problemy: `docs/aktualizacje/AKTUALIZACJA_2_8.md` `AKTUALIZACJA_2_8_1.md`, `AKTUALIZACJA_2_8_2.md` `AKTUALIZACJA_2_8_3.md` `AKTUALIZACJA_2_8_4.md` i `AKTUALIZACJA_2_8_5.md` (edycja CV; list motywacyjny; kontakty.py — adres firmy w sieci, wiedza.py — import wiedzy z ChatGPT).
+Pełny opis, ustawienia, instalacja i problemy: `docs/aktualizacje/AKTUALIZACJA_2_8.md` `AKTUALIZACJA_2_8_1.md`, `AKTUALIZACJA_2_8_2.md` `AKTUALIZACJA_2_8_3.md` `AKTUALIZACJA_2_8_4.md` `AKTUALIZACJA_2_8_5.md` i `AKTUALIZACJA_2_9.md` (owca.py — Owca Sebastian; edycja CV; list motywacyjny; kontakty.py — adres firmy w sieci, wiedza.py — import wiedzy z ChatGPT).
 
 ---
 
@@ -1653,6 +1653,7 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2, 2.3):
 | 2.8.3 | 12.11.2026 | Rekrutacja: list motywacyjny jako oficjalne pismo, mail z faktów, kontrola języka i korekta (Bielik), RODO ze stanowiskiem i bez powtórzeń, karta oferty (wynagrodzenie, dojazd, co pasuje i czego brakuje), pobieranie CV i listu |
 | 2.8.4 | 12.11.2026 | Rekrutacja: kontrola listów pisanych do kandydatki, rozpoznawanie potwierdzeń/reklam/próśb o potwierdzenie, odmowa tylko przy wyraźnym odrzuceniu, czysta treść i przyciski wiadomości, bez ucinania uzasadnienia |
 | 2.8.5 | 12.11.2026 | Rekrutacja: czytelne wyjaśnienia dopasowania do Agi, wymagania dosłownie z ogłoszenia, odświeżanie starych analiz |
+| 2.9 | 12.11.2026 | Rekrutacja: Owca Sebastian — cel dnia z maila, przypomnienia i gratulacje, seria dni, wsparcie na etapach (rozmowa, zadanie, oferta) aż do przyjęcia oferty |
 | 2.5.2 | 20.10.2026 | Poprawka nauki z rozmów WhatsApp: w procesie nauki moduł WhatsAppa nie był podłączony (`AttributeError: 'NoneType' object has no attribute 'TZ'` co 2 minuty i zablokowana kolejka). Dodatkowo: pozycja, która 3 razy z rzędu kończy się błędem, dostaje status „błąd” i nauka idzie dalej (`learn-retry` przywraca) |
 | 2.5.1 | 20.10.2026 | Diagnostyka „żona pisze, a Sebastian milczy”: odrzucone numery w logu i w `wa-status` (nazwa profilu, zamaskowany numer, bez treści, raz na godzinę), ostrzeżenie, gdy Sebastian jest na numerze właściciela, a lista zawiera inne osoby; w `wa-status` poziom dostępu i czy osoba została przywitana |
 | 2.5 | 20.10.2026 | **WhatsApp — pamięć rozmów i dostęp pełny**: rozmowy przechowywane na stałe, czytanie załączników (PDF, Office, OCR zdjęć — także wysłanych przez Ciebie), zapis historii przesłanej przy połączeniu, akta osób (`kto to Jan`, `wa-watch ludzie`, panel), nauka z rozmów (zakres `whatsapp`, bez Open WebUI); lista dozwolonych numerów z poziomem dostępu `prywatny`/`pelny` (`wa-user dodaj --dostep pelny`) |

@@ -314,3 +314,8 @@ z adresu no-reply i prawdziwa odmowa rozpoznane; „&nbsp;” usunięte, przycis
 # Weryfikacja 2.8.5
 
 Data: 2026-11-12. `test_rekrutacja` — 65 testów zaliczonych; pozostałe zestawy zaliczone. Wyjaśnienia ze zrzutu Agi porządkowane (bez „FAKTY”, „kandydatka”, powtórzeń wymagania); wymaganie spoza treści ogłoszenia pomijane; stara analiza odświeżana raz.
+
+
+# Weryfikacja 2.9
+
+Data: 2026-11-12. `test_rekrutacja` — 70 testów zaliczonych; pozostałe zestawy zaliczone. Owca: rano raz, przypomnienie w pierwszym tygodniu, potem tylko w tyle, gratulacje raz, nic w weekend; link z celem tylko z tokenem i z dnia maila; daty z terminów (20.11, 17 listopada, jutro; 10.00 h to godzina); etapy zaproszenie → dzień rozmowy → jak poszło → oferta → przyjęcie (z potwierdzeniem) → koniec, każdy mail raz. Maile i karta „Dziś” obejrzane w przeglądarce.

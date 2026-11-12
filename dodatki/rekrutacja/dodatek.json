@@ -1,7 +1,7 @@
 {
   "id": "rekrutacja",
   "nazwa": "Rekrutacja — aplikacje o pracę dla Agi",
-  "wersja": "1.2.0",
+  "wersja": "1.3.0",
   "rdzen": "2.7",
   "opis": "Osobny panel dla Agi (przez Tailscale): szukanie ofert, dopasowane CV i list z kontrolą prawdy, wysyłka mailem i przez formularze Recruitee, czytanie odpowiedzi, podziękowania, przypomnienia, powiadomienia na WhatsAppie, raport wieczorny.",
   "domyslnie_wlaczony": true,
@@ -85,6 +85,10 @@
     "bez_niedziel_wieczorow": false,
     "bez_prowizji": false,
     "dojazd_skad": "Kraków",
-    "model_pisania": "auto"
+    "model_pisania": "auto",
+    "owca": true,
+    "owca_rano": "07:45",
+    "owca_przypomnienia": "11:00,13:30,15:30",
+    "owca_cel": 30
   }
 }

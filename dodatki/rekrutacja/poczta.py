@@ -58,7 +58,7 @@ class Uncertain(RuntimeError):
     """Błąd w trakcie albo po przekazaniu wiadomości — mogła wyjść, nie ponawiam automatycznie."""
 
 
-def send(address, pwd, to, subject, body, attachments=(), name="", reply_to="", in_reply_to="", references=""):
+def send(address, pwd, to, subject, body, attachments=(), name="", reply_to="", in_reply_to="", references="", html="", images=None):
     """Wysyła jedną wiadomość; zwraca Message-ID. Gmail sam odkłada kopię do „Wysłane”.
     Błędy: NotSent / AuthFailed (nic nie wyszło) albo Uncertain (mogło wyjść)."""
     h = hosts(address)
@@ -77,6 +77,11 @@ def send(address, pwd, to, subject, body, attachments=(), name="", reply_to="", 
         msg["References"] = (references + " " + in_reply_to).strip()
     msg[MARK] = "1"                              # po tym znaczniku nie czytam własnych wiadomości jako odpowiedzi
     msg.set_content(body)
+    if html:                                     # wersja HTML z obrazkami w treści (cid:…), tekst zostaje dla prostych programów
+        msg.add_alternative(html, subtype="html")
+        part = msg.get_payload()[-1]
+        for cid, data in (images or {}).items():
+            part.add_related(data, maintype="image", subtype="png", cid=f"<{cid}>", filename=f"{cid}.png")
     for path in attachments:
         path = Path(path)
         msg.add_attachment(path.read_bytes(), maintype="application", subtype="pdf", filename=path.name)

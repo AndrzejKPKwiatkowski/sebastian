@@ -26,10 +26,11 @@ STATUS = {
     "duplikat": "duplikat",
     "formularz": "do wysłania przez formularz",
     "pytanie": "pracodawca pyta",
+    "przyjeta": "przyjęta oferta 🎉",
     "blad": "błąd",
 }
 OPEN = ("nowa", "przygotowywanie", "do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "zatwierdzona")
-SENT = ("wyslana", "wyslana_recznie", "pytanie", "zaproszenie", "rozmowa", "oferta", "odmowa")
+SENT = ("wyslana", "wyslana_recznie", "pytanie", "zaproszenie", "rozmowa", "oferta", "odmowa", "przyjeta")
 TODO = ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz", "blad")
 KRAKOW_AREA = ["krakow", "wieliczka", "niepolomice", "skawina", "zabierzow", "zielonki", "krzeszowice", "myslenice", "bochnia",
                "olkusz", "proszowice", "slomniki", "miechow", "kalwaria", "dobczyce", "liszki", "mogilany", "swiatniki", "michalowice",

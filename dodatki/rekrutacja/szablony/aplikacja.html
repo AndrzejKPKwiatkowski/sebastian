@@ -108,13 +108,13 @@
   {% endif %}
   </form>
 
-  {% if a.status in ('wyslana','wyslana_recznie','pytanie','zaproszenie','rozmowa','oferta','odmowa') %}
+  {% if a.status in ('wyslana','wyslana_recznie','pytanie','zaproszenie','rozmowa','oferta','przyjeta','odmowa') %}
   <div class="card" style="margin-top:16px">
     <h2>Co dalej</h2>
     <p class="soft">Wysłano {{ a.wyslano|dzien }}{% if a.email %} na {{ a.email }}{% endif %}.{% if a.przypomnienie %} Przypomnienie: {{ a.przypomnienie|dzien }}.{% endif %}{% if a.podziekowanie %} Podziękowanie po odmowie: {{ a.podziekowanie|dzien }}.{% endif %} Odpowiedzi rozpoznaję sam. Jeśli ktoś zadzwonił, ustaw status tutaj.</p>
     <form method="post" class="row" style="grid-template-columns:2fr 1fr">
       <input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="status">
-      <select name="status">{% for s in ('wyslana','pytanie','zaproszenie','rozmowa','oferta','odmowa') %}<option value="{{ s }}" {{ 'selected' if a.status == s }}>{{ STATUS[s] }}</option>{% endfor %}</select>
+      <select name="status">{% for s in ('wyslana','pytanie','zaproszenie','rozmowa','oferta','przyjeta','odmowa') %}<option value="{{ s }}" {{ 'selected' if a.status == s }}>{{ STATUS[s] }}</option>{% endfor %}</select>
       <button class="btn ghost">Zmień status</button>
     </form>
   </div>

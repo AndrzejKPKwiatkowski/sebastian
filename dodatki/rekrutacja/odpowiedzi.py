@@ -319,8 +319,8 @@ def check_inbox(ctx, send=None, fetch=None):
             if aid and kind != "reklama":
                 new_status = {"zaproszenie": "zaproszenie", "oferta": "oferta", "pytanie": "pytanie", "zadanie": "zaproszenie", "odmowa": "odmowa"}.get(kind)
                 cur_status = c.execute("SELECT status FROM aplikacje WHERE id=?", (aid,)).fetchone()["status"]
-                rank = ["wyslana", "wyslana_recznie", "pytanie", "odmowa", "zaproszenie", "rozmowa", "oferta"]
-                if new_status and (cur_status not in rank or rank.index(new_status) >= rank.index(cur_status) or cur_status == "pytanie"):
+                rank = ["wyslana", "wyslana_recznie", "pytanie", "odmowa", "zaproszenie", "rozmowa", "oferta", "przyjeta"]
+                if new_status and cur_status != "przyjeta" and (cur_status not in rank or rank.index(new_status) >= rank.index(cur_status) or cur_status == "pytanie"):
                     R.set_status(c, ctx, aid, new_status, odpowiedz_kiedy=R.stamp(ctx))
                 else:
                     c.execute("UPDATE aplikacje SET odpowiedz_kiedy=? WHERE id=?", (R.stamp(ctx), aid))

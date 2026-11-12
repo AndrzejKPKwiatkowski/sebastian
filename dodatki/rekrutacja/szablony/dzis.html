@@ -4,8 +4,21 @@
 <p class="soft">{% if st.wstrzymane %}Wysyłka jest wstrzymana.{% elif okno %}Trwa okno wysyłki ({{ st.godziny }}).{% else %}Wysyłam w dni robocze, {{ st.godziny }}.{% endif %}
   Raport wieczorny o {{ st.raport }}.</p>
 
+{% if st.owca %}
+<div class="card sheep">
+  <img src="{{ url_for('owca_art', name='brawo' if sheep.zrobione >= sheep.cel else ('motywacja' if sheep.zrobione else 'rano')) }}" alt="Owca Sebastian" width="96" height="96">
+  <div style="flex:1;min-width:220px">
+    <h2 style="margin:0 0 4px">{% if sheep.zrobione >= sheep.cel %}Cel osiągnięty! 🎉{% elif not sheep.dzien_roboczy %}Dzień wolny — odpocznij{% else %}Cel na dziś: {{ sheep.cel }}{% endif %}</h2>
+    <p class="soft" style="margin:0 0 10px">{{ sheep.zrobione }} z {{ sheep.cel }} · seria: {{ sheep.seria }} {{ 'dzień' if sheep.seria == 1 else 'dni' }}{% if sheep.czeka and sheep.zrobione < sheep.cel %} · <a href="{{ url_for('todo') }}">czeka na Ciebie {{ sheep.czeka }}</a>{% endif %}</p>
+    <div class="bar"><span style="width:{{ sheep.procent }}%"></span></div>
+    <form method="post" action="{{ url_for('owca_set') }}" class="goals"><input type="hidden" name="csrf" value="{{ csrf() }}">
+      {% for n in GOALS %}<button class="btn {{ '' if n == sheep.cel else 'ghost' }} small" name="cel" value="{{ n }}">{{ n }}</button>{% endfor %}</form>
+  </div>
+</div>
+{% endif %}
+
 <div class="grid" style="margin:22px 0">
-  <div class="stat"><b>{{ n.dzis }}<span style="font-size:20px;color:var(--soft);font-weight:500"> / {{ st.limit_dzienny }}</span></b><span>wysłane dziś</span></div>
+  <div class="stat"><b>{{ n.dzis }}<span style="font-size:20px;color:var(--soft);font-weight:500"> / {{ sheep.cel if st.owca and sheep else st.limit_dzienny }}</span></b><span>wysłane dziś</span></div>
   <div class="stat"><b>{{ n.lacznie }}</b><span>wysłane łącznie</span></div>
   <div class="stat"><b>{{ n.do_zrobienia }}</b><span>czeka na Ciebie</span></div>
   <div class="stat"><b>{{ n.zaproszenia }}</b><span>zaproszenia</span></div>

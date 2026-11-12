@@ -6,11 +6,11 @@ dane dodatku Rekrutacja.
 import contextlib, datetime as dt, hmac, json, os, random, re, secrets, subprocess, threading, time
 from pathlib import Path
 
-from . import dokumenty as D, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, poczta as P, rdzen as R, wiedza as Wd, zrodla as Z
+from . import dokumenty as D, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, owca as OW, poczta as P, rdzen as R, wiedza as Wd, zrodla as Z
 
 HERE = Path(__file__).resolve().parent
 STEPS = ["Powitanie", "Twoja skrzynka", "Skrzynka Sebastiana", "Twoje dane", "Narzędzia", "Czego szukasz", "Jak mam pracować", "Gotowe"]
-OPEN_ENDPOINTS = {"login", "first_run", "healthz"}
+OPEN_ENDPOINTS = {"login", "first_run", "healthz", "owca_goal", "owca_stage", "owca_art"}   # przyciski z maili owcy: z tokenem
 
 
 # ================================================================ przygotowanie kompletu dokumentów
@@ -315,6 +315,8 @@ def report_text(ctx):
         lines += [f"  • {r['firma'] or 'firma'}: {A.KINDS.get(r['rodzaj'], r['rodzaj'])}" for r in replies]
     if found:
         lines += ["", f"Znalazłem dziś {found} nowych ogłoszeń (te słabo pasujące pomijam sam)."]
+    with contextlib.suppress(Exception), R.db(ctx) as c:
+        lines += ["", OW.report_line(ctx, c, now.date())]
     lines += ["", f"Łącznie wysłanych: {total}. Zaproszenia i rozmowy: {invites}."]
     if queue:
         lines.append(f"W kolejce na kolejny dzień roboczy: {queue}.")
@@ -394,6 +396,8 @@ def work_once(ctx):
         with contextlib.suppress(Exception):
             refresh_match(ctx)                                        # w wolnej chwili: lepsze wyjaśnienia dopasowania
     send_one(ctx)
+    with contextlib.suppress(Exception):
+        OW.stage_tick(ctx, P.send) or OW.tick(ctx, P.send)            # owca: najpierw etapy rekrutacji, potem cel dnia
     if inbox:
         try:
             A.check_inbox(ctx)
@@ -641,6 +645,52 @@ def make_app(ctx, hosts=None):
         resp.headers.setdefault("Cache-Control", "no-store")
         return resp
 
+    def sheep_page(title, text, art="brawo", extra=""):
+        return render_template("owca.html", title=title, text=text, art=art, extra=extra, tab="")
+
+    @app.route("/owca/<name>.png")
+    def owca_art(name):
+        if name not in ("rano", "motywacja", "brawo"):
+            abort(404)
+        return send_file(OW.ART / f"{name}.png", mimetype="image/png", max_age=86400)
+
+    @app.route("/owca/cel/<tok>/<day>/<int:n>")
+    def owca_goal(tok, day, n):
+        db = ctx.db()
+        try:
+            if not hmac.compare_digest(tok, OW.token(db)) or day != ctx.now().date().isoformat():
+                return sheep_page("Ten link już nie działa", "Cel można ustawić tylko w dniu, z którego jest mail. Zmienisz go też na stronie „Dziś”.", "rano"), 410
+            n = OW.set_goal(db, ctx, ctx.now().date(), n)
+        finally:
+            db.close()
+        return sheep_page(f"Cel na dziś: {n}", "Zapisane! Przejrzyj gotowe aplikacje, a wysyłkę biorę na siebie. Do dzieła!", "motywacja",
+                          url_for("todo"))
+
+    @app.route("/owca/etap/<tok>/<int:aid>/<action>")
+    def owca_stage(tok, aid, action):
+        db = ctx.db()
+        try:
+            if not hmac.compare_digest(tok, OW.token(db)):
+                abort(403)
+            if action == "przyjmuje" and not request.args.get("tak"):
+                a = db.execute("SELECT firma FROM aplikacje WHERE id=?", (aid,)).fetchone()
+                if not a:
+                    abort(404)
+                return sheep_page(f"Przyjmujesz ofertę od {a['firma']}?", "Wstrzymam wtedy szukanie i wysyłkę nowych aplikacji. Odpowiedzi nadal będę czytać.",
+                                  "brawo", url_for("owca_stage", tok=tok, aid=aid, action=action, tak=1))
+            msg = OW.stage_action(ctx, db, aid, action)
+        finally:
+            db.close()
+        if msg is None:
+            abort(404)
+        return sheep_page("Zapisane", msg, "brawo" if action in ("oferta", "przyjmuje") else "rano")
+
+    @app.route("/owca/cel", methods=["POST"])
+    def owca_set():
+        with contextlib.suppress(ValueError):
+            OW.set_goal(g.db, ctx, ctx.now().date(), int(request.form.get("cel", "0")))
+        return redirect(url_for("home"))
+
     @app.route("/healthz")
     def healthz():
         return "ok"
@@ -841,7 +891,12 @@ def make_app(ctx, hosts=None):
     @app.route("/")
     def home():
         rows = g.db.execute("SELECT * FROM aplikacje WHERE status NOT IN ('duplikat') ORDER BY zmieniono DESC LIMIT 8").fetchall()
-        return render_template("dzis.html", rows=rows, tab="dzis", me=R.mailboxes(g.db)[0])
+        day = ctx.now().date()
+        goal_n, own = OW.goal(g.db, ctx, day)
+        prog = OW.progress(g.db, day)
+        sheep = {"cel": goal_n, "wlasny": own, "zrobione": prog["zrobione"], "seria": OW.streak(g.db, ctx, day), "czeka": prog["czeka"],
+                 "procent": min(100, round(100 * prog["zrobione"] / goal_n)) if goal_n else 0, "dzien_roboczy": OW.working_day(ctx, day)}
+        return render_template("dzis.html", rows=rows, tab="dzis", me=R.mailboxes(g.db)[0], sheep=sheep, GOALS=OW.GOALS)
 
     @app.route("/dodaj", methods=["POST"])
     def add():
@@ -1155,6 +1210,11 @@ def make_app(ctx, hosts=None):
                 save_work()
                 for key in ("bez_niedziel_wieczorow", "bez_prowizji"):
                     ctx.set_setting(key, "tak" if request.form.get(key) else "nie")
+                ctx.set_setting("owca", "tak" if request.form.get("owca") else "nie")
+                for key in ("owca_rano", "owca_przypomnienia"):
+                    val = re.sub(r"\s+", "", request.form.get(key, ""))
+                    if val and re.fullmatch(r"\d{1,2}:\d{2}(,\d{1,2}:\d{2})*", val):
+                        ctx.set_setting(key, val)
                 for key in ("dojazd_skad", "model_pisania"):
                     if key in request.form:
                         ctx.set_setting(key, re.sub(r"[\r\n<>]", " ", request.form.get(key, "")).strip()[:120])

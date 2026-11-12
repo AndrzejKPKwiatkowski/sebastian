@@ -97,8 +97,9 @@ class RekrutacjaBase(Base):
         DH._STATE.clear()
         super().tearDown()
 
-    def fake_send(self, sender, pwd, to, subject, body, attachments=(), name="", reply_to="", in_reply_to="", references=""):
-        self.sent.append({"from": sender, "to": to, "subject": subject, "body": body, "files": [Path(p).name for p in attachments], "pwd": pwd, "in_reply_to": in_reply_to})
+    def fake_send(self, sender, pwd, to, subject, body, attachments=(), name="", reply_to="", in_reply_to="", references="", html="", images=None):
+        self.sent.append({"from": sender, "to": to, "subject": subject, "body": body, "files": [Path(p).name for p in attachments], "pwd": pwd,
+                          "in_reply_to": in_reply_to, "html": html, "images": sorted(images or {})})
         return f"<id{len(self.sent)}@test>"
 
     def ready(self):
@@ -1220,6 +1221,125 @@ class MatchWording285(RekrutacjaBase):
             self.assertIsNone(self.P.refresh_match(self.ctx))
         info = json.loads(self.row(aid)["analiza"])
         self.assertEqual((info["v"], info["dopasowanie"][0]["dlaczego"]), (2, "Word i Excel znasz bardzo dobrze."))
+
+
+
+class Sheep290(RekrutacjaBase):
+    def setUp(self):
+        super().setUp()
+        self.OW = importlib.import_module(self.mod.__name__ + ".owca")
+        self.ready()
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "adres_panelu", "http://mac:8790")
+        self.ctx.set_setting("tylko_dni_robocze", "tak")
+
+    def at(self, h, m=0, day=12):
+        return dt.datetime(2026, 11, day, h, m, tzinfo=s.TZ)
+
+    def waiting(self, n=3, status="do_zatwierdzenia"):
+        for i in range(n):
+            self.add(firma=f"Firma {i}", stanowisko="Asystentka", status=status)
+
+    def test_day_flow_morning_nudge_bravo(self):
+        self.waiting(3)
+        with self.R.db(self.ctx) as c:
+            self.assertIsNone(self.OW.due(self.ctx, c, self.at(7, 30)))
+            self.assertEqual(self.OW.due(self.ctx, c, self.at(7, 50)), "rano")
+        self.assertEqual(self.OW.tick(self.ctx, self.fake_send, self.at(7, 50)), "rano")
+        mail = self.sent[-1]
+        self.assertIn("Jaki cel na dziś", mail["subject"])
+        self.assertIn("cid:rano", mail["html"])
+        self.assertIn("http://mac:8790/owca/cel/", mail["html"])
+        self.assertEqual(mail["images"], ["rano"])
+        self.assertIsNone(self.OW.tick(self.ctx, self.fake_send, self.at(8, 30)))            # rano tylko raz
+        with self.R.db(self.ctx) as c:
+            self.OW.set_goal(c, self.ctx, self.at(9).date(), 2)
+        self.assertEqual(self.OW.tick(self.ctx, self.fake_send, self.at(11, 5)), "p1")        # pierwszy tydzień: przypomina
+        self.assertIn("0/2", self.sent[-1]["subject"])
+        self.assertIn("Przejrzyj 2 aplikacje", self.sent[-1]["html"])
+        with self.R.db(self.ctx) as c:
+            c.execute("UPDATE aplikacje SET status='wyslana', wyslano=? WHERE id IN (SELECT id FROM aplikacje LIMIT 2)", (self.at(12).isoformat(),))
+            c.commit()
+        self.assertEqual(self.OW.tick(self.ctx, self.fake_send, self.at(12, 10)), "brawo")
+        self.assertIn("2/2", self.sent[-1]["subject"])
+        self.assertIsNone(self.OW.tick(self.ctx, self.fake_send, self.at(15, 40)))           # po celu cisza
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(self.OW.streak(c, self.ctx, self.at(12).date()), 1)
+            self.assertIn("2/2 — osiągnięty", self.OW.report_line(self.ctx, c, self.at(12).date()))
+
+    def test_after_first_week_only_when_behind_and_never_on_weekends(self):
+        self.waiting(5)
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "owca_start", "2026-10-01")
+            self.OW.set_goal(c, self.ctx, self.at(9).date(), 4)
+            self.R.meta_set(c, "owca_2026-11-12", json.dumps(["rano"]))
+            c.execute("UPDATE aplikacje SET status='wyslana', wyslano=? WHERE id IN (SELECT id FROM aplikacje LIMIT 2)", (self.at(9).isoformat(),))
+            c.commit()
+            self.assertIsNone(self.OW.due(self.ctx, c, self.at(11, 5)))                   # 2/4 o 11:00 — w tempie
+            self.assertEqual(self.OW.due(self.ctx, c, self.at(15, 35)), "p3")              # 2/4 pod koniec okna — w tyle
+            self.assertIsNone(self.OW.due(self.ctx, c, self.at(8, 0, day=14)))             # sobota
+
+    def test_goal_link_from_mail(self):
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        with self.R.db(self.ctx) as c:
+            tok = self.OW.token(c)
+        day = self.ctx.now().date().isoformat()
+        r = cl.get(f"/owca/cel/{tok}/{day}/40")
+        self.assertIn("Cel na dziś: 40", r.data.decode())
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(self.OW.goal(c, self.ctx, self.ctx.now().date()), (40, True))
+        self.assertEqual(cl.get(f"/owca/cel/zly/{day}/10").status_code, 410)
+        self.assertEqual(cl.get("/owca/rano.png").status_code, 200)
+
+    def test_dates_in_invitations(self):
+        ref = dt.date(2026, 11, 12)
+        P = self.OW.parse_date
+        self.assertEqual(P("20.11 o 10:00", ref), dt.date(2026, 11, 20))
+        self.assertEqual(P("wtorek, 17 listopada, godz. 9", ref), dt.date(2026, 11, 17))
+        self.assertEqual(P("jutro o 12", ref), dt.date(2026, 11, 13))
+        self.assertEqual(P("5.01.2027", ref), dt.date(2027, 1, 5))
+        self.assertIsNone(P("o 10.00 h", ref))
+        self.assertIsNone(P("", ref))
+
+    def test_interview_to_signed_contract(self):
+        aid = self.add(firma="Biuro Testowe", stanowisko="Asystentka", status="zaproszenie", wyslano="2026-11-10T09:00:00+01:00",
+                       analiza=json.dumps({"dopasowanie": [{"wymaganie": "Excel", "ocena": "mam", "dlaczego": "Excel znasz bardzo dobrze."},
+                                                           {"wymaganie": "SAP", "ocena": "brak", "dlaczego": "Nie pracowałaś w SAP."}],
+                                           "obowiazki": ["obieg dokumentów"]}))
+        with self.R.db(self.ctx) as c:
+            c.execute("INSERT INTO wiadomosci(uid,od,temat,tresc,aplikacja_id,rodzaj,wazne,status,termin,data) VALUES(1,'hr@testowe.pl','Rozmowa','Zapraszamy',?,"
+                      "'zaproszenie',1,'nowa','20.11 o 10:00','2026-11-12T10:00:00+01:00')", (aid,))
+            c.commit()
+        self.assertEqual(self.OW.stage_tick(self.ctx, self.fake_send, self.at(10, 30)), f"zaproszenie:1")
+        prep = self.sent[-1]["html"]
+        for part in ("Zaproszenie na rozmowę", "Excel znasz bardzo dobrze", "SAP", "obieg dokumentów", "Dlaczego chce Pani zmienić pracę"):
+            self.assertIn(part, self.sent[-1]["subject"] + prep)
+        self.assertIsNone(self.OW.stage_tick(self.ctx, self.fake_send, self.at(11)))
+        self.assertEqual(self.OW.stage_tick(self.ctx, self.fake_send, self.at(8, 0, day=20)), "dzien:1")
+        self.assertEqual(self.OW.stage_tick(self.ctx, self.fake_send, self.at(10, 0, day=21)), "jak:1")
+        self.assertIn("/owca/etap/", self.sent[-1]["html"])
+        self.assertIn("dziękuję za rozmowę dotyczącą stanowiska Asystentka", self.sent[-1]["html"])
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        with self.R.db(self.ctx) as c:
+            tok = self.OW.token(c)
+        cl.get(f"/owca/etap/{tok}/{aid}/oferta")
+        self.assertEqual(self.row(aid)["status"], "oferta")
+        self.assertEqual(self.OW.stage_tick(self.ctx, self.fake_send, self.at(12, 0, day=21)), f"oferta:{aid}")
+        self.assertIn("Dokumenty, które zwykle są potrzebne", self.sent[-1]["html"])
+        self.assertIn("Przyjmujesz ofertę", cl.get(f"/owca/etap/{tok}/{aid}/przyjmuje").data.decode())
+        self.assertEqual(self.row(aid)["status"], "oferta")                                  # najpierw pytanie, potem decyzja
+        cl.get(f"/owca/etap/{tok}/{aid}/przyjmuje?tak=1")
+        self.assertEqual(self.row(aid)["status"], "przyjeta")
+        st = self.ctx.settings()
+        self.assertTrue(st["wstrzymane"] and not st["szukanie"] and not st["spontaniczne"])
+        self.assertEqual(self.OW.stage_tick(self.ctx, self.fake_send, self.at(13, 0, day=21)), "koniec")
+        self.assertIn("Gratulacje! Nowa praca", self.sent[-1]["subject"])
+        self.assertIsNone(self.OW.stage_tick(self.ctx, self.fake_send, self.at(14, 0, day=21)))
+        self.assertEqual(cl.get(f"/owca/etap/zly/{aid}/oferta").status_code, 403)
 
 if __name__ == "__main__":
     unittest.main()
