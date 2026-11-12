@@ -316,7 +316,7 @@ def report_text(ctx):
     if found:
         lines += ["", f"Znalazłem dziś {found} nowych ogłoszeń (te słabo pasujące pomijam sam)."]
     with contextlib.suppress(Exception), R.db(ctx) as c:
-        lines += ["", OW.report_line(ctx, c, now.date())]
+        lines += ["", OW.report_line(ctx, c, ctx.now().date())]
     lines += ["", f"Łącznie wysłanych: {total}. Zaproszenia i rozmowy: {invites}."]
     if queue:
         lines.append(f"W kolejce na kolejny dzień roboczy: {queue}.")
@@ -325,6 +325,16 @@ def report_text(ctx):
     if url:
         lines += ["", f"Panel: {url}"]
     lines += ["", "Dobrego wieczoru,", "Sebastian"]
+    goal_n, done_n, streak_n = 0, 0, 0
+    with contextlib.suppress(Exception), R.db(ctx) as c:
+        day = ctx.now().date()
+        goal_n, _ = OW.goal(c, ctx, day)
+        done_n = OW.progress(c, day)["zrobione"]
+        streak_n = OW.streak(c, ctx, day)
+    data = {"wyslane": len(sent), "lista": [dict(r) for r in sent], "odpowiedzi": [dict(r, etykieta=A.KINDS.get(r["rodzaj"], r["rodzaj"])) for r in replies],
+            "znalezione": found, "lacznie": total, "zaproszenia": invites, "kolejka": queue, "czeka": todo, "url": url or "",
+            "cel": goal_n if ctx.settings().get("owca", True) else 0, "zrobione": done_n, "seria": streak_n, "tekst": "\n".join(lines)}
+    report_text.last = data
     return f"Rekrutacja: {len(sent)} dziś, {total} łącznie" + (f", {todo} do decyzji" if todo else ""), "\n".join(lines)
 
 
@@ -346,8 +356,12 @@ def evening_report(ctx, send=None, force=False):
     if not me or not R.secret(ctx, key):
         return False
     subject, body = report_text(ctx)
+    html, images = "", None
+    with contextlib.suppress(Exception):
+        subject, body, html, art = OW.report_email(ctx, report_text.last)
+        images = {art: OW.image(art)}
     try:
-        send(sender, R.secret(ctx, key), me, subject, body, name="Sebastian")
+        send(sender, R.secret(ctx, key), me, subject, body, name="Owca Sebastian" if html else "Sebastian", html=html, images=images)
     except Exception as e:
         ctx.log.warning(f"Rekrutacja: raport nie wyszedł: {type(e).__name__}: {str(e)[:160]}")
         return False
@@ -664,7 +678,7 @@ def make_app(ctx, hosts=None):
 
     @app.route("/owca/<name>.png")
     def owca_art(name):
-        if name not in ("rano", "motywacja", "brawo"):
+        if name not in ("rano", "motywacja", "brawo", "wieczor"):
             abort(404)
         return send_file(OW.ART / f"{name}.png", mimetype="image/png", max_age=86400)
 

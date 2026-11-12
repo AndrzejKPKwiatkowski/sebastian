@@ -324,3 +324,8 @@ Data: 2026-11-12. `test_rekrutacja` — 70 testów zaliczonych; pozostałe zesta
 # Weryfikacja 2.10
 
 Data: 2026-11-12. `test_rekrutacja` — 75 testów zaliczonych; pozostałe zestawy zaliczone. Alert Pracuj.pl: 4 oferty w mailu → 2 w kolejce (bez kierowcy i bez Bochni przy 20 km), firma z treści maila, bez powiadomień, bez powtórek; potwierdzenie z portalu i mail od pracodawcy nie są alertem. CBOP: bez nazwy partnera i w dzień nic; wieczorem zapytanie z Partner i Wojewodztwo 12, ZIP z JSON → oferta z e-mailem urzędu gminy (magazynier i Tarnów odfiltrowane), raz na dobę, „Niepoprawna autoryzacja” rozpoznana. Zakładka i strona „Więcej ofert” działają; mail „Mam pomysł!” wychodzi dopiero w następny dzień roboczy rano, raz. Strukturę zapytania CBOP oparto na instrukcji ePraca (wersja 3); prawdziwego połączenia z CBOP nie sprawdzono (wymaga nazwy partnera).
+
+
+# Weryfikacja 2.11
+
+Data: 2026-11-12. `test_rekrutacja` — 77 testów zaliczonych; pozostałe zestawy zaliczone. Raport wieczorny: HTML z owcą wieczorną, odpowiedzi, lista wysłanych, przycisk do panelu, linia owcy w wersji tekstowej. Powiadomienie o zaproszeniu: HTML z owcą, streszczeniem, terminem i linkiem do wiadomości. Oba obejrzane w przeglądarce.

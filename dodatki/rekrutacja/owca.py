@@ -542,7 +542,7 @@ def stage_action(ctx, c, aid, action):
             ctx.set_setting(k, v)
         R.note(c, ctx, aid, "Aga przyjęła ofertę — szukanie i wysyłka wstrzymane")
         c.commit()
-        return f"Gratulacje! Zapisałam: przyjęta oferta w {a['firma']}. Szukanie i wysyłka są wstrzymane."
+        return f"Gratulacje! Zapisałem: przyjęta oferta w {a['firma']}. Szukanie i wysyłka są wstrzymane."
     R.set_status(c, ctx, aid, action)
     R.note(c, ctx, aid, f"Aga z maila owcy: {R.STATUS[action]}")
     c.commit()
@@ -620,3 +620,85 @@ def compose_idea(ctx, c):
             "a ja będę z nich brać oferty.\n\n" + "\n\n".join(f"{i + 1}. {t}\n- " + "\n- ".join(items) for i, (_, t, items) in enumerate(MORE_STEPS))
             + f"\n\nFrazy: {', '.join(PHRASES)}\n\n" + (f"{base}/wiecej-ofert\n\n" if base else "") + "Owca Sebastian")
     return f"🐑 {hi}! Mam pomysł, jak zrobić, żeby było więcej ofert!", text, _page(title, lead, how + steps + phrases + tip + cta, "motywacja"), "motywacja"
+
+
+# ================================================================ pozostałe maile do Agi w stylu owcy
+
+def _hi(f):
+    name = f["osoba"].get("imie") or "Aga"
+    return "Ago" if name.lower().startswith("agn") or name.lower() == "aga" else name
+
+
+def _rows(items):
+    """[(tekst główny, opis, kolor etykiety|None, etykieta)] → lista w karcie."""
+    out = ""
+    for main, sub, color, tag in items:
+        badge = (f'<span style="display:inline-block;background:{color}1a;color:{color};font-size:12px;font-weight:600;'
+                 f'padding:3px 9px;border-radius:999px;white-space:nowrap">{H.escape(tag)}</span>') if tag else ""
+        out += (f'<tr><td style="padding:10px 0;border-bottom:1px solid #ececf0"><div style="font-weight:600">{H.escape(main)}</div>'
+                + (f'<div style="font-size:13px;color:{SOFT}">{H.escape(sub)}</div>' if sub else "")
+                + f'</td><td align="right" style="padding:10px 0 10px 10px;border-bottom:1px solid #ececf0">{badge}</td></tr>')
+    return f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px">{out}</table>' if out else ""
+
+
+KIND_COLORS = {"zaproszenie": "#34c759", "oferta": "#34c759", "zadanie": "#ff9f0a", "pytanie": "#ff9f0a",
+               "do_potwierdzenia": "#ff3b30", "odmowa": "#86868b"}
+
+
+def report_email(ctx, data):
+    """Raport wieczorny: (temat, tekst, html, obrazek). data — z panel.report_data."""
+    f = R.load_facts(ctx)
+    hi = _hi(f)
+    d = data
+    reached = d["cel"] and d["zrobione"] >= d["cel"]
+    art = "brawo" if reached else "wieczor"
+    title = f"Dobry wieczór, {hi}!"
+    if reached:
+        lead = f"Cel dnia zrobiony: {d['zrobione']}/{d['cel']}. Piękna robota!"
+    elif d["wyslane"]:
+        lead = f"Dziś {d['wyslane']} {_plural(d['wyslane'], 'aplikacja poszła', 'aplikacje poszły', 'aplikacji poszło')} w świat."
+    else:
+        lead = "Spokojny dzień. Jutro ruszamy dalej."
+    stats = [(f"{d['wyslane']}", "wysłane dziś"), (f"{d['seria']} {_plural(d['seria'], 'dzień', 'dni', 'dni')}", "seria"), (str(d["czeka"]), "czeka na Ciebie")]
+    cells = "".join(f'<td align="center" style="padding:6px 4px;width:33%"><div style="font-size:22px;font-weight:700">{H.escape(a)}</div>'
+                    f'<div style="font-size:12px;color:{SOFT}">{H.escape(b)}</div></td>' for a, b in stats)
+    body = f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{BG};border-radius:16px;margin:0 0 6px"><tr>{cells}</tr></table>'
+    if d["cel"]:
+        body += f'<p style="margin:14px 0 6px;font-size:13px;color:{SOFT}">Cel dnia: {d["zrobione"]} z {d["cel"]}</p>' + _bar(d["zrobione"], d["cel"])
+    if d["odpowiedzi"]:
+        body += '<div style="font-size:17px;font-weight:700;margin:22px 0 2px">Odpowiedzi od pracodawców</div>' + _rows(
+            [(r["firma"] or "Firma", "", KIND_COLORS.get(r["rodzaj"], SOFT), r["etykieta"]) for r in d["odpowiedzi"]])
+    if d["lista"]:
+        body += '<div style="font-size:17px;font-weight:700;margin:22px 0 2px">Wysłane dziś</div>' + _rows(
+            [(r["firma"] or "(firma)", r["stanowisko"] or "zapytanie o współpracę", "", "") for r in d["lista"][:25]])
+        if len(d["lista"]) > 25:
+            body += f'<p style="margin:0;color:{SOFT};font-size:13px">…i jeszcze {len(d["lista"]) - 25}.</p>'
+    extra = []
+    if d["znalezione"]:
+        extra.append(f"Znalazłem dziś {d['znalezione']} nowych ogłoszeń (słabo pasujące pomijam sam).")
+    if d["kolejka"]:
+        extra.append(f"W kolejce na kolejny dzień roboczy: {d['kolejka']}.")
+    extra.append(f"Łącznie wysłanych: {d['lacznie']} · zaproszenia i rozmowy: {d['zaproszenia']}.")
+    body += _section("W skrócie", [H.escape(x) for x in extra])
+    if d["url"]:
+        body += f'<p style="margin:22px 0 0">{_button(d["url"] + ("/do-zrobienia" if d["czeka"] else ""), "Przejrzyj w panelu" if d["czeka"] else "Otwórz panel")}</p>'
+    subject = (f"🌙 Dziś {d['wyslane']} wysłanych" + (f" · cel {d['zrobione']}/{d['cel']} ✓" if reached else "")
+               + (f" · {d['czeka']} czeka na Ciebie" if d["czeka"] else ""))
+    return subject, d["tekst"], _page(title, lead, body, art,
+                                      "Owca Sebastian · raport wieczorny. Godzinę raportu zmienisz w panelu: Ustawienia → Jak pracuję."), art
+
+
+def notify_email(ctx, kind, firm, job, summary, term, link):
+    """Powiadomienie o ważnej odpowiedzi (zaproszenie, oferta, zadanie): (temat, html, obrazek)."""
+    label = {"zaproszenie": "Zaproszenie na rozmowę!", "oferta": "Propozycja pracy!", "zadanie": "Zadanie rekrutacyjne"}.get(kind, "Ważna wiadomość")
+    lead = f"{firm}" + (f" · {job}" if job else "")
+    box = (f'<div style="background:{BG};border-radius:16px;padding:16px 18px;font-size:15px;line-height:22px">{H.escape(summary)}'
+           + (f'<div style="margin-top:10px"><b>Termin:</b> {H.escape(term)}</div>' if term else "") + "</div>")
+    after = {"zaproszenie": "Przygotowanie do rozmowy przyślę osobno. Szkic odpowiedzi z potwierdzeniem terminu czeka w panelu.",
+             "oferta": "Zanim odpowiesz, przyślę listę rzeczy do sprawdzenia w propozycji. Szkic odpowiedzi czeka w panelu.",
+             "zadanie": "Wskazówki do zadania przyślę osobno. Szkic odpowiedzi czeka w panelu."}.get(kind, "")
+    body = box + (f'<p style="margin:16px 0 0">{H.escape(after)}</p>' if after else "") + (
+        f'<p style="margin:20px 0 0">{_button(link, "Otwórz odpowiedź i szkic")}</p>' if link else "")
+    art = "brawo" if kind in ("zaproszenie", "oferta") else "motywacja"
+    emoji = {"zaproszenie": "📅", "oferta": "🎉", "zadanie": "📝"}.get(kind, "🐑")
+    return f"{emoji} {label.rstrip('!')}: {firm}", _page(label, lead, body, art), art

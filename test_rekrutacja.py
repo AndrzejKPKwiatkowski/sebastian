@@ -367,7 +367,7 @@ class Replies(RekrutacjaBase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["to_phone"], "48600000000")
         self.assertIn("Zaproszenie na rozmowę", out[0]["body"])
-        self.assertTrue(any(m["subject"].startswith("Zaproszenie") and m["to"] == "anna.testowa@gmail.com" for m in self.sent))
+        self.assertTrue(any("Zaproszenie na rozmowę" in m["subject"] and m["to"] == "anna.testowa@gmail.com" and "cid:brawo" in m["html"] for m in self.sent))
         with self.R.db(self.ctx) as c:
             q = c.execute("SELECT * FROM pytania").fetchone()
             w = c.execute("SELECT * FROM wiadomosci").fetchone()
@@ -1465,6 +1465,44 @@ class MoreOffers2100(RekrutacjaBase):
             self.assertIn(part, mail["html"])
         self.assertEqual(self.OW.tick(self.ctx, self.fake_send, dt.datetime(2026, 11, 11, 7, 55, tzinfo=s.TZ)), "rano")   # potem zwykły poranek
         self.assertNotEqual(self.OW.tick(self.ctx, self.fake_send, dt.datetime(2026, 11, 12, 7, 50, tzinfo=s.TZ)), "pomysl")
+
+
+
+class SheepMails2110(RekrutacjaBase):
+    def setUp(self):
+        super().setUp()
+        self.A = importlib.import_module(self.mod.__name__ + ".odpowiedzi")
+        self.ready()
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "adres_panelu", "http://mac:8790")
+
+    def test_evening_report_in_sheep_style(self):
+        aid = self.add(firma="Biuro Lex", stanowisko="Asystentka", status="wyslana", wyslano=self.ctx.now().isoformat())
+        self.add(firma="Firma B", status="do_zatwierdzenia")
+        with self.R.db(self.ctx) as c:
+            c.execute("INSERT INTO wiadomosci(uid,od,temat,tresc,aplikacja_id,rodzaj,wazne,status,utworzono) VALUES(9,'hr@lex.pl','x','x',?,'zaproszenie',1,'nowa',?)",
+                      (aid, self.R.stamp(self.ctx)))
+            c.commit()
+        self.assertTrue(self.P.evening_report(self.ctx, send=self.fake_send, force=True))
+        m = self.sent[-1]
+        self.assertTrue(m["subject"].startswith("🌙 Dziś 1 wysłanych"))
+        self.assertIn("cid:wieczor", m["html"])
+        self.assertEqual(m["images"], ["wieczor"])
+        for part in ("Dobry wieczór", "Biuro Lex", "zaproszenie na rozmowę", "Wysłane dziś", "http://mac:8790/do-zrobienia", "Cel dnia: 1 z"):
+            self.assertIn(part, m["html"])
+        self.assertIn("🐑 Cel dnia: 1/", m["body"])                                     # linia owcy w wersji tekstowej (wcześniej znikała)
+
+    def test_invitation_notification_in_sheep_style(self):
+        aid = self.add(firma="Biuro Lex", stanowisko="Asystentka", status="wyslana", wyslano="2026-11-09T10:00:00+01:00", email="hr@lex.pl")
+        box = [{"uid": 70, "message_id": "<z70@lex>", "od": "hr@lex.pl", "od_nazwa": "Kadry", "temat": "Rozmowa", "data": "2026-11-10T11:00:00",
+                "in_reply_to": "", "references": "", "auto": False, "tresc": "Dziękujemy za aplikację na stanowisko Asystentka. Zapraszamy Panią na rozmowę kwalifikacyjną 20.11 o godz. 10:00."}]
+        with patch.object(W, "ask", lambda prompt, **kw: json.dumps({"rodzaj": "zaproszenie", "streszczenie": "Biuro Lex zaprasza Cię na rozmowę 20.11 o 10:00.",
+                                                                       "termin": "20.11, 10:00", "pytania": []})):
+            self.A.check_inbox(self.ctx, send=self.fake_send, fetch=lambda *a, **k: box)
+        mail = next(m for m in self.sent if m["to"] == self.facts["osoba"]["email"] or "Zaproszenie" in m["subject"])
+        self.assertEqual(mail["subject"], "📅 Zaproszenie na rozmowę: Biuro Lex")
+        for part in ("cid:brawo", "zaprasza Cię na rozmowę", "20.11, 10:00", "http://mac:8790/wiadomosc/"):
+            self.assertIn(part, mail["html"])
 
 if __name__ == "__main__":
     unittest.main()

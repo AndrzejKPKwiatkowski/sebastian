@@ -257,13 +257,13 @@ def whatsapp(ctx, f, text, dedupe):
     return False
 
 
-def notify_mail(ctx, subject, body, send):
+def notify_mail(ctx, subject, body, send, html="", images=None):
     with R.db(ctx) as c:
         me, seb = R.mailboxes(c)
     sender, key = (seb, "sebastian") if seb and R.secret(ctx, "sebastian") else (me, "aga")
     if me and R.secret(ctx, key):
         with contextlib.suppress(Exception):
-            send(sender, R.secret(ctx, key), me, subject, body, name="Sebastian")
+            send(sender, R.secret(ctx, key), me, subject, body, name="Owca Sebastian" if html else "Sebastian", html=html, images=images)
             return True
     return False
 
@@ -358,7 +358,12 @@ def check_inbox(ctx, send=None, fetch=None):
             text = (f"*{label}*\n{firm}{' — ' + app['stanowisko'] if app.get('stanowisko') else ''}\n\n{info['streszczenie']}"
                     + (f"\n\nTermin: {info['termin']}" if info["termin"] else "") + (f"\n\nSzkic odpowiedzi czeka w panelu: {url}" if url else ""))
             whatsapp(ctx, f, text, dedupe=f"rek:{wid}")
-            notify_mail(ctx, f"{label.split(' ', 1)[1]}: {firm}", text.replace("*", ""), send)
+            subject, html, art = f"{label.split(' ', 1)[1]}: {firm}", "", None
+            with contextlib.suppress(Exception):
+                from . import owca as OW
+                subject, html, art = OW.notify_email(ctx, kind, firm, app.get("stanowisko") or "", info["streszczenie"], info["termin"],
+                                                     f"{url}/wiadomosc/{wid}" if url else "")
+            notify_mail(ctx, subject, text.replace("*", ""), send, html=html, images={art: OW.image(art)} if html else None)
         elif kind == "pytanie":
             whatsapp(ctx, f, f"*❓ {firm} pyta*\n{info['streszczenie']}" + ("\n\nPotrzebuję Twojej odpowiedzi w panelu." if missing else "\n\nSzkic odpowiedzi czeka w panelu."),
                      dedupe=f"rek:{wid}")
