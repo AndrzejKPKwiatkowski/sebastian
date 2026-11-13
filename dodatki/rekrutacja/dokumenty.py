@@ -601,6 +601,8 @@ def write(ctx, prompt, max_tokens=1100, temperature=0.4):
     got = GM.ask_json(ctx, prompt, max_tokens=max_tokens, temperature=temperature)
     if isinstance(got, dict):
         return got
+    if GM.ONLY["on"]:
+        return None
     m = writer_model(ctx)
     if m:
         with contextlib.suppress(Exception):

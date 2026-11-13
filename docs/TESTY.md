@@ -353,3 +353,7 @@ Data: 2026-11-13. `test_rekrutacja` — 83 testy zaliczone; pozostałe zestawy z
 - przypomnienie wychodzi raz i kończy przerwę; dni przerwy nie przerywają serii;
 - wiadomość o kryzysie → troska i telefon zaufania, bez modelu i bez pchania;
 - rozpoznawanie terminów (dzień tygodnia, „jutro wieczorem”, „za tydzień”, data); strona Rozmowa w panelu.
+
+# Weryfikacja 2.13.1
+
+`GeminiLimits2131`: kolejność modeli (flash → starszy flash → flash-lite, bez preview i pro); dzienny limit (QuotaFailure *PerDay*) blokuje model do rana i następne zapytanie idzie innym; 503 → krótka przerwa i inny model; `retryDelay` z odpowiedzi Google; gdy wszystkie odpoczywają — przerwa bez zapytań; przepisywanie nie woła modelu lokalnego.

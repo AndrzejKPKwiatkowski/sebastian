@@ -407,7 +407,9 @@ def work_once(ctx):
             row = c.execute("SELECT id FROM aplikacje WHERE status='nowa' ORDER BY id LIMIT 1").fetchone()
     if row:
         prepare(ctx, row["id"])
-    if not busy:
+    with R.db(ctx) as c:
+        manual = time.time() - float(R.meta_get(c, "gemini_reczne", "0") or 0) < 300   # trwa polecenie „przepisz” — nie dzielę limitu
+    if not busy and not manual:
         with contextlib.suppress(Exception):                          # czekające listy sprzed Gemini piszę na nowo (po jednym na obrót)
             refresh_letter(ctx) or (None if row else refresh_match(ctx))
     send_one(ctx)
@@ -505,7 +507,11 @@ def refresh_letter(ctx, statuses=REWRITE, only=None):
         info = analysis(a)
         sel = json.loads(a["wybor"] or "null")
         t0 = time.time()
-        letter, mail, by_model = D.compose(ctx, f, a, sel)
+        GM.ONLY["on"] = True
+        try:
+            letter, mail, by_model = D.compose(ctx, f, a, sel)
+        finally:
+            GM.ONLY["on"] = False
         if not GM.used_since(t0):
             return None                                               # Gemini nie odpisało (limit, błąd) — spróbuję później
         info["list_v"] = 3

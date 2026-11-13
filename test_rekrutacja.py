@@ -1616,7 +1616,9 @@ class Rewrite2121(Gemini2120):
             with self.R.db(self.ctx) as c:
                 pauses.append(float(self.R.meta_get(c, "gemini_przerwa", "0")) - time.time())
         self.assertLess(pauses[0], 70)                                            # pierwsza przerwa ok. minuty, nie godzina
-        self.assertGreater(pauses[2], pauses[0] * 3)                              # kolejne coraz dłuższe
+        self.assertGreater(pauses[1], pauses[0] + 20)                             # kolejne dłuższe
+        with self.R.db(self.ctx) as c:
+            self.assertIn("gemini-3.1-flash", self.GM.blocks(c))                  # po trzecim razie ten model odpoczywa
         with self.R.db(self.ctx) as c:
             self.R.meta_set(c, "gemini_przerwa", 0); c.commit()
         self.code = 200
@@ -1647,6 +1649,81 @@ class Rewrite2121(Gemini2120):
         with patch("builtins.print"):
             init.COMMANDS["przepisz"](self.ctx, ["--takze-zatwierdzone"])
         self.assertIn("od razu zwróciło moją uwagę", self.row(a2)["list"])
+
+
+class GeminiLimits2131(Gemini2120):
+    """2.13.1: dzienny limit i przeciążenie jednego modelu → piszę następnym; bez marnowania czasu modelu lokalnego."""
+    def setUp(self):
+        super().setUp()
+        self.per_model = {}
+
+    def key(self):
+        self.R.set_secret(self.ctx, "gemini", "klucz-testowy")
+
+    def http(self, method, url, key, body):
+        for name, (code, data) in self.per_model.items():
+            if f"/{name}:" in url:
+                self.calls.append((method, url, body))
+                return code, data
+        return super().http(method, url, key, body)
+
+    def used(self):
+        return [c[1].split("/models/")[1].split(":")[0] for c in self.calls if c[0] == "POST"]
+
+    def test_order_of_models(self):
+        self.assertEqual(self.GM.ranked(["models/gemini-2.0-flash", "models/gemini-3.1-flash", "models/gemini-3.1-flash-lite",
+                                         "models/gemini-3.5-flash-preview", "models/gemini-3.1-pro"]),
+                         ["gemini-3.1-flash", "gemini-2.0-flash", "gemini-3.1-flash-lite"])
+
+    def test_daily_limit_switches_model_until_morning(self):
+        self.key()
+        self.per_model["gemini-3.1-flash"] = (429, {"error": {"code": 429, "message": "Quota exceeded", "details": [
+            {"@type": "type.googleapis.com/google.rpc.QuotaFailure",
+             "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}})
+        self.assertIsNone(self.GM.ask_json(self.ctx, "piszesz SWÓJ list"))
+        with self.R.db(self.ctx) as c:
+            left = self.GM.blocks(c)["gemini-3.1-flash"] - time.time()
+            self.R.meta_set(c, "gemini_przerwa", 0)
+        self.assertGreater(left, 60)                                               # do północy w Kalifornii, nie na minutę
+        got = self.GM.ask_json(self.ctx, "piszesz SWÓJ list")
+        self.assertIn("od razu zwróciło moją uwagę", got["list"])
+        self.assertEqual(self.used(), ["gemini-3.1-flash", "gemini-2.0-flash"])
+        self.assertIn("odpoczywają (limit dzienny albo przeciążenie): gemini-3.1-flash", self.GM.status(self.ctx))
+
+    def test_overload_tries_next_model_and_retry_delay(self):
+        self.key()
+        self.per_model["gemini-3.1-flash"] = (503, {"error": {"code": 503, "message": "The model is overloaded."}})
+        self.assertIsNone(self.GM.ask_json(self.ctx, "piszesz SWÓJ list"))
+        with self.R.db(self.ctx) as c:
+            self.assertLess(float(self.R.meta_get(c, "gemini_przerwa")) - time.time(), 30)   # krótka przerwa
+            self.R.meta_set(c, "gemini_przerwa", 0)
+        self.per_model["gemini-2.0-flash"] = (429, {"error": {"code": 429, "details": [
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "41s"}]}})
+        self.assertIsNone(self.GM.ask_json(self.ctx, "piszesz SWÓJ list"))
+        with self.R.db(self.ctx) as c:
+            self.assertGreater(float(self.R.meta_get(c, "gemini_przerwa")) - time.time(), 40)
+        self.assertEqual(self.used(), ["gemini-3.1-flash", "gemini-2.0-flash"])
+
+    def test_all_models_resting_means_pause(self):
+        self.key()
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "gemini_blokady", json.dumps({n: time.time() + 500 for n in ("gemini-3.1-flash", "gemini-2.0-flash", "gemini-3.1-flash-lite")}))
+        self.assertIsNone(self.GM.ask_json(self.ctx, "piszesz SWÓJ list"))
+        self.assertFalse(self.GM.available(self.ctx))
+        self.assertEqual(self.used(), [])
+
+    def test_rewrite_does_not_fall_back_to_local_model(self):
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        self.key()
+        local = []
+        orig = W.ask
+        with patch.object(W, "ask", lambda prompt, *a, **k: local.append(prompt) or orig(prompt, *a, **k)):
+            self.per_model["gemini-3.1-flash"] = (503, {})
+            self.assertIsNone(self.P.refresh_letter(self.ctx))
+        self.assertFalse([p for p in local if "piszesz SWÓJ list" in p])           # bez lokalnego listu „na próżno”
+        self.assertEqual(self.P.letters_to_rewrite(self.ctx), [aid])
+
 
 
 class Conversation213(RekrutacjaBase):

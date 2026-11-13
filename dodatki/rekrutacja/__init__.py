@@ -253,17 +253,28 @@ def cmd_przepisz(ctx, args):
     if not todo:
         print("Wszystkie czekające listy są już napisane przez Gemini.")
         return 0
-    print(f"Do przepisania: {len(todo)} listów. Zajmie to ok. {max(1, round(len(todo) * 15 / 60))} min (tempo dla darmowego limitu Google).")
+    print(f"Do przepisania: {len(todo)} listów. Przy darmowym limicie Google to ok. {max(1, round(len(todo) * 30 / 60))} min albo dłużej. "
+          "Możesz przerwać (Ctrl+C) — reszta i tak przepisze się w tle.")
+
+    def mark():
+        with R.db(ctx) as c:
+            R.meta_set(c, "gemini_reczne", _t.time())
+
+    def why():
+        with R.db(ctx) as c:
+            return R.meta_get(c, "gemini_powod") or "limit Google"
     done = 0
     for i, aid in enumerate(todo, 1):
-        for attempt in range(6):
+        for attempt in range(8):
+            mark()
             if not GM.available(ctx):
                 with R.db(ctx) as c:
                     wait = max(5, float(R.meta_get(c, "gemini_przerwa", "0") or 0) - _t.time())
-                if wait > 3700:
-                    print("Wyczerpany dzienny limit zapytań — reszta jutro (albo podnieś limit w Ustawieniach).")
+                if wait > 1800:
+                    print(f"Stop: {why()}.")
+                    print(f"Przepisano {done} z {len(todo)}. Resztę dokończę sam w tle, gdy Google znów pozwoli (dzienne limity wracają ok. 9:00).")
                     return 0
-                print(f"   limit Google — czekam {int(wait)} s…")
+                print(f"   {why()} — czekam {int(wait)} s…")
                 _t.sleep(wait + 1)
                 continue
             if P.refresh_letter(ctx, statuses, only=aid):
@@ -271,8 +282,9 @@ def cmd_przepisz(ctx, args):
                 print(f"  {i}/{len(todo)} ✓")
                 break
             if aid not in P.letters_to_rewrite(ctx, statuses):
-                print(f"  {i}/{len(todo)} — pominięta (zmieniła status albo list nie przeszedł kontroli)")
+                print(f"  {i}/{len(todo)} — pominięta (zmieniła status)")
                 break
+            print(f"   {why()}")
     print(f"Gotowe: przepisano {done} z {len(todo)}. Nowe listy i PDF-y są w panelu.")
     return 0
 
