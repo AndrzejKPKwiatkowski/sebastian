@@ -277,5 +277,11 @@ def cmd_przepisz(ctx, args):
     return 0
 
 
+def on_user_message(ctx, msg):
+    """WhatsApp od osoby z listy Sebastiana (nie właściciela): jeśli to Aga — Sebastian odpisuje jak w rozmowie."""
+    from . import rozmowa as RZ
+    return RZ.on_whatsapp(ctx, msg)
+
+
 COMMANDS = {"przepisz": cmd_przepisz, "uzupelnij": cmd_uzupelnij, "szukaj": cmd_szukaj, "skrzynka": cmd_skrzynka, "raport": cmd_raport, "start": cmd_start, "usluga": cmd_usluga, "adres": cmd_adres, "haslo": cmd_haslo, "status": cmd_status,
             "ustawienia": cmd_ustawienia, "ustaw": cmd_ustaw}

@@ -341,3 +341,15 @@ Data: 2026-11-13. `test_rekrutacja` — 83 testy zaliczone; pozostałe zestawy z
 - `Rewrite2121.test_local_text_not_marked_as_gemini` — bez odpowiedzi Gemini list nie jest oznaczany jako przepisany.
 - `Rewrite2121.test_command_rewrites_all_and_keeps_approved` — `przepisz` przepisuje czekające, zatwierdzone tylko z flagą.
 - W testach tempo (`PACE`) wyłączone; bez sieci.
+
+# Weryfikacja 2.13
+
+`Conversation213` (bez sieci, model udawany):
+- „nie mam dziś czasu” bez modelu → pytanie o termin, owca milczy do końca dnia; „w czwartek o 10” → przypomnienie 12.11 10:00;
+- odpowiedź modelu: przerwa, przypomnienie, pamięć; kolejna wiadomość ma w poleceniu historię i pamięć; cel dnia z rozmowy; bez powtórek w pamięci;
+- zły rodzaj gramatyczny → poprawka, potem reguły;
+- mail od Agi: odpowiedź w tym samym wątku, bez cytatu, obcy nadawca pominięty, bez podwójnej odpowiedzi, wyłączenie w ustawieniach;
+- WhatsApp od Agi przez `dodatki_host.on_message` → odpowiedź na jej numer; „/…” i obce numery przechodzą dalej;
+- przypomnienie wychodzi raz i kończy przerwę; dni przerwy nie przerywają serii;
+- wiadomość o kryzysie → troska i telefon zaufania, bez modelu i bez pchania;
+- rozpoznawanie terminów (dzień tygodnia, „jutro wieczorem”, „za tydzień”, data); strona Rozmowa w panelu.

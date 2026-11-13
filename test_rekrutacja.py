@@ -1648,5 +1648,156 @@ class Rewrite2121(Gemini2120):
             init.COMMANDS["przepisz"](self.ctx, ["--takze-zatwierdzone"])
         self.assertIn("od razu zwróciło moją uwagę", self.row(a2)["list"])
 
+
+class Conversation213(RekrutacjaBase):
+    """2.13: Sebastian odpisuje Adze, pamięta rozmowę, wstrzymuje owcę i przypomina w umówionym terminie."""
+    def setUp(self):
+        super().setUp()
+        pkg = self.mod.__name__
+        self.RZ = importlib.import_module(pkg + ".rozmowa")
+        self.OW = importlib.import_module(pkg + ".owca")
+        self.A = importlib.import_module(pkg + ".odpowiedzi")
+        self.ready()
+        self.answers, self.prompts = [], []
+        orig = self.model.__call__
+        def talk(prompt, as_json=False, max_tokens=1200, temperature=0.4):
+            if "NOWA WIADOMOŚĆ OD AGI" in prompt or "prosiła, żeby przypomnieć" in prompt:
+                self.prompts.append(prompt)
+                return json.dumps(self.answers.pop(0)) if self.answers else None
+            return orig(prompt, as_json, max_tokens, temperature)
+        self.extra.append(patch.object(W, "ask", talk))
+        self.extra[-1].start()
+
+    def test_busy_without_model_asks_when_and_pauses_sheep(self):
+        text, effects = self.RZ.reply_to(self.ctx, "panel", "Nie mam dziś czasu, sorry")
+        self.assertIn("Kiedy będziesz mogła", text)
+        with self.R.db(self.ctx) as c:
+            self.assertTrue(self.RZ.paused(c, TUE_10.date()))
+            self.assertIsNone(self.OW.due(self.ctx, c, TUE_10.replace(hour=11, minute=5)))   # dziś owca milczy
+            self.assertFalse(self.RZ.paused(c, TUE_10.date() + dt.timedelta(days=1)))
+        text, _ = self.RZ.reply_to(self.ctx, "panel", "W czwartek o 10")                        # odpowiedź na pytanie „kiedy”
+        self.assertIn("Zapisane", text)
+        with self.R.db(self.ctx) as c:
+            rem = self.RZ.pending_reminders(c)
+        self.assertEqual(rem[0]["kiedy"], "2026-11-12T10:00")
+
+    def test_model_reply_reminder_memory_and_context(self):
+        self.answers = [{"odpowiedz": "Udanego wyjazdu, Anno! Odpuszczam przypomnienia, a w poniedziałek rano wrócę z ofertami.",
+                         "przerwa_do": "2026-11-15", "wznow": False, "przypomnij": {"kiedy": "2026-11-16 09:00", "co": "powrót z wyjazdu"},
+                         "cel": None, "zapamietaj": ["Wyjazd 11–15.11.2026", "Woli oferty w centrum Krakowa"]},
+                        {"odpowiedz": "Jasne, dziś 15 to świetny cel.", "przerwa_do": "", "wznow": True, "przypomnij": None, "cel": 15,
+                         "zapamietaj": ["Woli oferty w centrum Krakowa"]}]
+        text, effects = self.RZ.reply_to(self.ctx, "mail", "Od jutra wyjeżdżam do niedzieli")
+        self.assertIn("Udanego wyjazdu", text)
+        self.assertIn("przypomnienie 16.11 09:00", effects)
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(self.RZ.pause_until(c, self.ctx), "2026-11-15")
+            self.assertEqual([m["fakt"] for m in self.RZ.memory(c)], ["Wyjazd 11–15.11.2026", "Woli oferty w centrum Krakowa"])
+        text, effects = self.RZ.reply_to(self.ctx, "whatsapp", "Jednak zostaję, dziś zrobię 15")
+        second = self.prompts[-1]
+        self.assertIn("Od jutra wyjeżdżam do niedzieli", second)                              # historia rozmowy
+        self.assertIn("Udanego wyjazdu", second)
+        self.assertIn("Woli oferty w centrum Krakowa", second)                               # pamięć
+        self.assertIn("1–3 zdania", second)                                                  # WhatsApp: krócej
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(self.RZ.pause_until(c, self.ctx), "")
+            self.assertEqual(self.OW.goal(c, self.ctx, TUE_10.date())[0], 15)
+            self.assertEqual(len(self.RZ.memory(c)), 2)                                      # bez powtórek
+            self.assertEqual(len(self.RZ.history(c, 50)), 4)
+
+    def test_bad_grammar_retried_then_rules(self):
+        self.answers = [{"odpowiedz": "Rozumiem, byłeś zajęty.", "przerwa_do": ""}, {"odpowiedz": "Zrobiłeś dużo.", "przerwa_do": ""}]
+        text, _ = self.RZ.reply_to(self.ctx, "panel", "jestem zajęta")
+        self.assertEqual(len(self.prompts), 2)
+        self.assertIn("rodzaju żeńskim", self.prompts[1])
+        self.assertIn("Kiedy będziesz mogła", text)
+
+    def test_mail_reply_in_thread_without_quote(self):
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "imap_uid_seb", 5)
+        msgs = [{"uid": 6, "message_id": "<a1@gmail>", "od": "anna.testowa@gmail.com", "od_nazwa": "Anna", "temat": "Re: 🐑 3/30 — zostało 27",
+                 "data": TUE_10.isoformat(), "in_reply_to": "", "references": "<x@seb>", "nasza": False,
+                 "tresc": "Dziś nie dam rady, mam dużo na głowie.\n\nW dniu 10.11.2026 Owca Sebastian napisał(a):\n> Hej, jeszcze trochę!"},
+                {"uid": 7, "message_id": "<b1@x>", "od": "obcy@firma.pl", "od_nazwa": "", "temat": "Oferta", "data": TUE_10.isoformat(),
+                 "in_reply_to": "", "references": "", "nasza": False, "tresc": "Kup teraz"}]
+        n = self.RZ.check_mail(self.ctx, send=self.fake_send, fetch=lambda *a, **k: msgs)
+        self.assertEqual(n, 1)
+        out = self.sent[-1]
+        self.assertEqual((out["to"], out["from"], out["in_reply_to"]), ("anna.testowa@gmail.com", "sebastian.test@gmail.com", "<a1@gmail>"))
+        self.assertEqual(out["subject"], "Re: 🐑 3/30 — zostało 27")
+        self.assertIn("Owca Sebastian", out["body"])
+        with self.R.db(self.ctx) as c:
+            hist = self.RZ.history(c)
+            self.assertEqual(R_uid := int(self.R.meta_get(c, "imap_uid_seb")), 7)
+        self.assertEqual(hist[0]["tresc"], "Dziś nie dam rady, mam dużo na głowie.")             # bez cytatu
+        self.assertEqual(self.RZ.check_mail(self.ctx, send=self.fake_send, fetch=lambda *a, **k: msgs), 0)   # drugi raz nie
+        self.ctx.set_setting("rozmowa", "nie")
+        self.assertEqual(self.RZ.check_mail(self.ctx, send=self.fake_send, fetch=lambda *a, **k: 1 / 0), 0)
+
+    def test_whatsapp_from_aga_goes_to_conversation(self):
+        queued = []
+        aga = {"phone": "48600000000", "name": "Anna", "role": "rodzina"}
+        with patch.object(self.A, "aga_phone", lambda ctx, f: "48600000000"), \
+             patch.object(W, "enqueue", lambda con, kind, body="", **k: queued.append((body, k.get("to")))):
+            self.assertTrue(DH.on_message(None, "text", "Nie mam dziś czasu", aga))
+            self.assertFalse(DH.on_message(None, "text", "/pomoc", aga))                        # „/” = zwykły Sebastian
+            self.assertFalse(DH.on_message(None, "text", "Cześć", {"phone": "48111222333", "name": "Ktoś", "role": "rodzina"}))
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0][1], "48600000000")                                         # odpowiedź do Agi, nie do właściciela
+        self.assertIn("Kiedy będziesz mogła", queued[0][0])
+
+    def test_reminder_fires_once_and_ends_pause(self):
+        with self.R.db(self.ctx) as c:
+            self.RZ.set_pause(c, self.ctx, TUE_10.date() + dt.timedelta(days=3))
+            self.RZ.add_reminder(c, self.ctx, TUE_10 - dt.timedelta(minutes=5), "aplikacje", "mail")
+        self.answers = [{"odpowiedz": "Hej Anno, jak się umawialiśmy: czeka na Ciebie kilka ofert. Zerkniesz na 10 minut?"}]
+        self.assertTrue(self.RZ.tick(self.ctx, self.fake_send))
+        self.assertIn("Zerkniesz na 10 minut", self.sent[-1]["body"])
+        self.assertFalse(self.RZ.tick(self.ctx, self.fake_send))
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(self.RZ.pause_until(c, self.ctx), "")
+
+    def test_paused_days_keep_streak(self):
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "owca_przerwy", json.dumps([["2026-11-09", "2026-11-09"]]))
+            self.OW.set_goal(c, self.ctx, dt.date(2026, 11, 6), 1)
+        self.add(status="wyslana", wyslano="2026-11-06T10:00:00", firma="F1", stanowisko="S")
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(self.OW.streak(c, self.ctx, TUE_10.date()), 1)                   # pon. (przerwa) nie przerywa serii
+
+    def test_crisis_gets_care_not_push(self):
+        text, effects = self.RZ.reply_to(self.ctx, "panel", "Nie chcę już żyć, nic mi nie wychodzi")
+        self.assertIn("116 123", text)
+        self.assertEqual(self.prompts, [])
+        with self.R.db(self.ctx) as c:
+            self.assertTrue(self.RZ.paused(c, TUE_10.date() + dt.timedelta(days=2)))
+
+    def test_when_parsing(self):
+        now = TUE_10
+        self.assertEqual(self.RZ.parse_when("w czwartek o 10", now).strftime("%Y-%m-%d %H:%M"), "2026-11-12 10:00")
+        self.assertEqual(self.RZ.parse_when("jutro wieczorem", now).strftime("%Y-%m-%d %H:%M"), "2026-11-11 19:00")
+        self.assertEqual(self.RZ.parse_when("za tydzień", now).date().isoformat(), "2026-11-16")
+        self.assertEqual(self.RZ.parse_when("20.11", now).strftime("%d.%m %H:%M"), "20.11 09:00")
+        self.assertIsNone(self.RZ.parse_when("nie wiem", now))
+
+    def test_panel_page(self):
+        self.RZ.reply_to(self.ctx, "panel", "Nie mam dziś czasu")
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        html = cl.get("/rozmowa").get_data(as_text=True)
+        self.assertIn("Nie mam dziś czasu", html)
+        self.assertIn("wstrzymane do", html)
+        cl.post("/rozmowa", data={"csrf": "t", "co": "koniec_przerwy"})
+        self.assertNotIn("wstrzymane do", cl.get("/rozmowa").get_data(as_text=True))
+        cl.post("/rozmowa", data={"csrf": "t", "co": "napisz", "tresc": "Hej Sebastian"})
+        self.assertIn("Hej Sebastian", cl.get("/rozmowa").get_data(as_text=True))
+
 if __name__ == "__main__":
     unittest.main()

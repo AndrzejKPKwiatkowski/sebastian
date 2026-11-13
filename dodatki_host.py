@@ -15,7 +15,7 @@ from pathlib import Path
 
 W = None                      # moduł whatsapp (związany przez bind)
 log = logging.getLogger("sebastian.dodatki")
-HOST_VERSION = "2.12.1"
+HOST_VERSION = "2.13"
 PERMISSIONS = {
     "whatsapp.wysylanie": "wysyła Ci wiadomości i głosówki na WhatsAppie",
     "whatsapp.obserwacja": "czyta (tylko odczyt) Twoje rozmowy z obserwowanego WhatsAppa",
@@ -180,14 +180,17 @@ def _paused(aid):
 # ================================================================ haki wołane przez Sebastiana
 
 def on_message(con, kind, text, user=None):
-    """Wiadomość od właściciela (tekst albo przepisana głosówka). True = dodatek ją obsłużył (bez zwykłej odpowiedzi)."""
+    """Wiadomość (tekst albo przepisana głosówka). True = dodatek ją obsłużył (bez zwykłej odpowiedzi).
+    Od właściciela → on_message(ctx, msg); 2.13: od innej osoby z listy → on_user_message(ctx, msg), odpowiedź idzie do niej."""
     msg = {"kind": kind, "text": text or "", "voice": kind == "voice", "user": user}
+    owner = not user or user.get("role") == "wlasciciel"
+    hook = "on_message" if owner else "on_user_message"
     for mod, ctx in active():
-        if _paused(ctx.id) or not hasattr(mod, "on_message"):
+        if _paused(ctx.id) or not hasattr(mod, hook):
             continue
         try:
             ctx._con = con
-            out = mod.on_message(ctx, msg)
+            out = getattr(mod, hook)(ctx, msg)
             _STATE.setdefault(ctx.id, {"errors": 0, "paused_until": 0, "last_tick": 0})["errors"] = 0
         except Exception as e:
             _fail(ctx.id, "wiadomość", e)
@@ -195,7 +198,7 @@ def on_message(con, kind, text, user=None):
         finally:
             ctx._con = None
         if isinstance(out, str) and out.strip():
-            _w().enqueue(con, "text", out.strip()[:3500], purpose=f"reply:{ctx.id}", to="")
+            _w().enqueue(con, "text", out.strip()[:3500], purpose=f"reply:{ctx.id}", to="" if owner else user.get("phone", ""))
             return True
         if out is True:
             return True

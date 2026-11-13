@@ -1,5 +1,7 @@
 """Testy 2.7: gniazdo na dodatki + Przypominacz. Bez WhatsAppa, bez Ollamy, bez Twilio — wszystko udawane."""
 import contextlib, datetime as dt, io, json, time, unittest
+import os
+os.environ["SEBASTIAN_TESTY"] = "1"          # testy nie dotykają prawdziwego pęku kluczy macOS (hasła Gmaila, klucze API)
 from unittest.mock import patch
 
 import sebastian as s

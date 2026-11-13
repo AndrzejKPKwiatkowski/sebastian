@@ -58,8 +58,9 @@ def progress(c, day):
 def streak(c, ctx, day):
     """Ile kolejnych dni roboczych przed dziś (i dziś, jeśli już się udało) cel był osiągnięty."""
     n, d = 0, day
+    from . import rozmowa as RZ
     for i in range(60):
-        if not working_day(ctx, d):
+        if not working_day(ctx, d) or (d != day and RZ.paused(c, d)):     # dni przerwy nie przerywają serii
             d -= dt.timedelta(days=1)
             continue
         g, _ = goal(c, ctx, d)
@@ -130,6 +131,9 @@ def due(ctx, c, now=None):
     day = now.date()
     if not st.get("owca", True) or st.get("wstrzymane") or not working_day(ctx, day) or R.meta_get(c, "onboarding") != "gotowe":
         return None
+    from . import rozmowa as RZ
+    if RZ.paused(c, day):
+        return None                                                    # Aga zajęta albo na wyjeździe — umówiła się z Sebastianem
     sent = json.loads(R.meta_get(c, f"owca_{day.isoformat()}") or "[]")
     morning0 = R.hm(st.get("owca_rano", "07:45"), (7, 45))
     if pending_idea(c, day) and "pomysl" not in sent and morning0 <= now.time() < dt.time(18, 0):
@@ -316,6 +320,8 @@ def tick(ctx, send, now=None):
     except Exception as e:
         ctx.log.warning(f"Rekrutacja: mail owcy nie wyszedł ({type(e).__name__})")
         return None
+    from . import rozmowa as RZ
+    RZ.log(ctx, "mail", "sebastian", text[:700], subject)
     with R.db(ctx) as c:
         mark(c, now.date(), kind)
         if kind == "pomysl":
@@ -520,6 +526,8 @@ def stage_tick(ctx, send, now=None):
     except Exception as e:
         ctx.log.warning(f"Rekrutacja: mail owcy o etapie nie wyszedł ({type(e).__name__})")
         return None
+    from . import rozmowa as RZ
+    RZ.log(ctx, "mail", "sebastian", text[:700], subject)
     with R.db(ctx) as c:
         done = json.loads(R.meta_get(c, "owca_etapy") or "[]")
         R.meta_set(c, "owca_etapy", json.dumps(done + [key]))

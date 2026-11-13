@@ -6,7 +6,7 @@ dane dodatku Rekrutacja.
 import contextlib, datetime as dt, hmac, json, os, random, re, secrets, subprocess, threading, time
 from pathlib import Path
 
-from . import cbop as CB, dokumenty as D, gemini as GM, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, owca as OW, poczta as P, rdzen as R, wiedza as Wd, zrodla as Z
+from . import cbop as CB, dokumenty as D, gemini as GM, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, owca as OW, poczta as P, rdzen as R, rozmowa as RZ, wiedza as Wd, zrodla as Z
 
 HERE = Path(__file__).resolve().parent
 STEPS = ["Powitanie", "Twoja skrzynka", "Skrzynka Sebastiana", "Twoje dane", "Narzędzia", "Czego szukasz", "Jak mam pracować", "Gotowe"]
@@ -414,7 +414,14 @@ def work_once(ctx):
     with contextlib.suppress(Exception):
         CB.run(ctx)                                                   # CBOP: raz na dobę wieczorem, gdy jest nazwa partnera
     with contextlib.suppress(Exception):
-        OW.stage_tick(ctx, P.send) or OW.tick(ctx, P.send)            # owca: najpierw etapy rekrutacji, potem cel dnia
+        RZ.tick(ctx, P.send) or OW.stage_tick(ctx, P.send) or OW.tick(ctx, P.send)   # umówione przypomnienia, etapy, cel dnia
+    with R.db(ctx) as c:
+        talk = st.get("rozmowa", True) and _due(c, "ostatnia_rozmowa", 120)
+    if talk:
+        try:
+            RZ.check_mail(ctx)                                        # Aga odpisała Sebastianowi — odpowiadam w tym samym wątku
+        except Exception as e:
+            ctx.log.warning(f"Rekrutacja: rozmowa: {type(e).__name__}: {str(e)[:160]}")
     if inbox:
         try:
             A.check_inbox(ctx)
@@ -794,6 +801,24 @@ def make_app(ctx, hosts=None):
         with contextlib.suppress(ValueError):
             OW.set_goal(g.db, ctx, ctx.now().date(), int(request.form.get("cel", "0")))
         return redirect(url_for("home"))
+
+    @app.route("/rozmowa", methods=["GET", "POST"])
+    def talk():
+        if request.method == "POST":
+            what = request.form.get("co", "")
+            if what == "napisz" and request.form.get("tresc", "").strip():
+                RZ.reply_to(ctx, "panel", request.form["tresc"][:3000])
+            elif what == "zapomnij":
+                g.db.execute("DELETE FROM rozmowa_pamiec WHERE id=?", (request.form.get("id", 0),)); g.db.commit()
+            elif what == "odwolaj":
+                g.db.execute("DELETE FROM rozmowa_przypomnienia WHERE id=? AND wyslano=''", (request.form.get("id", 0),)); g.db.commit()
+            elif what == "koniec_przerwy":
+                RZ.end_pause(g.db, ctx)
+            return redirect(url_for("talk") + "#dol")
+        RZ.ensure(g.db)
+        rows = RZ.history(g.db, 80)
+        return render_template("rozmowa.html", tab="rozmowa", rows=rows, mem=RZ.memory(g.db), rem=RZ.pending_reminders(g.db),
+                               pause=RZ.pause_until(g.db, ctx), on=ctx.settings().get("rozmowa", True))
 
     @app.route("/healthz")
     def healthz():
@@ -1315,6 +1340,7 @@ def make_app(ctx, hosts=None):
                 for key in ("bez_niedziel_wieczorow", "bez_prowizji"):
                     ctx.set_setting(key, "tak" if request.form.get(key) else "nie")
                 ctx.set_setting("owca", "tak" if request.form.get("owca") else "nie")
+                ctx.set_setting("rozmowa", "tak" if request.form.get("rozmowa") else "nie")
                 for key in ("owca_rano", "owca_przypomnienia"):
                     val = re.sub(r"\s+", "", request.form.get(key, ""))
                     if val and re.fullmatch(r"\d{1,2}:\d{2}(,\d{1,2}:\d{2})*", val):

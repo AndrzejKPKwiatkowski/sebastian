@@ -241,7 +241,7 @@ def aga_phone(ctx, f):
     return ""
 
 
-def whatsapp(ctx, f, text, dedupe):
+def whatsapp(ctx, f, text, dedupe, log_it=True):
     """Wiadomość do Agi na WhatsAppie (tylko jeśli jej numer jest na liście dozwolonych). True, gdy trafiła do kolejki."""
     if not ctx.settings().get("whatsapp", True):
         return False
@@ -253,6 +253,9 @@ def whatsapp(ctx, f, text, dedupe):
         with contextlib.closing(W.db()) as con:
             when = W.quiet_end() if W.in_quiet() else None
             W.enqueue(con, "text", text[:3000], purpose="rekrutacja", not_before=when, dedupe=dedupe, to=phone)
+            if log_it:
+                from . import rozmowa as RZ
+                RZ.log(ctx, "whatsapp", "sebastian", text.replace("*", ""))
             return True
     return False
 
@@ -264,6 +267,8 @@ def notify_mail(ctx, subject, body, send, html="", images=None):
     if me and R.secret(ctx, key):
         with contextlib.suppress(Exception):
             send(sender, R.secret(ctx, key), me, subject, body, name="Owca Sebastian" if html else "Sebastian", html=html, images=images)
+            from . import rozmowa as RZ
+            RZ.log(ctx, "mail", "sebastian", body[:700], subject)
             return True
     return False
 

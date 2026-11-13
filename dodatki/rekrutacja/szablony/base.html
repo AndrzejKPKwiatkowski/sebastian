@@ -68,6 +68,9 @@ details{margin-top:14px}summary{cursor:pointer;color:var(--blue);font-size:15px}
 .job{border-top:1px solid rgba(0,0,0,.08);padding-top:6px;margin-top:18px}
 ol.steps{padding-left:22px;margin:0 0 6px}ol.steps li{margin:6px 0}
 .kit{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(0,0,0,.07)}.kit span{width:170px;color:var(--soft);font-size:14px;flex:none}.kit code{flex:1;font:15px/1.4 inherit;white-space:pre-wrap;word-break:break-word}
+.chat{display:flex;flex-direction:column;gap:8px}.msg{max-width:82%;padding:10px 14px;border-radius:18px;font-size:15px;line-height:1.42;white-space:pre-wrap;word-break:break-word}
+.msg.aga{align-self:flex-end;background:var(--blue);color:#fff;border-bottom-right-radius:6px}.msg.seb{align-self:flex-start;background:#e9e9eb;color:var(--ink);border-bottom-left-radius:6px}
+.msg small{display:block;font-size:11px;opacity:.7;margin-top:4px}
 iframe.pdf{width:100%;height:560px;border:1px solid var(--line);border-radius:12px;background:#fff}
 </style>
 </head>
@@ -78,6 +81,7 @@ iframe.pdf{width:100%;height:560px;border:1px solid var(--line);border-radius:12
   <a href="{{ url_for('todo') }}" class="{{ 'on' if tab=='todo' }}">Do zrobienia{% if n and n.do_zrobienia %}<span class="badge">{{ n.do_zrobienia }}</span>{% endif %}</a>
   <a href="{{ url_for('replies') }}" class="{{ 'on' if tab=='odp' }}">Odpowiedzi{% if n and n.odpowiedzi %}<span class="badge">{{ n.odpowiedzi }}</span>{% endif %}</a>
   <a href="{{ url_for('all_apps') }}" class="{{ 'on' if tab=='all' }}">Aplikacje</a>
+  <a href="{{ url_for('talk') }}" class="{{ 'on' if tab=='rozmowa' }}">Rozmowa</a>
   <a href="{{ url_for('settings') }}" class="{{ 'on' if tab=='ust' }}">Ustawienia</a>
   <span class="sp"></span>
   <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="btn plain small">Wyloguj</button></form>

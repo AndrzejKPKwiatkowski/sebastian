@@ -1685,7 +1685,7 @@ def handle_incoming(con, transport, msg):
             transport.typing(True, to or None)
         log.info(f"Wiadomość od: {'właściciel' if is_owner(user) else (user['name'] or 'rodzina')} "
                  f"({'głos' if msg['kind'] == 'voice' else 'tekst'}, {len(text)} znaków).")
-        if not (is_owner(user) and addons_message(con, msg["kind"], text, user)):
+        if not addons_message(con, msg["kind"], text, user):           # 2.13: dodatki widzą też wiadomości innych osób z listy
             reply(con, text, voice_in=msg["kind"] == "voice", user=user)
         with contextlib.suppress(Exception):
             transport.typing(False, to or None)
