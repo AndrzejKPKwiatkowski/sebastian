@@ -1504,5 +1504,102 @@ class SheepMails2110(RekrutacjaBase):
         for part in ("cid:brawo", "zaprasza Cię na rozmowę", "20.11, 10:00", "http://mac:8790/wiadomosc/"):
             self.assertIn(part, mail["html"])
 
+
+
+class Gemini2120(RekrutacjaBase):
+    GOOD = ("Ogłoszenie na stanowisko asystentki biura od razu zwróciło moją uwagę, bo opisuje pracę, w której czuję się najpewniej: "
+            "porządek w dokumentach i pilnowanie terminów.\n\nW szpitalu prowadziłam dokumentację i archiwizowałam ją tak, żeby wszystko "
+            "dało się szybko odnaleźć. Koordynowałam terminy i przygotowywałam raporty dla kierownika, co nauczyło mnie dokładności.\n\n"
+            "Pracuję w Excelu i Wordzie na co dzień i lubię, gdy w biurze wszystko jest na swoim miejscu. Dobrze odnajduję się w zespole "
+            "i potrafię zadbać o sprawy bez przypominania.\n\nChętnie opowiem więcej podczas rozmowy. Będę wdzięczna za kontakt.")
+
+    def setUp(self):
+        super().setUp()
+        self.GM = importlib.import_module(self.mod.__name__ + ".gemini")
+        self.GM._MODEL.update(at=0.0, name=None, key="")
+        self.calls = []
+        self.code = 200
+        self.extra.append(patch.object(self.GM, "_http", self.http))
+        self.extra[-1].start()
+        self.ready()
+
+    def http(self, method, url, key, body):
+        self.calls.append((method, url, body))
+        if method == "GET":
+            return 200, {"models": [{"name": f"models/{n}", "supportedGenerationMethods": ["generateContent"]} for n in
+                                    ("gemini-2.0-flash", "gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-preview", "gemini-3.1-pro",
+                                     "gemini-3.1-flash-image", "text-embedding-004")]}
+        if self.code != 200:
+            return self.code, {}
+        prompt = body["contents"][0]["parts"][0]["text"]
+        if "LIST MOTYWACYJNY" in prompt or "piszesz SWÓJ list" in prompt:
+            return 200, {"candidates": [{"content": {"parts": [{"text": json.dumps({"list": self.GOOD})}]}}]}
+        return 200, {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]}
+
+    def test_model_choice(self):
+        self.assertEqual(self.GM.pick_model(["models/gemini-2.0-flash", "models/gemini-3.1-flash", "models/gemini-3.1-flash-lite",
+                                            "models/gemini-3.5-flash-preview", "models/gemini-3.1-pro"]), "gemini-3.1-flash")
+        self.assertEqual(self.GM.pick_model(["models/gemini-3.5-flash-preview", "models/gemini-3.1-flash-lite"]), "gemini-3.5-flash-preview")
+        self.assertEqual(self.GM.pick_model(["models/gemini-3.1-pro"], "gemini-3.1-pro"), "gemini-3.1-pro")
+        self.assertIsNone(self.GM.pick_model([]))
+
+    def test_no_key_means_local(self):
+        a = {"stanowisko": "Asystentka biura", "firma": "Firma", "tresc": OFFER, "zrodlo": "oferta", "url": ""}
+        letter, mail, by_model = self.D.compose(self.ctx, self.facts, a)
+        self.assertEqual(self.calls, [])                                          # bez klucza żadnego zapytania do Google
+        self.assertTrue(by_model)
+
+    def test_letter_from_gemini_without_personal_data(self):
+        self.R.set_secret(self.ctx, "gemini", "klucz-testowy")
+        a = {"stanowisko": "Asystentka biura", "firma": "Firma", "tresc": OFFER, "zrodlo": "oferta", "url": ""}
+        letter, mail, by_model = self.D.compose(self.ctx, self.facts, a)
+        self.assertTrue(by_model)
+        self.assertIn("od razu zwróciło moją uwagę", letter)
+        self.assertTrue(letter.rstrip().endswith(self.R.full_name(self.facts)) or self.R.full_name(self.facts) in letter)   # podpis lokalnie
+        sent = json.dumps([c[2] for c in self.calls if c[0] == "POST"], ensure_ascii=False)
+        o = self.facts["osoba"]
+        for private in (self.R.full_name(self.facts), o["email"], o.get("telefon") or "zzz-brak"):
+            self.assertNotIn(private, sent)
+        self.assertIn("WZORY TONU", sent)
+        self.assertTrue(any("gemini-3.1-flash:generateContent" in c[1] for c in self.calls))
+
+    def test_rate_limit_pauses_and_falls_back(self):
+        self.R.set_secret(self.ctx, "gemini", "klucz-testowy")
+        self.code = 429
+        a = {"stanowisko": "Asystentka biura", "firma": "Firma", "tresc": OFFER, "zrodlo": "oferta", "url": ""}
+        letter, mail, by_model = self.D.compose(self.ctx, self.facts, a)
+        self.assertTrue(by_model)                                                  # napisał model lokalny
+        self.assertFalse(self.GM.available(self.ctx))                             # godzina przerwy
+        posts = len([c for c in self.calls if c[0] == "POST"])
+        self.D.compose(self.ctx, self.facts, a)
+        self.assertEqual(len([c for c in self.calls if c[0] == "POST"]), posts)   # w przerwie nie pyta
+        self.assertIn("przerwa", self.GM.status(self.ctx))
+
+    def test_daily_limit_and_switch_off(self):
+        self.R.set_secret(self.ctx, "gemini", "klucz-testowy")
+        self.ctx.set_setting("gemini_limit_dzienny", "10")
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, f"gemini_{self.ctx.now().date().isoformat()}", 10)
+            c.commit()
+        self.assertFalse(self.GM.available(self.ctx))
+        self.ctx.set_setting("gemini_limit_dzienny", "300")
+        self.assertTrue(self.GM.available(self.ctx))
+        self.ctx.set_setting("pisanie", "lokalnie")
+        self.assertFalse(self.GM.available(self.ctx))
+
+    def test_waiting_letters_rewritten_once(self):
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)                                             # bez klucza: list lokalny
+        old = self.row(aid)["list"]
+        self.assertIsNone(self.P.refresh_letter(self.ctx))                        # bez Gemini nic nie ruszam
+        self.R.set_secret(self.ctx, "gemini", "klucz-testowy")
+        self.assertEqual(self.P.refresh_letter(self.ctx), aid)
+        new = self.row(aid)
+        self.assertNotEqual(new["list"], old)
+        self.assertIn("od razu zwróciło moją uwagę", new["list"])
+        self.assertEqual(json.loads(new["analiza"])["list_v"], 3)
+        self.assertTrue((self.P.app_dir(self.ctx, aid) / new["list_plik"]).exists())
+        self.assertIsNone(self.P.refresh_letter(self.ctx))                        # drugi raz już nie
+
 if __name__ == "__main__":
     unittest.main()

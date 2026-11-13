@@ -6,7 +6,7 @@ dane dodatku Rekrutacja.
 import contextlib, datetime as dt, hmac, json, os, random, re, secrets, subprocess, threading, time
 from pathlib import Path
 
-from . import cbop as CB, dokumenty as D, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, owca as OW, poczta as P, rdzen as R, wiedza as Wd, zrodla as Z
+from . import cbop as CB, dokumenty as D, gemini as GM, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, owca as OW, poczta as P, rdzen as R, wiedza as Wd, zrodla as Z
 
 HERE = Path(__file__).resolve().parent
 STEPS = ["Powitanie", "Twoja skrzynka", "Skrzynka Sebastiana", "Twoje dane", "Narzędzia", "Czego szukasz", "Jak mam pracować", "Gotowe"]
@@ -141,7 +141,8 @@ def prepare(ctx, aid):
         profile = D.tailored_profile(ctx, f, a)
         if profile:
             selection.update(profil_tekst=profile, profil_zrodlo="model", profil_model=profile)
-        a["analiza"] = json.dumps(dict(analysis(a), dopasowanie=D.match_report(ctx, f, a, analysis(a).get("wymagania")), v=2), ensure_ascii=False)
+        a["analiza"] = json.dumps(dict(analysis(a), dopasowanie=D.match_report(ctx, f, a, analysis(a).get("wymagania")), v=2,
+                                       list_v=3 if GM.available(ctx) else 2), ensure_ascii=False)
         letter, mail, by_model = D.compose(ctx, f, a, selection)
         notes += D.check(ctx, f, a, letter + ("\n\nOpis w CV: " + profile if profile else ""), mail, by_model=by_model)
         if not by_model:
@@ -406,9 +407,9 @@ def work_once(ctx):
             row = c.execute("SELECT id FROM aplikacje WHERE status='nowa' ORDER BY id LIMIT 1").fetchone()
     if row:
         prepare(ctx, row["id"])
-    elif not busy:
-        with contextlib.suppress(Exception):
-            refresh_match(ctx)                                        # w wolnej chwili: lepsze wyjaśnienia dopasowania
+    if not busy:
+        with contextlib.suppress(Exception):                          # czekające listy sprzed Gemini piszę na nowo (po jednym na obrót)
+            refresh_letter(ctx) or (None if row else refresh_match(ctx))
     send_one(ctx)
     with contextlib.suppress(Exception):
         CB.run(ctx)                                                   # CBOP: raz na dobę wieczorem, gdy jest nazwa partnera
@@ -472,6 +473,37 @@ def migrate_282(ctx):
                 c.commit()
     with R.db(ctx) as c:
         R.meta_set(c, "migracja_282", R.stamp(ctx))
+
+
+def refresh_letter(ctx):
+    """Jedna czekająca aplikacja z listem napisanym przed Gemini → nowy list (tylko gdy Gemini jest dostępne)."""
+    if not GM.available(ctx):
+        return None
+    with R.db(ctx) as c:
+        rows = c.execute("SELECT * FROM aplikacje WHERE status IN ('do_zatwierdzenia','do_sprawdzenia','formularz') AND list<>'' "
+                         "AND analiza NOT LIKE '%\"list_v\": 3%' ORDER BY id DESC LIMIT 5").fetchall()
+    f = R.load_facts(ctx)
+    for r in rows:
+        a = dict(r)
+        info = analysis(a)
+        sel = json.loads(a["wybor"] or "null")
+        letter, mail, by_model = D.compose(ctx, f, a, sel)
+        info["list_v"] = 3
+        names = (f["osoba"].get("imie", ""), f["osoba"].get("nazwisko", ""))
+        with R.db(ctx) as c:
+            cur = c.execute("SELECT status FROM aplikacje WHERE id=?", (a["id"],)).fetchone()
+            if not cur or cur["status"] not in ("do_zatwierdzenia", "do_sprawdzenia", "formularz"):
+                return None                                           # Aga w międzyczasie zatwierdziła albo odrzuciła — nie ruszam
+            if by_model and not D.language_issues(letter, names):
+                cv, li = render_files(ctx, f, a, letter, sel, a["rodo"])
+                c.execute("UPDATE aplikacje SET list=?, mail=?, cv_plik=?, list_plik=?, analiza=?, zmieniono=? WHERE id=?",
+                          (letter, mail, cv, li, json.dumps(info, ensure_ascii=False), R.stamp(ctx), a["id"]))
+                R.note(c, ctx, a["id"], "list napisany na nowo (Gemini)")
+            else:
+                c.execute("UPDATE aplikacje SET analiza=? WHERE id=?", (json.dumps(info, ensure_ascii=False), a["id"]))
+            c.commit()
+        return a["id"]
+    return None
 
 
 def refresh_match(ctx):
@@ -1323,7 +1355,12 @@ def make_app(ctx, hosts=None):
                 flash(f"Dodane firmy: {added}." + (f" Pominięte (powtórki albo brak adresu): {skipped}." if skipped else ""))
                 return redirect(url_for("settings", czesc="firmy"))
             elif what == "klucze":
-                for field, name in (("adzuna_id", "adzuna_id"), ("adzuna_key", "adzuna_key"), ("jooble", "jooble"), ("brave", "brave")):
+                ctx.set_setting("pisanie", "gemini" if request.form.get("pisanie_gemini") else "lokalnie")
+                lim = request.form.get("gemini_limit_dzienny", "").strip()
+                if lim.isdigit():
+                    ctx.set_setting("gemini_limit_dzienny", str(max(10, min(2000, int(lim)))))
+                ctx.set_setting("gemini_model", re.sub(r"[^a-z0-9.\-]", "", request.form.get("gemini_model", "").lower())[:60])
+                for field, name in (("adzuna_id", "adzuna_id"), ("adzuna_key", "adzuna_key"), ("jooble", "jooble"), ("brave", "brave"), ("gemini", "gemini")):
                     val = request.form.get(field, "").strip()
                     if val:
                         R.set_secret(ctx, name, val)
@@ -1349,8 +1386,8 @@ def make_app(ctx, hosts=None):
         Z.seed(g.db, ctx)
         sources = g.db.execute("SELECT * FROM zrodla ORDER BY id").fetchall()
         firms = g.db.execute("SELECT COUNT(*) n, SUM(uzyta) u FROM firmy").fetchone()
-        keys = {k: bool(R.secret(ctx, k)) for k in ("adzuna_id", "adzuna_key", "jooble", "brave")}
-        return render_template("ustawienia.html", f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)), has_signature=bool(signature_path(ctx)), writer=D.writer_model(ctx), cbop_wynik=R.meta_get(g.db, "cbop_wynik"),
+        keys = {k: bool(R.secret(ctx, k)) for k in ("adzuna_id", "adzuna_key", "jooble", "brave", "gemini")}
+        return render_template("ustawienia.html", f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)), has_signature=bool(signature_path(ctx)), writer=D.writer_model(ctx), cbop_wynik=R.meta_get(g.db, "cbop_wynik"), gemini_status=GM.status(ctx),
                                sources=sources, firms=firms, keys=keys)
 
     return app

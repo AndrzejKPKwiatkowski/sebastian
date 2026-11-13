@@ -227,7 +227,7 @@ FAKTY:
 
 Zwróć JSON {{"profil": "..."}}"""
     with contextlib.suppress(Exception):
-        out = ctx.ask(prompt, as_json=True, max_tokens=300, temperature=0.3)
+        out = write(ctx, prompt, max_tokens=300, temperature=0.3)
         text = re.sub(r"\s+", " ", re.sub(r"[ \t]*[—–][ \t]*", ", ", str((out or {}).get("profil") or ""))).strip()
         words = len(text.split())
         if 15 <= words <= 90 and not rule_check(f, app, text):
@@ -596,7 +596,11 @@ def writer_model(ctx):
 
 
 def write(ctx, prompt, max_tokens=1100, temperature=0.4):
-    """Zapytanie o tekst (JSON) do modelu piszącego; gdy go nie ma albo nie odpowie — główny model Sebastiana."""
+    """Zapytanie o tekst (JSON): najpierw Gemini (gdy włączone i dostępne), potem Bielik, na końcu główny model Sebastiana."""
+    from . import gemini as GM
+    got = GM.ask_json(ctx, prompt, max_tokens=max_tokens, temperature=temperature)
+    if isinstance(got, dict):
+        return got
     m = writer_model(ctx)
     if m:
         with contextlib.suppress(Exception):
@@ -750,6 +754,29 @@ def mail_text(f, app, sel=None):
     return "Dzień dobry,\n\n" + body + "\n\n" + signature(f)
 
 
+STYLE_EXAMPLES = """--- wzór 1 (oferta biurowa) ---
+Ogłoszenie na stanowisko specjalistki ds. administracji od razu zwróciło moją uwagę, bo opisuje dokładnie tę pracę, w której
+czuję się najpewniej: porządek w dokumentach, pilnowanie terminów i wsparcie zespołu w codziennej organizacji.
+
+W szpitalu prowadziłam dokumentację medyczną, średnio około 80 historii choroby miesięcznie, równolegle w systemie i w wersji
+papierowej. Zanim teczka trafiła dalej, sprawdzałam, czy niczego w niej nie brakuje, bo od tego zależały rozliczenia świadczeń.
+Później przygotowałam ponad 100 spersonalizowanych planów finansowych. Ta praca nauczyła mnie dyskrecji przy danych poufnych
+i prowadzenia wielu spraw jednocześnie bez gubienia szczegółów.
+
+Dobrze odnajduję się też w koordynacji. W ciągu trzech miesięcy współorganizowałam 10 transmisji na żywo i 8 wywiadów:
+ustalałam terminy, byłam w kontakcie z gośćmi, przygotowywałam materiały i pilnowałam, żeby nic nie zostało bez odpowiedzi.
+
+Chętnie opowiem, jak mogłabym odciążyć Państwa zespół. Będę wdzięczna za możliwość rozmowy.
+--- wzór 2 (bez ogłoszenia) ---
+piszę z pytaniem, czy w Państwa biurze przydałaby się osoba, która weźmie na siebie dokumentację i codzienną organizację pracy.
+Nie znalazłam aktualnego ogłoszenia, ale profil Państwa działalności bardzo dobrze pasuje do tego, czym zajmuję się na co dzień.
+
+Mam za sobą pracę z dokumentacją medyczną, przygotowywanie planów i zestawień oraz koordynowanie spotkań i wydarzeń.
+Lubię, gdy wszystko jest na swoim miejscu, a terminy są dotrzymane, i potrafię o to zadbać bez przypominania.
+
+Jeśli taka pomoc byłaby dla Państwa wartościowa, chętnie się spotkam i opowiem więcej."""
+
+
 def fallback_texts(f, app, sel=None):
     """List bez modelu: z punktów najlepiej pasujących stanowisk (konkrety z bazy faktów)."""
     spont = app["zrodlo"] == "spontaniczna" or not app["stanowisko"]
@@ -820,8 +847,13 @@ Zwróć JSON {{"list": "..."}}:
   Jeśli FAKTY podają liczby (np. „ok. 80 historii choroby miesięcznie”, liczba wydarzeń, osób, dokumentów), użyj 2–3 najlepiej
   pasujących do oferty, dokładnie w tym brzmieniu. Liczb spoza FAKTÓW nie wolno podawać ani szacować.
   Ostatni akapit: gotowość do rozmowy.
-PRZYKŁAD TONU (nie kopiuj treści): „W ZZOZ w Czarnkowie prowadziłam dokumentację medyczną, ok. 80 historii choroby miesięcznie.
-Dzięki temu wiem, jak ważna jest kompletność dokumentów i terminowość.”"""
+
+JAK MA BRZMIEĆ (wskazówki samej kandydatki): naturalnie, ciepło, ale profesjonalnie; pewnie, ale bez arogancji; z zaangażowaniem,
+ale bez desperacji; po partnersku, nie służalczo. Bez rekrutacyjnych frazesów, korporacyjnych wypełniaczy, myślników
+i wygładzonego, mechanicznego stylu. Zdania różnej długości. Zmianę pracy przedstawiaj jako świadomą decyzję, nie ucieczkę.
+
+WZORY TONU (to inne oferty — NIE kopiuj zdań, tylko sposób pisania; fakty bierz wyłącznie z FAKTÓW i dopasuj do TEJ oferty):
+{STYLE_EXAMPLES}"""
     fb_letter, fb_mail = fallback_texts(f, app, sel)
     mail = mail_text(f, app, sel)
     feedback = ""

@@ -329,3 +329,8 @@ Data: 2026-11-12. `test_rekrutacja` — 75 testów zaliczonych; pozostałe zesta
 # Weryfikacja 2.11
 
 Data: 2026-11-12. `test_rekrutacja` — 77 testów zaliczonych; pozostałe zestawy zaliczone. Raport wieczorny: HTML z owcą wieczorną, odpowiedzi, lista wysłanych, przycisk do panelu, linia owcy w wersji tekstowej. Powiadomienie o zaproszeniu: HTML z owcą, streszczeniem, terminem i linkiem do wiadomości. Oba obejrzane w przeglądarce.
+
+
+# Weryfikacja 2.12
+
+Data: 2026-11-13. `test_rekrutacja` — 83 testy zaliczone; pozostałe zestawy zaliczone. Gemini (symulowane API): wybór modelu (najnowszy stabilny flash), bez klucza zero zapytań, w zapytaniu brak imienia, nazwiska, e-maila i telefonu, podpis dopisany lokalnie, 429 → przerwa i list lokalny, dzienny limit i wyłącznik, czekający list napisany na nowo raz (z PDF). Prawdziwego klucza Gemini nie sprawdzono.

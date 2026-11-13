@@ -69,6 +69,11 @@
   <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="klucze">
     <div class="row"><div><label>Adzuna app_id {{ '✓ zapisany' if keys.adzuna_id }}</label><input type="password" name="adzuna_id" autocomplete="off"></div>
       <div><label>Adzuna app_key {{ '✓ zapisany' if keys.adzuna_key }}</label><input type="password" name="adzuna_key" autocomplete="off"></div></div>
+    <label>Google Gemini — klucz API do pisania listów {{ '✓ zapisany' if keys.gemini }}</label><input type="password" name="gemini" autocomplete="off" placeholder="z aistudio.google.com → Get API key">
+    <label class="check"><input type="checkbox" name="pisanie_gemini" value="1" {{ 'checked' if st.pisanie != 'lokalnie' }}> Listy, opisy w CV i wyjaśnienia dopasowania pisze Gemini (do Google nie trafiają imię, nazwisko, e-mail ani telefon)</label>
+    <div class="row"><div><label>Dzienny limit zapytań do Gemini</label><input type="number" name="gemini_limit_dzienny" value="{{ st.gemini_limit_dzienny }}" min="10" max="2000"></div>
+      <div><label>Model Gemini (puste = najnowszy „flash”)</label><input type="text" name="gemini_model" value="{{ st.gemini_model }}" placeholder="automatycznie"></div></div>
+    <p class="small soft">{{ gemini_status }}</p>
     <div class="row"><div><label>Jooble — klucz API {{ '✓ zapisany' if keys.jooble }}</label><input type="password" name="jooble" autocomplete="off"></div>
       <div><label>Brave Search — klucz API {{ '✓ zapisany' if keys.brave }}</label><input type="password" name="brave" autocomplete="off"></div></div>
     <label>Czego szukać (frazy oddzielone przecinkami)</label><input type="text" name="frazy" value="{{ st.frazy }}">
