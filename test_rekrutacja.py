@@ -1,5 +1,5 @@
 """Testy dodatku Rekrutacja (część A). Bez Gmaila, bez Ollamy, bez Tailscale — wszystko udawane."""
-import contextlib, datetime as dt, importlib, json, re, unittest
+import contextlib, datetime as dt, importlib, json, re, time, unittest
 import os
 os.environ["SEBASTIAN_TESTY"] = "1"          # testy nie dotykają prawdziwego pęku kluczy macOS (hasła Gmaila, klucze API)
 from pathlib import Path
@@ -1521,6 +1521,8 @@ class Gemini2120(RekrutacjaBase):
         self.code = 200
         self.extra.append(patch.object(self.GM, "_http", self.http))
         self.extra[-1].start()
+        self.extra.append(patch.object(self.GM, "PACE", 0.0))
+        self.extra[-1].start()
         self.ready()
 
     def http(self, method, url, key, body):
@@ -1600,6 +1602,51 @@ class Gemini2120(RekrutacjaBase):
         self.assertEqual(json.loads(new["analiza"])["list_v"], 3)
         self.assertTrue((self.P.app_dir(self.ctx, aid) / new["list_plik"]).exists())
         self.assertIsNone(self.P.refresh_letter(self.ctx))                        # drugi raz już nie
+
+
+class Rewrite2121(Gemini2120):
+    def test_backoff_grows_and_resets(self):
+        self.R.set_secret(self.ctx, "gemini", "klucz-testowy")
+        self.code = 429
+        pauses = []
+        for _ in range(3):
+            with self.R.db(self.ctx) as c:
+                self.R.meta_set(c, "gemini_przerwa", 0); c.commit()
+            self.assertIsNone(self.GM.ask_json(self.ctx, "test LIST MOTYWACYJNY"))
+            with self.R.db(self.ctx) as c:
+                pauses.append(float(self.R.meta_get(c, "gemini_przerwa", "0")) - time.time())
+        self.assertLess(pauses[0], 70)                                            # pierwsza przerwa ok. minuty, nie godzina
+        self.assertGreater(pauses[2], pauses[0] * 3)                              # kolejne coraz dłuższe
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "gemini_przerwa", 0); c.commit()
+        self.code = 200
+        self.assertIsNotNone(self.GM.ask_json(self.ctx, "test LIST MOTYWACYJNY"))
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(int(self.R.meta_get(c, "gemini_429", "0") or 0), 0)
+
+    def test_local_text_not_marked_as_gemini(self):
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        self.R.set_secret(self.ctx, "gemini", "klucz-testowy")
+        self.code = 500                                                           # Google nie odpowiada
+        self.assertIsNone(self.P.refresh_letter(self.ctx))
+        self.assertEqual(self.P.letters_to_rewrite(self.ctx), [aid])              # zostaje do przepisania później
+
+    def test_command_rewrites_all_and_keeps_approved(self):
+        a1, a2 = self.add(), self.add(firma="Inna firma", stanowisko="Recepcjonistka")
+        self.P.prepare(self.ctx, a1); self.P.prepare(self.ctx, a2)
+        self.assertTrue(self.row(a2)["list"], self.row(a2)["status"])
+        with self.R.db(self.ctx) as c:
+            c.execute("UPDATE aplikacje SET status='zatwierdzona' WHERE id=?", (a2,)); c.commit()
+        self.R.set_secret(self.ctx, "gemini", "klucz-testowy")
+        init = importlib.import_module(self.mod.__name__)
+        with patch("builtins.print"):
+            self.assertEqual(init.COMMANDS["przepisz"](self.ctx, []), 0)
+        self.assertIn("od razu zwróciło moją uwagę", self.row(a1)["list"])
+        self.assertNotIn("od razu zwróciło moją uwagę", self.row(a2)["list"])   # zatwierdzonej nie ruszam
+        with patch("builtins.print"):
+            init.COMMANDS["przepisz"](self.ctx, ["--takze-zatwierdzone"])
+        self.assertIn("od razu zwróciło moją uwagę", self.row(a2)["list"])
 
 if __name__ == "__main__":
     unittest.main()

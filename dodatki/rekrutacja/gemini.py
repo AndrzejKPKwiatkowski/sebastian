@@ -13,6 +13,8 @@ from . import rdzen as R
 
 API = "https://generativelanguage.googleapis.com/v1beta"
 _MODEL = {"at": 0.0, "name": None, "key": ""}
+_LAST = {"at": 0.0, "ok": 0.0}
+PACE = 6.0                                                             # najwyżej ok. 10 zapytań na minutę
 
 
 def key(ctx):
@@ -110,14 +112,22 @@ def ask_json(ctx, prompt, max_tokens=1200, temperature=0.5, http=None):
     body = {"contents": [{"role": "user", "parts": [{"text": redact(prompt, f)}]}],
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max(4096, max_tokens * 3),
                                  "responseMimeType": "application/json"}}
+    wait = PACE - (time.time() - _LAST["at"])                           # równe tempo: darmowy poziom liczy zapytania na minutę
+    if wait > 0:
+        time.sleep(wait)
+    _LAST["at"] = time.time()
     try:
         code, data = http("POST", f"{API}/models/{name}:generateContent", key(ctx), body)
     except Exception as e:
         ctx.log.warning(f"Rekrutacja: Gemini nie odpowiada ({type(e).__name__})")
         _count(ctx, ok=False, pause=600)
         return None
-    if code == 429:
-        _count(ctx, ok=False, pause=3600)                              # limit darmowego poziomu — godzina przerwy
+    if code == 429:                                                    # limit: przerwa rośnie 1 → 2 → 4 … min (najwyżej godzina)
+        with R.db(ctx) as c:
+            streak = int(R.meta_get(c, "gemini_429", "0") or 0) + 1
+            R.meta_set(c, "gemini_429", streak)
+            c.commit()
+        _count(ctx, ok=False, pause=min(3600, 60 * 2 ** (streak - 1)))
         return None
     if code in (400, 401, 403, 404):
         _MODEL.update(at=0.0, name=None)                               # zły klucz albo model wycofany — wybierz od nowa
@@ -127,6 +137,11 @@ def ask_json(ctx, prompt, max_tokens=1200, temperature=0.5, http=None):
         _count(ctx, ok=False, pause=600)
         return None
     _count(ctx)
+    _LAST["ok"] = time.time()
+    with R.db(ctx) as c:
+        if R.meta_get(c, "gemini_429"):
+            R.meta_set(c, "gemini_429", 0)
+            c.commit()
     with contextlib.suppress(Exception):
         parts = data["candidates"][0]["content"]["parts"]
         raw = "".join(p.get("text", "") for p in parts if not p.get("thought"))
@@ -136,6 +151,11 @@ def ask_json(ctx, prompt, max_tokens=1200, temperature=0.5, http=None):
         if hit:
             return json.loads(hit.group(0))
     return None
+
+
+def used_since(t0):
+    """Czy od chwili t0 Gemini choć raz odpowiedziało (czyli tekst jest od Gemini, a nie z modelu lokalnego)."""
+    return _LAST["ok"] >= t0
 
 
 def status(ctx):

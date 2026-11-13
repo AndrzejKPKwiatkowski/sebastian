@@ -334,3 +334,10 @@ Data: 2026-11-12. `test_rekrutacja` — 77 testów zaliczonych; pozostałe zesta
 # Weryfikacja 2.12
 
 Data: 2026-11-13. `test_rekrutacja` — 83 testy zaliczone; pozostałe zestawy zaliczone. Gemini (symulowane API): wybór modelu (najnowszy stabilny flash), bez klucza zero zapytań, w zapytaniu brak imienia, nazwiska, e-maila i telefonu, podpis dopisany lokalnie, 429 → przerwa i list lokalny, dzienny limit i wyłącznik, czekający list napisany na nowo raz (z PDF). Prawdziwego klucza Gemini nie sprawdzono.
+
+# Weryfikacja 2.12.1
+
+- `Rewrite2121.test_backoff_grows_and_resets` — przerwy po 429 rosną od ok. minuty, zerują się po sukcesie.
+- `Rewrite2121.test_local_text_not_marked_as_gemini` — bez odpowiedzi Gemini list nie jest oznaczany jako przepisany.
+- `Rewrite2121.test_command_rewrites_all_and_keeps_approved` — `przepisz` przepisuje czekające, zatwierdzone tylko z flagą.
+- W testach tempo (`PACE`) wyłączone; bez sieci.

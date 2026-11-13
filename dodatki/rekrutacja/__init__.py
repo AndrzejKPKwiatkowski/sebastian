@@ -241,5 +241,41 @@ def apply_patch(ctx, patch):
     return f"Baza faktów: dodane {added}. Historia aplikacji: dopisane {hist}."
 
 
-COMMANDS = {"uzupelnij": cmd_uzupelnij, "szukaj": cmd_szukaj, "skrzynka": cmd_skrzynka, "raport": cmd_raport, "start": cmd_start, "usluga": cmd_usluga, "adres": cmd_adres, "haslo": cmd_haslo, "status": cmd_status,
+def cmd_przepisz(ctx, args):
+    """Przepisuje teraz (Gemini) listy czekających aplikacji; z --takze-zatwierdzone także te zatwierdzone, a jeszcze niewysłane."""
+    import time as _t
+    from . import gemini as GM, panel as P
+    if not GM.key(ctx):
+        print("Brak klucza Gemini — wpisz go w panelu: Ustawienia → Klucze.")
+        return 1
+    statuses = P.REWRITE + (("zatwierdzona",) if "--takze-zatwierdzone" in args else ())
+    todo = P.letters_to_rewrite(ctx, statuses)
+    if not todo:
+        print("Wszystkie czekające listy są już napisane przez Gemini.")
+        return 0
+    print(f"Do przepisania: {len(todo)} listów. Zajmie to ok. {max(1, round(len(todo) * 15 / 60))} min (tempo dla darmowego limitu Google).")
+    done = 0
+    for i, aid in enumerate(todo, 1):
+        for attempt in range(6):
+            if not GM.available(ctx):
+                with R.db(ctx) as c:
+                    wait = max(5, float(R.meta_get(c, "gemini_przerwa", "0") or 0) - _t.time())
+                if wait > 3700:
+                    print("Wyczerpany dzienny limit zapytań — reszta jutro (albo podnieś limit w Ustawieniach).")
+                    return 0
+                print(f"   limit Google — czekam {int(wait)} s…")
+                _t.sleep(wait + 1)
+                continue
+            if P.refresh_letter(ctx, statuses, only=aid):
+                done += 1
+                print(f"  {i}/{len(todo)} ✓")
+                break
+            if aid not in P.letters_to_rewrite(ctx, statuses):
+                print(f"  {i}/{len(todo)} — pominięta (zmieniła status albo list nie przeszedł kontroli)")
+                break
+    print(f"Gotowe: przepisano {done} z {len(todo)}. Nowe listy i PDF-y są w panelu.")
+    return 0
+
+
+COMMANDS = {"przepisz": cmd_przepisz, "uzupelnij": cmd_uzupelnij, "szukaj": cmd_szukaj, "skrzynka": cmd_skrzynka, "raport": cmd_raport, "start": cmd_start, "usluga": cmd_usluga, "adres": cmd_adres, "haslo": cmd_haslo, "status": cmd_status,
             "ustawienia": cmd_ustawienia, "ustaw": cmd_ustaw}

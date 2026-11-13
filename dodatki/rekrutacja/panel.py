@@ -475,24 +475,37 @@ def migrate_282(ctx):
         R.meta_set(c, "migracja_282", R.stamp(ctx))
 
 
-def refresh_letter(ctx):
-    """Jedna czekająca aplikacja z listem napisanym przed Gemini → nowy list (tylko gdy Gemini jest dostępne)."""
+REWRITE = ("do_zatwierdzenia", "do_sprawdzenia", "formularz")
+
+
+def letters_to_rewrite(ctx, statuses=REWRITE):
+    with R.db(ctx) as c:
+        return [r["id"] for r in c.execute(f"SELECT id FROM aplikacje WHERE status IN ({','.join('?' * len(statuses))}) AND list<>'' "
+                                           "AND analiza NOT LIKE '%\"list_v\": 3%' ORDER BY id DESC", statuses)]
+
+
+def refresh_letter(ctx, statuses=REWRITE, only=None):
+    """Jedna aplikacja z listem napisanym przed Gemini → nowy list (tylko gdy Gemini jest dostępne)."""
     if not GM.available(ctx):
         return None
     with R.db(ctx) as c:
-        rows = c.execute("SELECT * FROM aplikacje WHERE status IN ('do_zatwierdzenia','do_sprawdzenia','formularz') AND list<>'' "
-                         "AND analiza NOT LIKE '%\"list_v\": 3%' ORDER BY id DESC LIMIT 5").fetchall()
+        rows = c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(statuses))}) AND list<>'' "
+                         "AND analiza NOT LIKE '%\"list_v\": 3%'" + (" AND id=?" if only else "") + " ORDER BY id DESC LIMIT 5",
+                         (*statuses, *([only] if only else []))).fetchall()
     f = R.load_facts(ctx)
     for r in rows:
         a = dict(r)
         info = analysis(a)
         sel = json.loads(a["wybor"] or "null")
+        t0 = time.time()
         letter, mail, by_model = D.compose(ctx, f, a, sel)
+        if not GM.used_since(t0):
+            return None                                               # Gemini nie odpisało (limit, błąd) — spróbuję później
         info["list_v"] = 3
         names = (f["osoba"].get("imie", ""), f["osoba"].get("nazwisko", ""))
         with R.db(ctx) as c:
             cur = c.execute("SELECT status FROM aplikacje WHERE id=?", (a["id"],)).fetchone()
-            if not cur or cur["status"] not in ("do_zatwierdzenia", "do_sprawdzenia", "formularz"):
+            if not cur or cur["status"] not in statuses:
                 return None                                           # Aga w międzyczasie zatwierdziła albo odrzuciła — nie ruszam
             if by_model and not D.language_issues(letter, names):
                 cv, li = render_files(ctx, f, a, letter, sel, a["rodo"])
