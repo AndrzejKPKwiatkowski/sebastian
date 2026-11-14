@@ -13,7 +13,7 @@
     <input type="hidden" name="loc" value="{{ loc }}"><input type="hidden" name="gdzie" value="{{ gdzie }}">
     <label>Krótko dla gwaranta (opcjonalnie): klient, cel spotkania</label>
     <textarea name="notatka" maxlength="500" placeholder="np. Analiza dla rodziny 2+1, chcą zacząć oszczędzać na mieszkanie"></textarea>
-    <p class="small muted">Po rezerwacji dostaniesz maila z potwierdzeniem, a {{ g_.imie_nazwisko.split()[0] }} zaproszenie do kalendarza. Spotkanie jest ważne po akceptacji gwaranta (do 24 h).</p>
+    <p class="small muted">{% if przez_calcom %}Rezerwacja trafi do cal.com {{ g_.imie_nazwisko.split()[0] }} — po akceptacji cal.com wyśle Ci potwierdzenie z wpisem do kalendarza.{% else %}Po rezerwacji dostaniesz maila z potwierdzeniem, a {{ g_.imie_nazwisko.split()[0] }} zaproszenie do kalendarza.{% endif %} Spotkanie jest ważne po akceptacji gwaranta (do 24 h).</p>
     <p><button class="btn">Rezerwuję</button> <a class="btn sec" href="/rezerwuj?typ={{ typ }}">Anuluj</a></p>
   </form>
 </div>{% endblock %}

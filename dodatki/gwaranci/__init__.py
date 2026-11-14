@@ -1,4 +1,4 @@
-"""Dodatek Gwaranci (Sebastian 2.14) — spotkania gwaranckie Feniksów.
+"""Dodatek Gwaranci (Sebastian 2.14.1) — spotkania gwaranckie Feniksów.
 
 Gwarant dostaje osobisty link, podłącza kalendarz (tylko zajętość), zaznacza kiedy może i ile spotkań w tygodniu.
 Adept wybiera typ i godzinę, Sebastian dobiera gwaranta (bezpośredni menedżer → pośredni → ta sama struktura → inna)
@@ -7,6 +7,7 @@ i wysyła zaproszenie z Gmaila. Ty dostajesz krótkie powiadomienia na WhatsAppi
     python sebastian.py dodatek gwaranci usluga instaluj     # panel i praca w tle (start po zalogowaniu do Maca)
     python sebastian.py dodatek gwaranci internet wlacz      # publiczny adres https (Tailscale Funnel)
     python sebastian.py dodatek gwaranci linki               # osobiste linki do rozesłania
+    python sebastian.py dodatek gwaranci calcom              # kto ma podpięty cal.com; podpięcie: calcom "Imię Nazwisko" https://cal.com/…
 """
 import contextlib, getpass, os, plistlib, re, subprocess, sys
 from pathlib import Path
@@ -116,6 +117,44 @@ def cmd_poczta(ctx, args):
     return 0
 
 
+def _attach_calcom(c, name, link):
+    p = R.find_person(c, name)
+    ref = R.parse_calcom(link)
+    if not p:
+        return f"Nie znam osoby „{name}”."
+    if not ref:
+        return "To nie wygląda na link do wydarzenia cal.com (np. https://cal.com/nazwa/spotkanie-gwaranckie)."
+    if not R.can_guarantee(p):
+        return f"{p['imie_nazwisko']} nie jest jeszcze gwarantem (gwarantem zostaje się po pierwszym awansie)."
+    g = R.guarantor(c, p["id"]) or {}
+    R.save_guarantor(c, p["id"], calcom=ref, gotowe=1, limit_tyg=g.get("limit_tyg") or R.max_limit(p))
+    n, err = R.refresh_calcom(c, p["id"])
+    return (f"{p['imie_nazwisko']}: cal.com podpięty ({ref})" + (f", {n} wolnych terminów." if not err else f" — ⚠ {err}"))
+
+
+def cmd_calcom(ctx, args):
+    with contextlib.closing(R.db(ctx)) as c:
+        if args and args[0] == "klucz":
+            print("Klucz API z cal.com → Settings → Developer → API Keys (opcjonalny: pozwala Sebastianowi odczytać akceptacje i odwołania).")
+            key = getpass.getpass("Klucz API (cal_live_…, nie będzie widoczny): ").strip()
+            if key:
+                ctx.set_secret("calcom_klucz", key)
+                print("Zapisane w pęku kluczy macOS.")
+            return 0
+        if len(args) >= 2:
+            print(_attach_calcom(c, " ".join(args[:-1]), args[-1]))
+            return 0
+        rows = c.execute("SELECT osoba, calcom, blad, odczyt FROM gwaranci WHERE calcom!=''").fetchall()
+        ppl = R.people(c)
+        for r in rows:
+            print(f"{ppl.get(r['osoba'], {}).get('imie_nazwisko', r['osoba']):<26} https://cal.com/{r['calcom']}"
+                  + (f"  ⚠ {r['blad'][:80]}" if r["blad"] else (f"  odczyt {r['odczyt'][11:16]}" if r["odczyt"] else "")))
+        if not rows:
+            print("Nikt nie ma jeszcze podpiętego cal.com.")
+        print('Podpięcie: python sebastian.py dodatek gwaranci calcom "Imię Nazwisko" https://cal.com/nazwa/wydarzenie')
+    return 0
+
+
 def cmd_linki(ctx, args):
     with contextlib.closing(R.db(ctx)) as c:
         base = _base(ctx, c)
@@ -187,7 +226,7 @@ def status_text(ctx, c):
     for pid, g in ready.items():
         n, _ = R.week_load(c, pid, R.now(ctx))
         lines.append(f"• {ppl[pid]['imie_nazwisko']} — {n}/{g['limit_tyg']} w tym tygodniu" + (" (wstrzymany)" if g["wstrzymany"] else "")
-                     + (f" ⚠ kalendarz: {g['blad'][:60]}" if g["blad"] else ""))
+                     + (" · cal.com" if g.get("calcom") else "") + (f" ⚠ kalendarz: {g['blad'][:60]}" if g["blad"] else ""))
     pend = c.execute("SELECT COUNT(*) n FROM rezerwacje WHERE status='czeka'").fetchone()["n"]
     conf = c.execute("SELECT COUNT(*) n FROM rezerwacje WHERE status='potwierdzone'").fetchone()["n"]
     asks = c.execute("SELECT COUNT(*) n FROM prosby WHERE status='nowa'").fetchone()["n"]
@@ -243,6 +282,9 @@ def on_message(ctx, msg):
         if mm:
             p = R.find_person(c, mm.group(1))
             return f"{p['imie_nazwisko']}: {_base(ctx, c)}/l/{p['token']}" if p else f"Nie znam osoby „{mm.group(1)}”."
+        mm = re.match(r"(?i)^cal\.?com\s+(.+?)\s+(\S*cal\.com/\S+)$", rest)
+        if mm:
+            return _attach_calcom(c, mm.group(1), mm.group(2))
         mm = re.match(r"(?i)^awans\s+(.+)$", rest)
         if mm:
             return _promote(c, mm.group(1))
@@ -254,9 +296,9 @@ def on_message(ctx, msg):
                 return str(e)
             return f"Dodano {p['imie_nazwisko']} (od: {mm.group(2)}). Link: {_base(ctx, c)}/l/{p['token']}"
         return ("Gwaranci — polecenia: „gwaranci”, „gwaranci link Imię Nazwisko”, „gwaranci awans Imię Nazwisko na Planner”, "
-                "„gwaranci dodaj Imię Nazwisko od Imię Nazwisko”.")
+                "„gwaranci dodaj Imię Nazwisko od Imię Nazwisko”, „gwaranci calcom Imię Nazwisko https://cal.com/…”.")
 
 
 COMMANDS = {"start": cmd_start, "usluga": cmd_usluga, "internet": cmd_internet, "adres": cmd_adres, "poczta": cmd_poczta,
-            "linki": cmd_linki, "struktura": cmd_struktura, "awans": cmd_awans, "dodaj": cmd_dodaj, "status": cmd_status, "odswiez": cmd_odswiez,
+            "linki": cmd_linki, "calcom": cmd_calcom, "struktura": cmd_struktura, "awans": cmd_awans, "dodaj": cmd_dodaj, "status": cmd_status, "odswiez": cmd_odswiez,
             "ustawienia": cmd_ustawienia, "ustaw": cmd_ustaw}

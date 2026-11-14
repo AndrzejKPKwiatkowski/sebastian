@@ -3,9 +3,9 @@
 <p class="sub">Cześć {{ me.imie_nazwisko.split()[0] }}! Tu akceptujesz prośby i zmieniasz swoją dostępność.</p>
 <div class="card" style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
   <div style="flex:1;min-width:220px"><div class="small muted">Ten tydzień</div><div style="font-size:24px;font-weight:700">{{ n }} / {{ gw.limit_tyg }} <span class="small muted" style="font-weight:400">spotkań · {{ dur(mins) }}</span></div></div>
-  <div style="flex:1;min-width:220px"><div class="small muted">Kalendarz</div>
+  <div style="flex:1;min-width:220px"><div class="small muted">{{ 'cal.com · ' ~ gw.calcom if gw.calcom else 'Kalendarz' }}</div>
     {% if gw.blad %}<div style="color:#fca5a5">⚠ {{ gw.blad[:120] }}</div>{% else %}<div>✓ połączony{% if gw.odczyt %} · odczyt {{ gw.odczyt[11:16] }}{% endif %}</div>{% endif %}</div>
-  <div><a class="btn sec sm" href="/gwarant/start?k=2">Zmień dostępność i limit</a> <a class="btn sec sm" href="/gwarant/start?k=1">Kalendarze</a>
+  <div><a class="btn sec sm" href="/gwarant/start?k=2">{{ 'Zmień limit' if gw.calcom else 'Zmień dostępność i limit' }}</a> <a class="btn sec sm" href="/gwarant/start?k=1">{{ 'cal.com / kalendarz' if gw.calcom else 'Kalendarze' }}</a>
     <form method="post" action="/gwarant/wstrzymaj" style="display:inline"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="btn sec sm">{{ 'Wznów przyjmowanie' if gw.wstrzymany else 'Wstrzymaj (urlop)' }}</button></form></div>
 </div>
 {% if gw.wstrzymany %}<div class="err">Przyjmowanie spotkań jest wstrzymane — adepci Cię nie widzą.</div>{% endif %}
@@ -15,7 +15,7 @@
   {% for b in list %}{% set s = parse(b.start) %}{% set a = ppl.get(b.adept, {}) %}
   <div class="item"><div><b>{{ TYPES[b.typ][0] }}</b> · {{ a.imie_nazwisko }} <span class="small muted">{{ a.stanowisko }}</span>
     <div class="small muted">{{ fdate(s) }}, {{ s.strftime('%H:%M') }} · {{ place_label(b) }}</div>{% if b.notatka %}<div class="small">„{{ b.notatka }}”</div>{% endif %}</div>
-    {% if b.status=='czeka' %}<div><a class="btn sm" href="/decyzja/{{ b.token }}/tak">{{ 'Akceptuję, mogę być na miejscu' if b.miejsce=='miejsce' else 'Akceptuj' }}</a> <a class="btn sec sm" href="/decyzja/{{ b.token }}/nie">Nie mogę</a></div>{% endif %}
+    {% if b.status=='czeka' and b.calcom_uid %}<div><a class="btn sm" href="https://app.cal.com/bookings/unconfirmed" target="_blank" rel="noopener">Zaakceptuj w cal.com</a></div>{% elif b.status=='czeka' %}<div><a class="btn sm" href="/decyzja/{{ b.token }}/tak">{{ 'Akceptuję, mogę być na miejscu' if b.miejsce=='miejsce' else 'Akceptuj' }}</a> <a class="btn sec sm" href="/decyzja/{{ b.token }}/nie">Nie mogę</a></div>{% endif %}
   </div>{% else %}<p class="muted">{{ 'Brak próśb — nic nie trzeba robić.' if tab=='czeka' else 'Brak.' }}</p>{% endfor %}
 </div>
 {% endblock %}

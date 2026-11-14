@@ -16,10 +16,19 @@
 
 {% if step == '1' %}
 <h1>Podłącz swój kalendarz</h1>
-<p class="sub">Dzięki temu nikt nie zarezerwuje Cię w godzinach, w których masz klientów. Sebastian widzi <b style="color:var(--ink)">tylko zajęte godziny</b> — nie czyta tytułów ani opisów wydarzeń.</p>
+<p class="sub">Dzięki temu nikt nie zarezerwuje Cię w godzinach, w których masz klientów. Sebastian widzi <b style="color:var(--ink)">tylko wolne i zajęte godziny</b> — nie czyta tytułów ani opisów wydarzeń.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <div class="card">
-  <h3>Jak skopiować link (Kalendarz Google na komputerze, ok. 30 sekund)</h3>
+  <h3>Masz cal.com? Wklej link do swojego wydarzenia</h3>
+  <p class="small muted">Najprościej: dostępność, kalendarze i limity ustawiasz w cal.com jak dotąd, a rezerwacje adeptów trafiają prosto do Twojego cal.com (akceptujesz je tam, jak zawsze).</p>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="zrodlo" value="calcom">
+    <label>Link do wydarzenia w cal.com</label>
+    <input name="calcom" placeholder="https://cal.com/twoja-nazwa/spotkanie-gwaranckie" value="{{ 'https://cal.com/' ~ gw.calcom if gw.calcom }}">
+    <p style="margin-top:14px"><button class="btn">Podłącz cal.com</button></p>
+  </form>
+</div>
+<div class="card">
+  <h3>Nie masz cal.com? Podłącz Kalendarz Google (ok. 30 sekund)</h3>
   <ol class="howto">
     <li>Otwórz <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener">ustawienia Kalendarza Google</a>.</li>
     <li>Po lewej, w sekcji „Ustawienia moich kalendarzy”, kliknij swój kalendarz (zwykle Twoje imię i nazwisko).</li>
@@ -30,11 +39,23 @@
   <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}">
     <label>Tajny adres w formacie iCal</label>
     <textarea name="kalendarze" placeholder="https://calendar.google.com/calendar/ical/…/private-…/basic.ics" required>{{ gw.kalendarze|join('\n') }}</textarea>
-    <p style="margin-top:14px"><button class="btn">Sprawdź i dalej</button></p>
+    <p style="margin-top:14px"><button class="btn sec">Sprawdź i dalej</button></p>
   </form>
 </div>
 
 {% elif step == '2' %}
+{% if gw.calcom %}
+<h1>Ile spotkań gwaranckich w tygodniu?</h1>
+<p class="sub">✅ cal.com podłączony{% if info %} — widzę {{ info }} wolnych terminów w najbliższych tygodniach{% endif %}. Godziny i przerwy ustawiasz w cal.com, tu tylko limit.</p>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="dostepnosc" value="[]">
+<div class="card">
+  <p class="small muted">Twoje maksimum to {{ mx }} ({{ 'menedżer' if me.stanowisko[:1] in 'MD' else 'każdy awans daje jedno spotkanie więcej' }}). Po osiągnięciu limitu Twoje terminy znikają do końca tygodnia.</p>
+  <div class="lim">{% for i in range(1, mx+1) %}<label><input type="radio" name="limit" value="{{ i }}" {{ 'checked' if i==lim }}><span>{{ i }}</span></label>{% endfor %}</div>
+</div>
+<p><button class="btn">Zapisz</button> <a class="btn sec" href="?k=1">Wstecz</a></p>
+</form>
+{% else %}
 <h1>Kiedy możesz być gwarantem?</h1>
 <p class="sub">{% if info %}✅ Kalendarz podłączony — widzę {{ info }} zajętych terminów w najbliższych tygodniach. {% endif %}Zaznacz godziny, w których zwykle możesz usiąść z adeptem. Godziny zajęte w kalendarzu i tak nie będą proponowane.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
@@ -83,12 +104,13 @@ document.getElementById('f').onsubmit=()=>{
   const out=[];for(let d=0;d<6;d++){let s=null;for(let h=H0;h<=H1;h++){const x=on.has(d+':'+h)&&h<H1;if(x&&s===null)s=h;if(!x&&s!==null){out.push([d,s*60,h*60]);s=null}}}
   document.getElementById('dost').value=JSON.stringify(out);};
 </script>
+{% endif %}
 
 {% else %}
 <div class="card" style="text-align:center;padding:36px 24px">
   <div style="font-size:42px">🎉</div>
   <h1>Gotowe — jesteś gwarantem!</h1>
-  <p class="muted">Od teraz dostajesz tylko <b style="color:var(--ink)">gotowe zaproszenia do kalendarza</b> z przyciskami Akceptuję / Nie mogę. Dostępność i limit zmienisz w każdej chwili w panelu gwaranta.</p>
+  <p class="muted">{% if gw.calcom %}Od teraz prośby adeptów trafiają prosto do <b style="color:var(--ink)">Twojego cal.com</b> — akceptujesz je tam, jak zawsze.{% else %}Od teraz dostajesz tylko <b style="color:var(--ink)">gotowe zaproszenia do kalendarza</b> z przyciskami Akceptuję / Nie mogę.{% endif %} Dostępność i limit zmienisz w każdej chwili w panelu gwaranta.</p>
   <a class="btn" href="/gwarant">Mój panel gwaranta</a>
 </div>
 {% endif %}

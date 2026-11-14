@@ -1,9 +1,9 @@
 {
   "id": "gwaranci",
   "nazwa": "Gwaranci — spotkania gwaranckie Feniksów",
-  "wersja": "1.0.0",
+  "wersja": "1.1.0",
   "rdzen": "2.14",
-  "opis": "Panel dla zespołu (przez Tailscale Funnel): osobiste linki bez haseł, onboarding gwaranta (kalendarz → dostępność → limit), rezerwacja z automatycznym przydziałem gwaranta bez kolizji z jego kalendarzem, zaproszenia z Gmaila Sebastiana, przypomnienia, powiadomienia dla Ciebie na WhatsAppie.",
+  "opis": "Panel dla zespołu (przez Tailscale Funnel): osobiste linki bez haseł, onboarding gwaranta (cal.com albo kalendarz Google → dostępność → limit), rezerwacja z automatycznym przydziałem gwaranta bez kolizji z jego kalendarzem, zaproszenia z Gmaila Sebastiana, przypomnienia, powiadomienia dla Ciebie na WhatsAppie.",
   "domyslnie_wlaczony": true,
   "uprawnienia": [
     "whatsapp.wysylanie"
@@ -12,7 +12,8 @@
     "gwaranci — stan: gotowi gwaranci, prośby czekające na akceptację",
     "gwaranci link Imię Nazwisko — osobisty link do wysłania tej osobie",
     "gwaranci awans Imię Nazwisko na Senior Planner — nowe stanowisko (limit spotkań rośnie sam)",
-    "gwaranci dodaj Imię Nazwisko od Imię Nazwisko przełożonego — nowa osoba w strukturze"
+    "gwaranci dodaj Imię Nazwisko od Imię Nazwisko przełożonego — nowa osoba w strukturze",
+    "gwaranci calcom Imię Nazwisko https://cal.com/… — podpina gwarantowi jego cal.com"
   ],
   "polecenia": [
     {
@@ -34,6 +35,10 @@
     {
       "nazwa": "linki",
       "opis": "Osobiste linki: wszystkie albo dla jednej osoby, np. linki Wiktor Król"
+    },
+    {
+      "nazwa": "calcom",
+      "opis": "Kto ma cal.com; podpięcie: calcom \"Imię Nazwisko\" https://cal.com/nazwa/wydarzenie; calcom klucz — opcjonalny klucz API cal.com."
     },
     {
       "nazwa": "struktura",

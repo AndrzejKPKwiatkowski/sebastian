@@ -163,12 +163,23 @@ def make_app(ctx):
         gw = R.guarantor(g.db, g.me["id"]) or {"kalendarze": [], "dostepnosc": [], "limit_tyg": 0, "gotowe": 0, "blad": "", "odczyt": ""}
         step = request.args.get("k", "1")
         info = ""
+        if request.method == "POST" and step == "1" and request.form.get("zrodlo") == "calcom":
+            ref = R.parse_calcom(request.form.get("calcom", ""))
+            if not ref:
+                return page("onboarding.html", step="1", gw=gw, error="Wklej link do wydarzenia, np. https://cal.com/twoja-nazwa/spotkanie-gwaranckie.", info="")
+            R.save_guarantor(g.db, g.me["id"], calcom=ref)
+            n, err = R.refresh_calcom(g.db, g.me["id"], when=now())
+            if err:
+                R.save_guarantor(g.db, g.me["id"], calcom="")
+                return page("onboarding.html", step="1", gw=R.guarantor(g.db, g.me["id"]),
+                            error=f"Nie udało się odczytać wydarzenia z cal.com ({err}). Sprawdź, czy link otwiera Twoją stronę rezerwacji.", info="")
+            return redirect(url_for("onboarding", k="2", n=n))
         if request.method == "POST" and step == "1":
             urls = [R.clean_calendar_url(u) for u in request.form.get("kalendarze", "").splitlines() if u.strip()]
             urls = [u for u in urls if u][:4]
             if not urls:
                 return page("onboarding.html", step="1", gw=gw, error="Wklej link zaczynający się od https:// (Tajny adres w formacie iCal).", info="")
-            R.save_guarantor(g.db, g.me["id"], kalendarze=urls)
+            R.save_guarantor(g.db, g.me["id"], kalendarze=urls, calcom="")
             n, err = R.refresh_busy(g.db, g.me["id"], when=now())
             if err and not n:
                 return page("onboarding.html", step="1", gw=R.guarantor(g.db, g.me["id"]),
@@ -181,13 +192,15 @@ def make_app(ctx):
                          if 0 <= int(d) <= 6 and 0 <= int(a) < int(b) <= 24 * 60]
             mx = R.max_limit(g.me)
             lim = max(1, min(mx, int(request.form.get("limit", 1) or 1)))
-            if not avail:
+            if gw.get("calcom"):                                # dostępność ustawia się w cal.com
+                avail = gw.get("dostepnosc") or []
+            elif not avail:
                 return page("onboarding.html", step="2", gw=gw, error="Zaznacz przynajmniej jedną godzinę.", info="", mx=mx, lim=lim)
             first = not gw.get("gotowe")
             R.save_guarantor(g.db, g.me["id"], dostepnosc=avail, limit_tyg=lim, gotowe=1)
             if first:
                 PB.notify_owner(ctx, f"🧭 Gwaranci: {g.me['imie_nazwisko']} jest gotowy/gotowa — {lim} spotk. w tygodniu, "
-                                f"{sum(b - a for _, a, b in avail) // 60} h dostępności.", "gotowy")
+                                + (f"cal.com: {gw['calcom']}." if gw.get("calcom") else f"{sum(b - a for _, a, b in avail) // 60} h dostępności."), "gotowy")
             return redirect(url_for("onboarding", k="3"))
         if step == "2":
             info = request.args.get("n", "")
@@ -275,7 +288,8 @@ def make_app(ctx):
         if request.method == "GET":
             if not cand:
                 return msg("Termin zajęty", "Ten termin przed chwilą przestał być wolny. Wybierz inny.", ("Wróć", url_for("rezerwuj", typ=typ)))
-            return page("potwierdz.html", typ=typ, start=start, loc=loc, gdzie=gdzie, g_=R.person(g.db, cand[0]["gwarant"]))
+            return page("potwierdz.html", typ=typ, start=start, loc=loc, gdzie=gdzie, g_=R.person(g.db, cand[0]["gwarant"]),
+                        przez_calcom=bool((R.guarantor(g.db, cand[0]["gwarant"]) or {}).get("calcom")))
         pid = cand[0]["gwarant"] if cand else ""
         with contextlib.suppress(Exception):                    # świeży odczyt kalendarza przydzielonego gwaranta tuż przed rezerwacją
             if pid:
@@ -287,7 +301,7 @@ def make_app(ctx):
         errors = PB.after_booking(ctx, g.db, b)
         gp = R.person(g.db, b["gwarant"])
         return msg("Prośba wysłana 🎉", f"Twój gwarant: {gp['imie_nazwisko']}. Gdy zaakceptuje (najpóźniej w ciągu 24 h), dostaniesz maila "
-                   "z zaproszeniem do kalendarza." + (" (Uwaga: mail nie wyszedł — Sebastian dał znać Andrzejowi.)" if errors else ""),
+                   + ("z potwierdzeniem z cal.com." if b.get("calcom_uid") else "z zaproszeniem do kalendarza.") + (" (Uwaga: mail nie wyszedł — Sebastian dał znać Andrzejowi.)" if errors else ""),
                    ("Moje spotkania", url_for("moje")))
 
     @app.route("/moje")

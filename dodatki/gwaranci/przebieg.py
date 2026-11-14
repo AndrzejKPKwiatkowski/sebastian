@@ -34,6 +34,8 @@ def after_booking(ctx, c, b):
     g, a = ppl[b["gwarant"]], ppl[b["adept"]]
     url = base_url(ctx, c)
     errors = []
+    if b.get("calcom_uid"):
+        return _after_calcom_booking(ctx, c, b, g, a, url)
     try:
         R.send_mail(ctx, c, g["email"], f"Prośba o spotkanie gwaranckie: {a['imie_nazwisko']}, {_when(b)}",
                     f"Cześć {g['imie_nazwisko'].split()[0]}!\n\n{a['imie_nazwisko']} prosi Cię o spotkanie gwaranckie.\n\n"
@@ -60,6 +62,61 @@ def after_booking(ctx, c, b):
     notify_owner(ctx, f"🗓️ Gwaranci: {a['imie_nazwisko']} → {g['imie_nazwisko']} · {R.TYPES[b['typ']][0]} · {_when(b)} (czeka na akceptację)"
                  + (f"\n⚠️ {'; '.join(errors)}" if errors else ""), "rezerwacja")
     return errors
+
+
+FEEDBACK = ("Po spotkaniu wypełnij feedback po usłudze i wyślij gwarantowi kilka zdań: czego się nauczyłeś/nauczyłaś "
+            "i za co jesteś wdzięczny/wdzięczna. Gwaranci robią to bez wynagrodzenia — Twoje słowa są dla nich najważniejszym podziękowaniem.")
+
+
+def _after_calcom_booking(ctx, c, b, g, a, url):
+    """Gwarant z cal.com: prośbę i zaproszenia wysyła jego cal.com — ja dokładam tylko maila dla adepta i powiadomienie dla Ciebie."""
+    if a.get("email"):
+        with contextlib.suppress(Exception):
+            R.send_mail(ctx, c, a["email"], f"Twoje spotkanie gwaranckie – {R.TYPES[b['typ']][0]}, {_when(b)}",
+                        f"Cześć {a['imie_nazwisko'].split()[0]}!\n\nProśba poszła do: {g['imie_nazwisko']} (przez cal.com). "
+                        "Gdy zaakceptuje, cal.com wyśle Ci potwierdzenie z wpisem do kalendarza.\n\n" + R.description(ctx, c, b) + "\n\n" + FEEDBACK,
+                        html=R.html_mail("Prośba wysłana", f"Cześć {a['imie_nazwisko'].split()[0]}! Prośba poszła do: <b>{g['imie_nazwisko']}</b>. "
+                                         "Gdy zaakceptuje, <b>cal.com</b> wyśle Ci potwierdzenie z wpisem do kalendarza.", _rows(c, b),
+                                         [("Moje spotkania", f"{url}/moje")], FEEDBACK))
+    notify_owner(ctx, f"🗓️ Gwaranci: {a['imie_nazwisko']} → {g['imie_nazwisko']} · {R.TYPES[b['typ']][0]} · {_when(b)} "
+                 "(zapisane w cal.com, czeka na akceptację)", "rezerwacja")
+    return []
+
+
+def calcom_key(ctx):
+    with contextlib.suppress(Exception):
+        return ctx.secret("calcom_klucz") or ""
+    return ""
+
+
+def sync_calcom(ctx, c, when):
+    """Statusy rezerwacji z cal.com: akceptacja, odrzucenie, odwołanie w cal.com trafiają do Sebastiana."""
+    key = calcom_key(ctx)
+    ppl = R.people(c)
+    rows = c.execute("SELECT * FROM rezerwacje WHERE calcom_uid!='' AND status IN ('czeka','potwierdzone')").fetchall()
+    for r in rows:
+        b = dict(r)
+        if R.parse(b["start"]) < when - dt.timedelta(hours=12):
+            continue
+        st = R.calcom_booking_status(b["calcom_uid"], key)
+        g, a = ppl.get(b["gwarant"], {}), ppl.get(b["adept"], {})
+        if st == "accepted" and b["status"] == "czeka":
+            R.set_status(c, b["id"], "potwierdzone")
+            notify_owner(ctx, f"✅ Gwaranci: {g.get('imie_nazwisko', '?')} potwierdził(a) w cal.com spotkanie z {a.get('imie_nazwisko', '?')} · {_when(b)}", "decyzja")
+        elif st == "rejected" and b["status"] == "czeka":
+            b = R.set_status(c, b["id"], "odrzucone")
+            if a.get("email"):
+                with contextlib.suppress(Exception):
+                    R.send_mail(ctx, c, a["email"], "Wybierz proszę inny termin spotkania gwaranckiego",
+                                f"{g.get('imie_nazwisko', 'Gwarant')} nie może w tym terminie. Wybierz inny: {base_url(ctx, c)}/rezerwuj",
+                                html=R.html_mail("Wybierz inny termin", f"<b>{g.get('imie_nazwisko', 'Gwarant')}</b> nie może w tym terminie. "
+                                                 "Wybierz proszę inny — system znów dobierze gwaranta.", _rows(c, b),
+                                                 [("Wybierz termin", f"{base_url(ctx, c)}/rezerwuj?typ={b['typ']}")]))
+            notify_owner(ctx, f"↩️ Gwaranci: {g.get('imie_nazwisko', '?')} odrzucił(a) w cal.com ({a.get('imie_nazwisko', '?')}, {_when(b)}). "
+                         "Adept dostał prośbę o inny termin.", "decyzja")
+        elif st == "cancelled":
+            R.set_status(c, b["id"], "anulowane")
+            notify_owner(ctx, f"✖️ Gwaranci: spotkanie {a.get('imie_nazwisko', '?')} z {g.get('imie_nazwisko', '?')} ({_when(b)}) odwołane w cal.com.", "anulowanie")
 
 
 def decide(ctx, c, b, yes, source="link"):
@@ -109,6 +166,15 @@ def cancel_by_adept(ctx, c, b):
         return b
     ppl = R.people(c)
     g, a = ppl[b["gwarant"]], ppl[b["adept"]]
+    if b.get("calcom_uid"):                                    # odwołanie w cal.com gwaranta — cal.com zawiadamia obie strony
+        try:
+            R.calcom_cancel(b["calcom_uid"], f"{a['imie_nazwisko']} odwołał(a) spotkanie w panelu gwarantów.", calcom_key(ctx))
+            note = ""
+        except Exception as e:
+            note = f"\n⚠️ Nie udało się odwołać w cal.com ({e}) — odwołaj ręcznie w cal.com {g['imie_nazwisko']}."
+        R.set_status(c, b["id"], "anulowane")
+        notify_owner(ctx, f"✖️ Gwaranci: {a['imie_nazwisko']} odwołał(a) spotkanie z {g['imie_nazwisko']} · {_when(b)}" + note, "anulowanie")
+        return R.booking(c, b["id"])
     b = R.set_status(c, b["id"], "anulowane")
     with contextlib.suppress(Exception):
         R.send_mail(ctx, c, g["email"], f"Odwołane: {a['imie_nazwisko']}, {_when(b)}",
@@ -130,12 +196,17 @@ def periodic(ctx, c, when=None, refresh=True, mail=True):
             if not last or (when - last).total_seconds() >= every:
                 with contextlib.suppress(Exception):
                     R.refresh_busy(c, pid, when=when)
+        last = R.meta_get(c, "calcom_sync")
+        if not last or (when - R.parse(last)).total_seconds() >= every:
+            with contextlib.suppress(Exception):
+                sync_calcom(ctx, c, when)
+            R.meta_set(c, "calcom_sync", R.iso(when))
     if mail:
         with contextlib.suppress(Exception):
             for b, ans in R.check_replies(ctx, c):
                 decide(ctx, c, b, ans == "tak", source="gmail")
     ppl = R.people(c)
-    for r in c.execute("SELECT * FROM rezerwacje WHERE status='czeka'").fetchall():
+    for r in c.execute("SELECT * FROM rezerwacje WHERE status='czeka' AND calcom_uid=''").fetchall():
         b = dict(r)
         start, made = R.parse(b["start"]), R.parse(b["utworzono"])
         if start - when < dt.timedelta(hours=2):

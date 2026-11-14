@@ -1,4 +1,4 @@
-"""Testy 2.14: dodatek Gwaranci. Bez sieci, bez Gmaila, bez WhatsAppa — wszystko udawane."""
+"""Testy 2.14 / 2.14.1: dodatek Gwaranci (także gwaranci z cal.com). Bez sieci, bez Gmaila, bez WhatsAppa — wszystko udawane."""
 import datetime as dt, json, os, re, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -279,6 +279,125 @@ class Panel(Base):
         r = self.app.get("/admin")
         self.assertEqual(r.status_code, 200)
         self.assertIn("Jan Nowak", r.get_data(as_text=True))
+
+
+class FakeCal:
+    """Udawane API cal.com: wolne terminy co 75 min (analiza) i co 30 min (krótsze), rezerwacje, statusy, odwołania."""
+    def __init__(self):
+        self.calls, self.status, self.refuse = [], "pending", False
+
+    def __call__(self, method, path, params=None, body=None, version="2024-08-13", key=""):
+        self.calls.append((method, path, params, body, key))
+        if path == "/slots":
+            if params["username"] == "nie-ma":
+                return 404, {"error": {"message": "not found"}}
+            step = 75 if int(params.get("duration", 30)) == 75 else 30
+            day = MON.isoformat()
+            starts = [dt.datetime.combine(MON, dt.time(9), TZ) + dt.timedelta(minutes=step * i) for i in range(4)]
+            return 200, {"status": "success", "data": {day: [{"start": x.isoformat()} for x in starts]}}
+        if method == "POST" and path == "/bookings":
+            if self.refuse:
+                return 400, {"error": {"message": "User either already has booking at this time or is not available"}}
+            return 201, {"status": "success", "data": {"uid": "cal-uid-1", "status": "pending"}}
+        if method == "GET" and path.startswith("/bookings/"):
+            return 200, {"status": "success", "data": {"uid": path.split("/")[-1], "status": self.status}}
+        if path.endswith("/cancel"):
+            return 200, {"status": "success", "data": {}}
+        return 404, {}
+
+
+class CalCom(Base):
+    def setUp(self):
+        super().setUp()
+        self.cal = FakeCal()
+        p = patch.object(R, "calcom_http", self.cal)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def podepnij(self, name="Adam Wierzba", ref="adam-w/spotkanie-gwaranckie"):
+        f = self.ctx.folder() / "struktura.json"
+        data = json.loads(f.read_text(encoding="utf-8"))
+        for o in data["osoby"]:
+            if o["imie_nazwisko"] == name:
+                o["calcom"] = "https://cal.com/" + ref
+        f.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        self.c.close()
+        self.c = R.db(self.ctx)
+        pid = R.slug(name)
+        self.c.execute("UPDATE osoby SET email=? WHERE id IN (?, 'tomasz-solny')", (pid + "@example.com", pid))
+        self.c.execute("UPDATE osoby SET email='tomasz@example.com' WHERE id='tomasz-solny'")
+        self.c.commit()
+        R.refresh_busy(self.c, pid, when=NOW)
+        return pid
+
+    def test_link_calcom(self):
+        self.assertEqual(R.parse_calcom("https://cal.com/andrzej-kwiatkowski/spotkanie-gwaranckie"), "andrzej-kwiatkowski/spotkanie-gwaranckie")
+        self.assertEqual(R.parse_calcom("cal.com/andrzej-kwiatkowski/spotkanie-gwaranckie?month=2026-11"), "andrzej-kwiatkowski/spotkanie-gwaranckie")
+        self.assertEqual(R.parse_calcom("https://cal.com/andrzej-kwiatkowski"), "")
+        self.assertEqual(R.parse_calcom("https://calendar.google.com/x/basic.ics"), "")
+
+    def test_domyslnie_podpiety_z_struktury(self):
+        adam = self.podepnij()
+        g = R.guarantor(self.c, adam)
+        self.assertEqual(g["calcom"], "adam-w/spotkanie-gwaranckie")
+        self.assertTrue(g["gotowe"])
+        self.assertEqual(g["limit_tyg"], 8)
+        R.save_guarantor(self.c, adam, calcom="")                 # sam przełączył się na iCal — nie nadpisuję przy kolejnym starcie
+        self.c.close()
+        self.c = R.db(self.ctx)
+        self.assertEqual(R.guarantor(self.c, adam)["calcom"], "")
+
+    def test_rezerwacja_w_calcom(self):
+        adam = self.podepnij()
+        day = R.slots(self.c, self.st, "tomasz-solny", "analiza", MON, NOW)
+        times = [s.strftime("%H:%M") for s, _ in day]
+        self.assertIn("10:15", times)                             # godzina z cal.com spoza siatki co 30 min
+        self.assertNotIn("10:00", times)
+        start = dt.datetime.combine(MON, dt.time(10, 15), TZ)
+        b = R.book(self.c, self.st, "tomasz-solny", "analiza", start, "miejsce", "biuro Zakopiańska", "rodzina 2+1", when=NOW)
+        self.assertEqual((b["gwarant"], b["calcom_uid"]), (adam, "cal-uid-1"))
+        post = next(x for x in self.cal.calls if x[0] == "POST")
+        self.assertEqual(post[3]["start"], "2026-11-16T09:15:00Z")
+        self.assertEqual(post[3]["attendee"]["email"], "tomasz@example.com")
+        self.assertIn("Na miejscu: biuro Zakopiańska", post[3]["bookingFieldsResponses"]["notes"])
+        self.assertNotIn("10:15", [s.strftime("%H:%M") for s, _ in R.slots(self.c, self.st, "tomasz-solny", "analiza", MON, NOW)])
+        PB.after_booking(self.ctx, self.c, b)
+        self.assertEqual([m["to"] for m in self.mails], ["tomasz@example.com"])  # prośbę do gwaranta wysyła cal.com
+        self.assertTrue(any("cal.com" in s for s in self.ctx.sent))
+        PB.periodic(self.ctx, self.c, when=NOW + dt.timedelta(hours=30), refresh=False, mail=False)
+        self.assertEqual(R.booking(self.c, b["id"])["status"], "czeka")  # bez przypomnień i wygasania — to robi cal.com
+        self.cal.status = "accepted"
+        PB.sync_calcom(self.ctx, self.c, NOW)
+        self.assertEqual(R.booking(self.c, b["id"])["status"], "potwierdzone")
+        PB.cancel_by_adept(self.ctx, self.c, R.booking(self.c, b["id"]))
+        self.assertTrue(any(x[1] == "/bookings/cal-uid-1/cancel" for x in self.cal.calls))
+        self.assertEqual(R.booking(self.c, b["id"])["status"], "anulowane")
+
+    def test_odmowa_calcom_bierze_nastepnego(self):
+        self.podepnij()
+        wiktor = self.ready("Wiktor Buk", [[0, 540, 1080]], 3)
+        self.cal.refuse = True
+        start = dt.datetime.combine(MON, dt.time(10, 30), TZ)
+        b = R.book(self.c, self.st, "tomasz-solny", "usluga", start, when=NOW)
+        self.assertEqual((b["gwarant"], b["calcom_uid"]), (wiktor, ""))
+
+    def test_onboarding_z_calcom_i_whatsapp(self):
+        app = PN.make_app(self.ctx).test_client()
+        p = R.find_person(self.c, "Wiktor Buk")
+        self.c.execute("UPDATE osoby SET email='wiktor@example.com' WHERE id=?", (p["id"],))
+        self.c.commit()
+        app.get(f"/l/{p['token']}")
+        tok = re.search(r'name="csrf" value="([^"]+)"', app.get("/gwarant/start").get_data(as_text=True)).group(1)
+        r = app.post("/gwarant/start?k=1", data={"csrf": tok, "zrodlo": "calcom", "calcom": "https://cal.com/nie-ma/x"})
+        self.assertIn("Nie udało się odczytać", r.get_data(as_text=True))
+        r = app.post("/gwarant/start?k=1", data={"csrf": tok, "zrodlo": "calcom", "calcom": "https://cal.com/wiktor-b/gwarant"})
+        self.assertIn("k=2", r.headers["Location"])
+        self.assertIn("cal.com podłączony", app.get(r.headers["Location"]).get_data(as_text=True))
+        app.post("/gwarant/start?k=2", data={"csrf": tok, "dostepnosc": "[]", "limit": "2"})
+        g = R.guarantor(self.c, p["id"])
+        self.assertEqual((g["calcom"], g["limit_tyg"], g["gotowe"]), ("wiktor-b/gwarant", 2, 1))
+        out = GW.on_message(self.ctx, {"text": "gwaranci calcom Olga Ruda https://cal.com/olga/gw"})
+        self.assertIn("cal.com podpięty", out)
 
 
 if __name__ == "__main__":

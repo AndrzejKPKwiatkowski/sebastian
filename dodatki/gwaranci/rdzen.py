@@ -117,6 +117,8 @@ CREATE TABLE IF NOT EXISTS rezerwacje (
     notatka TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'czeka', poziom INTEGER NOT NULL DEFAULT 3,
     kategoria TEXT NOT NULL DEFAULT '', token TEXT NOT NULL, uid TEXT NOT NULL, sekwencja INTEGER NOT NULL DEFAULT 0,
     utworzono TEXT NOT NULL, decyzja TEXT NOT NULL DEFAULT '', przypomniano INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS calcom_wolne (osoba TEXT NOT NULL, minuty INTEGER NOT NULL, start INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS calcom_wolne_osoba ON calcom_wolne(osoba);
 CREATE TABLE IF NOT EXISTS prosby (
     id INTEGER PRIMARY KEY AUTOINCREMENT, imie_nazwisko TEXT NOT NULL, email TEXT NOT NULL, telefon TEXT NOT NULL DEFAULT '',
     przelozony TEXT NOT NULL DEFAULT '', utworzono TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'nowa');
@@ -128,9 +130,34 @@ def db(ctx):
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
+    _add_column(con, "gwaranci", "calcom", "TEXT NOT NULL DEFAULT ''")      # 2.14.1: gwarant z cal.com zamiast linku iCal
+    _add_column(con, "rezerwacje", "calcom_uid", "TEXT NOT NULL DEFAULT ''")
     if not con.execute("SELECT 1 FROM osoby LIMIT 1").fetchone():
         seed(con, ctx.folder() / STRUCTURE_FILE)
+    calcom_defaults(con, ctx.folder() / STRUCTURE_FILE)
     return con
+
+
+def _add_column(c, table, col, decl):
+    if col not in {r[1] for r in c.execute(f"PRAGMA table_info({table})")}:
+        c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        c.commit()
+
+
+def calcom_defaults(c, path):
+    """Osoby, które w struktura.json mają "calcom", dostają go podpięty od razu (raz — potem decyduje sam gwarant)."""
+    rows = []
+    with contextlib.suppress(Exception):
+        rows = json.loads(path.read_text(encoding="utf-8")).get("osoby", [])
+    for r in rows:
+        ref = parse_calcom(r.get("calcom", ""))
+        pid = slug(r.get("imie_nazwisko", ""))
+        p = person(c, pid) if ref and pid else None
+        if not p or meta_get(c, f"calcom_domyslny:{pid}") or not can_guarantee(p):
+            continue
+        g = guarantor(c, pid)
+        save_guarantor(c, pid, calcom=ref, gotowe=1, limit_tyg=(g or {}).get("limit_tyg") or max_limit(p))
+        meta_set(c, f"calcom_domyslny:{pid}", ref)
 
 
 def meta_get(c, k, default=""):
@@ -344,9 +371,12 @@ def busy_blocks(ics_text, start, end):
 
 
 def refresh_busy(c, pid, days=40, fetch=None, when=None):
-    """Czyta wszystkie kalendarze gwaranta i zapisuje same godziny zajętości. Zwraca (liczba bloków, błąd)."""
-    fetch = fetch or fetch_ics
+    """Czyta wszystkie kalendarze gwaranta i zapisuje same godziny zajętości. Zwraca (liczba bloków, błąd).
+    Gwarant z cal.com: zamiast zajętości zapisuję wolne terminy jego wydarzenia z cal.com (zwraca (liczba terminów, błąd))."""
     g = guarantor(c, pid)
+    if g and g.get("calcom"):
+        return refresh_calcom(c, pid, days=min(days, 40), when=when)
+    fetch = fetch or fetch_ics
     if not g or not g["kalendarze"]:
         return 0, "brak podłączonego kalendarza"
     t0 = (when or dt.datetime.now(TZ)) - dt.timedelta(days=1)
@@ -367,6 +397,134 @@ def refresh_busy(c, pid, days=40, fetch=None, when=None):
               (dt.datetime.now(TZ).isoformat(timespec="seconds"), "; ".join(errors), pid))
     c.commit()
     return len(blocks), "; ".join(errors)
+
+
+# ================================================================ cal.com (gwarant ma własne wydarzenie w cal.com)
+
+CALCOM_API = "https://api.cal.com/v2"
+
+
+def parse_calcom(text):
+    """„https://cal.com/andrzej-kwiatkowski/spotkanie-gwaranckie” (albo bez https) → „andrzej-kwiatkowski/spotkanie-gwaranckie”."""
+    t = (text or "").strip().strip("<>\"' ")
+    t = re.sub(r"^(https?://)?(www\.)?cal\.com/", "", t, flags=re.I).split("?")[0].split("#")[0].strip("/")
+    parts = t.split("/")
+    if len(parts) != 2 or not all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", x) for x in parts):
+        return ""
+    return "/".join(parts)
+
+
+def calcom_http(method, path, params=None, body=None, version="2024-08-13", key=""):
+    """Jedno zapytanie do API cal.com v2. Zwraca (kod HTTP, JSON). Podmieniane w testach."""
+    import urllib.error, urllib.parse
+    url = CALCOM_API + path + ("?" + urllib.parse.urlencode(params) if params else "")
+    head = {"cal-api-version": version, "Accept": "application/json", "User-Agent": "Sebastian-Gwaranci/1.1"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        head["Content-Type"] = "application/json"
+    if key:
+        head["Authorization"] = "Bearer " + key
+    req = urllib.request.Request(url, data=data, headers=head, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return r.status, json.loads(r.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
+        with contextlib.suppress(Exception):
+            return e.code, json.loads(e.read().decode("utf-8") or "{}")
+        return e.code, {}
+
+
+def _calcom_err(code, js):
+    e = js.get("error") if isinstance(js, dict) else None
+    msg = (e.get("message") if isinstance(e, dict) else e) or (js.get("message") if isinstance(js, dict) else "") or ""
+    return f"cal.com {code}: {str(msg)[:140]}".strip()
+
+
+def calcom_slots(ref, d0, d1, minutes, http=None):
+    """Wolne starty (datetime w Europe/Warsaw) wydarzenia cal.com między dniami d0 i d1 dla spotkania o długości `minutes`."""
+    http = http or calcom_http
+    user, ev = ref.split("/", 1)
+    params = {"eventTypeSlug": ev, "username": user, "start": d0.isoformat(), "end": d1.isoformat(), "timeZone": "Europe/Warsaw",
+              "duration": minutes}
+    code, js = http("GET", "/slots", params=params, version="2024-09-04")
+    if code == 400:                                            # wydarzenie bez wyboru długości — pytam o jego domyślną
+        params.pop("duration")
+        code, js = http("GET", "/slots", params=params, version="2024-09-04")
+    if code != 200:
+        raise ValueError(_calcom_err(code, js) if code != 404 else "cal.com nie zna takiego wydarzenia — sprawdź link.")
+    out = []
+    for day in (js.get("data") or {}).values():
+        for x in day:
+            s = x.get("start") if isinstance(x, dict) else x
+            with contextlib.suppress(Exception):
+                out.append(dt.datetime.fromisoformat(str(s).replace("Z", "+00:00")).astimezone(TZ))
+    return out
+
+
+def refresh_calcom(c, pid, days=40, when=None, http=None):
+    g = guarantor(c, pid)
+    if not g or not g.get("calcom"):
+        return 0, "brak cal.com"
+    d0 = (when or dt.datetime.now(TZ)).date()
+    rows, err = [], ""
+    try:
+        for minutes in sorted({m for _, m in TYPES.values()}):
+            rows += [(pid, minutes, int(s.timestamp())) for s in calcom_slots(g["calcom"], d0, d0 + dt.timedelta(days=days), minutes, http)]
+    except Exception as e:
+        err = str(e)[:200] or type(e).__name__
+    if err:
+        c.execute("UPDATE gwaranci SET blad=? WHERE osoba=?", (err, pid))
+        c.commit()
+        return 0, err
+    c.execute("DELETE FROM calcom_wolne WHERE osoba=?", (pid,))
+    c.executemany("INSERT INTO calcom_wolne(osoba,minuty,start) VALUES(?,?,?)", rows)
+    c.execute("UPDATE gwaranci SET odczyt=?, blad='' WHERE osoba=?", (dt.datetime.now(TZ).isoformat(timespec="seconds"), pid))
+    c.commit()
+    return len(rows), ""
+
+
+def calcom_book(ref, start, minutes, name, email, notes, http=None):
+    """Rezerwacja w cal.com gwaranta (publiczne API, jak zwykły formularz rezerwacji). Zwraca (uid, status) albo rzuca ValueError."""
+    http = http or calcom_http
+    user, ev = ref.split("/", 1)
+    body = {"start": start.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "eventTypeSlug": ev, "username": user,
+            "attendee": {"name": name, "email": email, "timeZone": "Europe/Warsaw", "language": "pl"},
+            "lengthInMinutes": minutes, "bookingFieldsResponses": {"notes": notes[:900]}, "metadata": {"zrodlo": "sebastian-gwaranci"}}
+    code, js = http("POST", "/bookings", body=body)
+    if code == 400 and "length" in json.dumps(js).lower():     # wydarzenie o stałej długości
+        body.pop("lengthInMinutes")
+        code, js = http("POST", "/bookings", body=body)
+    if code not in (200, 201):
+        raise ValueError(_calcom_err(code, js))
+    d = js.get("data") or {}
+    d = d[0] if isinstance(d, list) and d else d
+    return str(d.get("uid", "")), str(d.get("status", "pending"))
+
+
+def calcom_booking_status(uid, key="", http=None):
+    """'pending' / 'accepted' / 'rejected' / 'cancelled' — albo None, gdy cal.com nie pozwala odczytać (np. brak klucza API)."""
+    http = http or calcom_http
+    code, js = http("GET", f"/bookings/{uid}", key=key)
+    if code != 200:
+        return None
+    d = js.get("data") or {}
+    d = d[0] if isinstance(d, list) and d else d
+    return str(d.get("status", "")).lower() or None
+
+
+def calcom_cancel(uid, reason, key="", http=None):
+    http = http or calcom_http
+    code, js = http("POST", f"/bookings/{uid}/cancel", body={"cancellationReason": reason}, key=key)
+    if code not in (200, 201):
+        raise ValueError(_calcom_err(code, js))
+
+
+def calcom_free(c, pid):
+    out = {}
+    for r in c.execute("SELECT minuty, start FROM calcom_wolne WHERE osoba=?", (pid,)):
+        out.setdefault(r["minuty"], set()).add(r["start"])
+    return out
 
 
 def busy_of(c, pid):
@@ -398,6 +556,7 @@ class Snapshot:
         self.ppl = people(c)
         self.g = ready_guarantors(c)
         self.busy = {p: busy_of(c, p) for p in self.g}
+        self.cal = {p: calcom_free(c, p) for p in self.g if self.g[p].get("calcom")}
         self.book = {p: bookings_of(c, p) for p in self.g}
         self.total = {p: sum(b["minuty"] for b in c.execute("SELECT minuty FROM rezerwacje WHERE gwarant=? AND status='potwierdzone'", (p,)))
                       for p in self.g}
@@ -413,12 +572,16 @@ class Snapshot:
             return False
         g = self.g[p]
         end = start + dt.timedelta(minutes=minutes)
-        wd, m0 = start.weekday(), start.hour * 60 + start.minute
-        if not any(int(d) == wd and int(x) <= m0 and m0 + minutes <= int(y) for d, x, y in g["dostepnosc"]):
-            return False
         pad = dt.timedelta(minutes=self.buffer)
-        if any(start < b + pad and end + pad > a_ for a_, b in self.busy[p]):
-            return False
+        if g.get("calcom"):                                    # dostępność, kalendarze i bufory liczy cal.com gwaranta
+            if int(start.timestamp()) not in self.cal.get(p, {}).get(minutes, set()):
+                return False
+        else:
+            wd, m0 = start.weekday(), start.hour * 60 + start.minute
+            if not any(int(d) == wd and int(x) <= m0 and m0 + minutes <= int(y) for d, x, y in g["dostepnosc"]):
+                return False
+            if any(start < b + pad and end + pad > a_ for a_, b in self.busy[p]):
+                return False
         for b in self.book[p]:
             bs = parse(b["start"])
             if start < bs + dt.timedelta(minutes=b["minuty"]) + pad and end + pad > bs:
@@ -446,8 +609,14 @@ def slots(c, settings, a, typ, day, when=None, snap=None):
     if day > last_day:
         return []
     out = []
-    for m in range(int(settings.get("od_godz", 7)) * 60, int(settings.get("do_godz", 21)) * 60 - minutes + 1, 30):
-        start = dt.datetime.combine(day, dt.time(m // 60, m % 60), TZ)
+    starts = {dt.datetime.combine(day, dt.time(m // 60, m % 60), TZ)
+              for m in range(int(settings.get("od_godz", 7)) * 60, int(settings.get("do_godz", 21)) * 60 - minutes + 1, 30)}
+    for free in snap.cal.values():                             # godziny z cal.com gwarantów (np. co 75 min) też proponuję
+        for ts in free.get(minutes, ()):
+            s = dt.datetime.fromtimestamp(ts, TZ)
+            if s.date() == day:
+                starts.add(s)
+    for start in sorted(starts):
         if start < first:
             continue
         cand = snap.candidates(a, start, minutes)
@@ -468,22 +637,41 @@ def days_with_slots(c, settings, a, typ, when=None):
     return out
 
 
-def book(c, settings, a, typ, start, place="online", place_text="", note="", when=None):
-    """Rezerwuje: jeszcze raz sprawdza wolny termin (świeża zajętość) i przydziela gwaranta. Zwraca rezerwację."""
+def book(c, settings, a, typ, start, place="online", place_text="", note="", when=None, http=None):
+    """Rezerwuje: jeszcze raz sprawdza wolny termin (świeża zajętość) i przydziela gwaranta. Zwraca rezerwację.
+    Gwarant z cal.com: rezerwacja powstaje od razu w jego cal.com; gdy cal.com odmówi, biorę następnego kandydata."""
     minutes = TYPES[typ][1]
-    cand = Snapshot(c, settings).candidates(a, start, minutes)
+    snap = Snapshot(c, settings)
+    cand = snap.candidates(a, start, minutes)
     if start < (when or dt.datetime.now(TZ)) + dt.timedelta(hours=int(settings.get("wyprzedzenie_h", 24))) or not cand:
         raise ValueError("Ten termin właśnie przestał być wolny. Wybierz proszę inny.")
     ppl = people(c)
-    g = cand[0]["gwarant"]
-    tok = secrets.token_urlsafe(18)
-    uid = f"gwaranci-{secrets.token_hex(8)}@sebastian"
-    cur = c.execute("INSERT INTO rezerwacje(adept,gwarant,typ,start,minuty,miejsce,miejsce_opis,notatka,status,poziom,kategoria,token,uid,utworzono)"
-                    " VALUES(?,?,?,?,?,?,?,?,'czeka',?,?,?,?,?)",
-                    (a, g, typ, iso(start), minutes, place, place_text.strip()[:200], note.strip()[:500], cand[0]["poziom"],
-                     category(ppl, g, a), tok, uid, (when or dt.datetime.now(TZ)).isoformat(timespec="seconds")))
-    c.commit()
-    return booking(c, cur.lastrowid)
+    me = ppl[a]
+    for k in cand:
+        g = k["gwarant"]
+        cal_uid = ""
+        ref = snap.g[g].get("calcom")
+        if ref:
+            where = f"Na miejscu: {place_text.strip()}" if place == "miejsce" else "Online"
+            text = (f"Spotkanie gwaranckie: {TYPES[typ][0]} ({dur(minutes)}). {where}. Adept: {me['imie_nazwisko']}, {me['stanowisko']}."
+                    + (f" Od adepta: {note.strip()}" if note.strip() else "") + " — zarezerwowane przez Sebastiana (system gwarantów Feniksów).")
+            try:
+                cal_uid, _ = calcom_book(ref, start, minutes, me["imie_nazwisko"], me.get("email", ""), text, http)
+            except Exception:
+                with contextlib.suppress(Exception):
+                    refresh_calcom(c, g, when=when, http=http)
+                continue
+        tok = secrets.token_urlsafe(18)
+        uid = f"gwaranci-{secrets.token_hex(8)}@sebastian"
+        cur = c.execute("INSERT INTO rezerwacje(adept,gwarant,typ,start,minuty,miejsce,miejsce_opis,notatka,status,poziom,kategoria,token,uid,"
+                        "utworzono,calcom_uid) VALUES(?,?,?,?,?,?,?,?,'czeka',?,?,?,?,?,?)",
+                        (a, g, typ, iso(start), minutes, place, place_text.strip()[:200], note.strip()[:500], k["poziom"],
+                         category(ppl, g, a), tok, uid, (when or dt.datetime.now(TZ)).isoformat(timespec="seconds"), cal_uid))
+        if ref:                                                # ten termin w cal.com jest już zajęty
+            c.execute("DELETE FROM calcom_wolne WHERE osoba=? AND start=?", (g, int(start.timestamp())))
+        c.commit()
+        return booking(c, cur.lastrowid)
+    raise ValueError("Ten termin właśnie przestał być wolny. Wybierz proszę inny.")
 
 
 def booking(c, bid):
