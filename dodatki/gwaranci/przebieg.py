@@ -36,8 +36,7 @@ def after_booking(ctx, c, b):
     errors = []
     if b.get("calcom_uid"):
         return _after_calcom_booking(ctx, c, b, g, a, url)
-    try:
-        R.send_mail(ctx, c, g["email"], f"Prośba o spotkanie gwaranckie: {a['imie_nazwisko']}, {_when(b)}",
+    err = R.send_or_queue(ctx, c, g["email"], f"Prośba o spotkanie gwaranckie: {a['imie_nazwisko']}, {_when(b)}",
                     f"Cześć {g['imie_nazwisko'].split()[0]}!\n\n{a['imie_nazwisko']} prosi Cię o spotkanie gwaranckie.\n\n"
                     + R.description(ctx, c, b) + f"\n\nAkceptuję: {url}/decyzja/{b['token']}/tak\nNie mogę: {url}/decyzja/{b['token']}/nie\n",
                     html=R.html_mail("Prośba o spotkanie gwaranckie",
@@ -45,12 +44,12 @@ def after_booking(ctx, c, b):
                                      "Termin pasuje do Twojej dostępności i jest wolny w Twoim kalendarzu.",
                                      _rows(c, b), [("Akceptuję", f"{url}/decyzja/{b['token']}/tak"), ("Nie mogę", f"{url}/decyzja/{b['token']}/nie")],
                                      "Możesz też odpowiedzieć przyciskami Tak / Nie w zaproszeniu Google Calendar. Prosimy o odpowiedź w ciągu 24 h."),
-                    ics=R._event_ics(ctx, c, b))
-    except Exception as e:
-        errors.append(f"mail do gwaranta: {e}")
+                    ics=R._event_ics(ctx, c, b), booking_id=b["id"])
+    if err:
+        errors.append(f"mail do gwaranta: {err}")
     if a.get("email"):
         with contextlib.suppress(Exception):
-            R.send_mail(ctx, c, a["email"], f"Twoje spotkanie gwaranckie – {R.TYPES[b['typ']][0]}, {_when(b)}",
+            R.send_or_queue(ctx, c, a["email"], f"Twoje spotkanie gwaranckie – {R.TYPES[b['typ']][0]}, {_when(b)}",
                         f"Cześć {a['imie_nazwisko'].split()[0]}!\n\nProśba poszła do: {g['imie_nazwisko']}. Gdy zaakceptuje, dostaniesz "
                         "zaproszenie do kalendarza.\n\n" + R.description(ctx, c, b),
                         html=R.html_mail("Prośba wysłana", f"Cześć {a['imie_nazwisko'].split()[0]}! Prośba poszła do: <b>{g['imie_nazwisko']}</b>. "
@@ -60,6 +59,7 @@ def after_booking(ctx, c, b):
                                          "i za co jesteś wdzięczny/wdzięczna. Gwaranci robią to bez wynagrodzenia — Twoje słowa są dla nich "
                                          "najważniejszym podziękowaniem."))
     notify_owner(ctx, f"🗓️ Gwaranci: {a['imie_nazwisko']} → {g['imie_nazwisko']} · {R.TYPES[b['typ']][0]} · {_when(b)} (czeka na akceptację)"
+                 + (f"\nℹ️ cal.com nie przyjął rezerwacji ({b['calcom_blad']}) — prośba poszła mailem z zaproszeniem." if b.get("calcom_blad") else "")
                  + (f"\n⚠️ {'; '.join(errors)}" if errors else ""), "rezerwacja")
     return errors
 
@@ -201,6 +201,12 @@ def periodic(ctx, c, when=None, refresh=True, mail=True):
             with contextlib.suppress(Exception):
                 sync_calcom(ctx, c, when)
             R.meta_set(c, "calcom_sync", R.iso(when))
+    with contextlib.suppress(Exception):                       # maile, których Gmail wcześniej nie przyjął
+        for r, err in R.flush_queue(ctx, c, when):
+            if err:
+                notify_owner(ctx, f"⚠️ Gwaranci: mail do {r['do_kogo']} („{r['temat']}”) nie wyszedł mimo kilku prób: {err}", "poczta")
+            elif r["proby"] >= 1 and r["rezerwacja"]:
+                notify_owner(ctx, f"✉️ Gwaranci: mail do {r['do_kogo']} („{r['temat']}”) wyszedł za {r['proby'] + 1}. razem.", "poczta")
     if mail:
         with contextlib.suppress(Exception):
             for b, ans in R.check_replies(ctx, c):

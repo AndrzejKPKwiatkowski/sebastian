@@ -5,7 +5,7 @@ Z kalendarzy gwarantów zapamiętuję wyłącznie godziny zajętości (od–do),
 """
 import contextlib, datetime as dt, email.policy, imaplib, json, re, secrets, smtplib, sqlite3, ssl, subprocess, sys, unicodedata, urllib.request
 from email.message import EmailMessage
-from email.utils import formataddr, make_msgid
+from email.utils import formataddr, formatdate, make_msgid
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Europe/Warsaw")
@@ -119,6 +119,10 @@ CREATE TABLE IF NOT EXISTS rezerwacje (
     utworzono TEXT NOT NULL, decyzja TEXT NOT NULL DEFAULT '', przypomniano INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS calcom_wolne (osoba TEXT NOT NULL, minuty INTEGER NOT NULL, start INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS calcom_wolne_osoba ON calcom_wolne(osoba);
+CREATE TABLE IF NOT EXISTS poczta_kolejka (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, do_kogo TEXT NOT NULL, temat TEXT NOT NULL, tresc TEXT NOT NULL, html TEXT NOT NULL DEFAULT '',
+    ics TEXT NOT NULL DEFAULT '', metoda TEXT NOT NULL DEFAULT 'REQUEST', proby INTEGER NOT NULL DEFAULT 0, blad TEXT NOT NULL DEFAULT '',
+    utworzono TEXT NOT NULL, nastepna TEXT NOT NULL DEFAULT '', wyslano TEXT NOT NULL DEFAULT '', rezerwacja INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS prosby (
     id INTEGER PRIMARY KEY AUTOINCREMENT, imie_nazwisko TEXT NOT NULL, email TEXT NOT NULL, telefon TEXT NOT NULL DEFAULT '',
     przelozony TEXT NOT NULL DEFAULT '', utworzono TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'nowa');
@@ -484,6 +488,15 @@ def refresh_calcom(c, pid, days=40, when=None, http=None):
     return len(rows), ""
 
 
+TAKEN = re.compile(r"already has booking|not available|no available|unavailable|busy|slot|already booked|booking limit|conflict", re.I)
+
+
+class CalcomError(ValueError):
+    def __init__(self, msg, taken=False):
+        super().__init__(msg)
+        self.taken = taken
+
+
 def calcom_book(ref, start, minutes, name, email, notes, http=None):
     """Rezerwacja w cal.com gwaranta (publiczne API, jak zwykły formularz rezerwacji). Zwraca (uid, status) albo rzuca ValueError."""
     http = http or calcom_http
@@ -495,8 +508,14 @@ def calcom_book(ref, start, minutes, name, email, notes, http=None):
     if code == 400 and "length" in json.dumps(js).lower():     # wydarzenie o stałej długości
         body.pop("lengthInMinutes")
         code, js = http("POST", "/bookings", body=body)
+    if code == 400 and not TAKEN.search(json.dumps(js, ensure_ascii=False)):   # inne pola formularza — najprostsza rezerwacja
+        body.pop("lengthInMinutes", None)
+        body.pop("metadata", None)
+        body.pop("bookingFieldsResponses", None)
+        body["attendee"].pop("language", None)
+        code, js = http("POST", "/bookings", body=body)
     if code not in (200, 201):
-        raise ValueError(_calcom_err(code, js))
+        raise CalcomError(_calcom_err(code, js), taken=bool(TAKEN.search(json.dumps(js, ensure_ascii=False))))
     d = js.get("data") or {}
     d = d[0] if isinstance(d, list) and d else d
     return str(d.get("uid", "")), str(d.get("status", "pending"))
@@ -649,28 +668,39 @@ def book(c, settings, a, typ, start, place="online", place_text="", note="", whe
     me = ppl[a]
     for k in cand:
         g = k["gwarant"]
-        cal_uid = ""
+        cal_uid, fallback = "", ""
         ref = snap.g[g].get("calcom")
         if ref:
             where = f"Na miejscu: {place_text.strip()}" if place == "miejsce" else "Online"
             text = (f"Spotkanie gwaranckie: {TYPES[typ][0]} ({dur(minutes)}). {where}. Adept: {me['imie_nazwisko']}, {me['stanowisko']}."
                     + (f" Od adepta: {note.strip()}" if note.strip() else "") + " — zarezerwowane przez Sebastiana (system gwarantów Feniksów).")
             try:
+                if not EMAIL_OK.match(me.get("email", "") or ""):
+                    raise CalcomError("adept nie ma adresu e-mail, a cal.com go wymaga")
                 cal_uid, _ = calcom_book(ref, start, minutes, me["imie_nazwisko"], me.get("email", ""), text, http)
-            except Exception:
-                with contextlib.suppress(Exception):
-                    refresh_calcom(c, g, when=when, http=http)
-                continue
+            except Exception as e:
+                taken = getattr(e, "taken", False)
+                calcom_err = str(e)[:300] or type(e).__name__
+                meta_set(c, "calcom_ostatni_blad", f"{dt.datetime.now(TZ):%d.%m %H:%M} · {snap.g[g].get('calcom')} · {calcom_err}")
+                if taken or not EMAIL_OK.match(ppl[g].get("email", "") or ""):
+                    with contextlib.suppress(Exception):
+                        refresh_calcom(c, g, when=when, http=http)
+                    continue
+                ref = ""                                   # cal.com odmówił z innego powodu — prośba idzie zwykłą drogą (mail + zaproszenie)
+                fallback = calcom_err
         tok = secrets.token_urlsafe(18)
         uid = f"gwaranci-{secrets.token_hex(8)}@sebastian"
         cur = c.execute("INSERT INTO rezerwacje(adept,gwarant,typ,start,minuty,miejsce,miejsce_opis,notatka,status,poziom,kategoria,token,uid,"
                         "utworzono,calcom_uid) VALUES(?,?,?,?,?,?,?,?,'czeka',?,?,?,?,?,?)",
                         (a, g, typ, iso(start), minutes, place, place_text.strip()[:200], note.strip()[:500], k["poziom"],
                          category(ppl, g, a), tok, uid, (when or dt.datetime.now(TZ)).isoformat(timespec="seconds"), cal_uid))
-        if ref:                                                # ten termin w cal.com jest już zajęty
+        if ref or fallback:                                    # ten termin w cal.com jest już zajęty (albo obiecany mailem)
             c.execute("DELETE FROM calcom_wolne WHERE osoba=? AND start=?", (g, int(start.timestamp())))
         c.commit()
-        return booking(c, cur.lastrowid)
+        out = booking(c, cur.lastrowid)
+        if fallback:
+            out["calcom_blad"] = fallback
+        return out
     raise ValueError("Ten termin właśnie przestał być wolny. Wybierz proszę inny.")
 
 
@@ -693,25 +723,35 @@ def set_status(c, bid, status):
 
 # ================================================================ poczta (skrzynka Sebastiana, Gmail z hasłem aplikacji)
 
+SEB_MAIL = "sebastian.k.kwiatkowski@gmail.com"
+
+
 def mailbox(ctx, c):
-    """(adres, hasło aplikacji) skrzynki Sebastiana: własne ustawienie dodatku albo to z dodatku Rekrutacja."""
+    """(adres, hasło aplikacji) skrzynki Sebastiana (domyślnie sebastian.k.kwiatkowski@gmail.com): własne ustawienie dodatku
+    albo — w parze, adres razem z hasłem — skrzynka Sebastiana z dodatku Rekrutacja."""
     addr = meta_get(c, "poczta") or ""
     pwd = None
     with contextlib.suppress(Exception):
         pwd = ctx.secret("poczta")
-    if not (addr and pwd):
+    if addr and pwd:
+        return addr, pwd
+    raddr, rpwd = "", None
+    for name in ("stan.sqlite3", "rekrutacja.sqlite3"):
         with contextlib.suppress(Exception):
-            rc = sqlite3.connect(ctx.folder().parent / "rekrutacja" / "rekrutacja.sqlite3", timeout=10)
-            rc.row_factory = sqlite3.Row
-            r = rc.execute("SELECT v FROM meta WHERE k='poczta_sebastian'").fetchone()
-            rc.close()
-            addr = addr or (r["v"] if r else "")
-        if sys.platform == "darwin":
-            with contextlib.suppress(Exception):
-                r = subprocess.run(["security", "find-generic-password", "-s", "sebastian-rekrutacja", "-a", "sebastian", "-w"],
-                                   capture_output=True, text=True, timeout=10)
-                pwd = pwd or (r.stdout.strip() if r.returncode == 0 else None)
-    return (addr or ""), (pwd or "")
+            f = ctx.folder().parent / "rekrutacja" / name
+            if f.exists() and not raddr:
+                rc = sqlite3.connect(f, timeout=10)
+                r = rc.execute("SELECT v FROM meta WHERE k='poczta_sebastian'").fetchone()
+                rc.close()
+                raddr = (r[0] if r else "") or ""
+    if sys.platform == "darwin":
+        with contextlib.suppress(Exception):
+            r = subprocess.run(["security", "find-generic-password", "-s", "sebastian-rekrutacja", "-a", "sebastian", "-w"],
+                               capture_output=True, text=True, timeout=10)
+            rpwd = r.stdout.strip() if r.returncode == 0 else None
+    if rpwd:
+        return (raddr or addr or SEB_MAIL), rpwd
+    return (addr or raddr or SEB_MAIL), (pwd or "")
 
 
 def _event_ics(ctx, c, b, method="REQUEST", with_adept=False, accepted=False):
@@ -805,14 +845,94 @@ def send_mail(ctx, c, to, subject, text, html="", ics="", method="REQUEST"):
     if ics:
         msg.add_alternative(ics.encode("utf-8"), maintype="text", subtype="calendar", params={"method": method, "charset": "utf-8"})
         msg.add_attachment(ics.encode("utf-8"), maintype="application", subtype="ics", filename="zaproszenie.ics")
-    s = smtplib.SMTP("smtp.gmail.com", 587, timeout=60)
+    msg["Date"] = formatdate(localtime=True)
+    smtp_send(addr, pwd, msg)
+
+
+class MailError(RuntimeError):
+    pass
+
+
+def smtp_send(addr, pwd, msg, tries=None, pause=3.0):
+    """Gmail: najpierw port 587 (STARTTLS), przy zerwanym połączeniu jeszcze raz, potem port 465 (SSL).
+    Zły login → od razu jasny błąd (powtarzanie nic nie da)."""
+    import time
+    pwd = "".join(pwd.split())
+    ways = tries or [("587", 587), ("587", 587), ("465", 465)]
+    last = None
+    for n, (label, port) in enumerate(ways):
+        if n:
+            time.sleep(pause)
+        s = None
+        try:
+            if port == 465:
+                s = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=60, context=ssl.create_default_context())
+                s.ehlo()
+            else:
+                s = smtplib.SMTP("smtp.gmail.com", 587, timeout=60)
+                s.ehlo()
+                s.starttls(context=ssl.create_default_context())
+                s.ehlo()
+            s.login(addr, pwd)
+            refused = s.send_message(msg)
+            if refused:
+                raise MailError(f"Gmail odrzucił adres odbiorcy: {', '.join(refused)}")
+            return
+        except smtplib.SMTPAuthenticationError as e:
+            raise MailError("Gmail odrzucił hasło aplikacji skrzynki Sebastiana — ustaw je na nowo: "
+                            "python sebastian.py dodatek gwaranci poczta --zmien") from e
+        except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused) as e:
+            raise MailError(f"Gmail odrzucił adres: {e}") from e
+        except MailError:
+            raise
+        except Exception as e:                                   # zerwane połączenie, limit Gmaila, sieć — próbuję dalej
+            last = f"{type(e).__name__}: {e}"[:200]
+        finally:
+            with contextlib.suppress(Exception):
+                if s:
+                    s.quit()
+    raise MailError(f"Gmail zerwał połączenie ({last}) — ponowię wysyłkę za kilka minut")
+
+
+def send_or_queue(ctx, c, to, subject, text, html="", ics="", method="REQUEST", booking_id=0):
+    """Wysyła od razu; gdy Gmail zawiedzie (nie z powodu hasła/adresu), mail czeka w kolejce i wychodzi przy kolejnym obrocie.
+    Zwraca '' gdy wyszło, inaczej opis problemu."""
     try:
-        s.starttls(context=ssl.create_default_context())
-        s.login(addr, "".join(pwd.split()))
-        s.send_message(msg)
-    finally:
-        with contextlib.suppress(Exception):
-            s.quit()
+        send_mail(ctx, c, to, subject, text, html, ics, method)
+        return ""
+    except Exception as e:
+        err = str(e)[:300]
+        if EMAIL_OK.match(to or "") and "hasło" not in err and "odrzucił adres" not in err:
+            when = dt.datetime.now(TZ)
+            c.execute("INSERT INTO poczta_kolejka(do_kogo,temat,tresc,html,ics,metoda,proby,blad,utworzono,nastepna,rezerwacja) "
+                      "VALUES(?,?,?,?,?,?,1,?,?,?,?)", (to, subject, text, html, ics, method, err, when.isoformat(timespec="seconds"),
+                                                        (when + dt.timedelta(minutes=3)).isoformat(timespec="seconds"), booking_id))
+            c.commit()
+            return err + " (w kolejce — ponowię sam)"
+        return err
+
+
+def flush_queue(ctx, c, when=None, max_tries=12):
+    """Ponawia maile z kolejki. Zwraca [(wiersz, błąd albo '')] dla tych, które właśnie wyszły albo ostatecznie przepadły."""
+    when = when or dt.datetime.now(TZ)
+    out = []
+    rows = c.execute("SELECT * FROM poczta_kolejka WHERE wyslano='' AND proby<? AND nastepna<=? ORDER BY id LIMIT 10",
+                     (max_tries, when.isoformat(timespec="seconds"))).fetchall()
+    for r in rows:
+        r = dict(r)
+        try:
+            send_mail(ctx, c, r["do_kogo"], r["temat"], r["tresc"], r["html"], r["ics"], r["metoda"])
+            c.execute("UPDATE poczta_kolejka SET wyslano=? WHERE id=?", (when.isoformat(timespec="seconds"), r["id"]))
+            out.append((r, ""))
+        except Exception as e:
+            n = r["proby"] + 1
+            c.execute("UPDATE poczta_kolejka SET proby=?, blad=?, nastepna=? WHERE id=?",
+                      (n, str(e)[:300], (when + dt.timedelta(minutes=min(60, 3 * 2 ** n))).isoformat(timespec="seconds"), r["id"]))
+            if n >= max_tries or "hasło" in str(e):
+                c.execute("UPDATE poczta_kolejka SET proby=? WHERE id=?", (max_tries, r["id"]))
+                out.append((r, str(e)[:300]))
+        c.commit()
+    return out
 
 
 def check_replies(ctx, c, since_days=14):

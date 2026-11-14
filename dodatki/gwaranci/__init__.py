@@ -1,4 +1,4 @@
-"""Dodatek Gwaranci (Sebastian 2.14.1) — spotkania gwaranckie Feniksów.
+"""Dodatek Gwaranci (Sebastian 2.14.3) — spotkania gwaranckie Feniksów.
 
 Gwarant dostaje osobisty link, podłącza kalendarz (tylko zajętość), zaznacza kiedy może i ile spotkań w tygodniu.
 Adept wybiera typ i godzinę, Sebastian dobiera gwaranta (bezpośredni menedżer → pośredni → ta sama struktura → inna)
@@ -105,6 +105,22 @@ def cmd_adres(ctx, args):
 def cmd_poczta(ctx, args):
     with contextlib.closing(R.db(ctx)) as c:
         addr, pwd = R.mailbox(ctx, c)
+        if args and args[0] == "test":                     # próbny mail z zaproszeniem (.ics) na skrzynkę Sebastiana albo podany adres
+            to = args[1] if len(args) > 1 else addr
+            print(f"Wysyłam próbny mail z zaproszeniem: {addr} → {to} …")
+            ics = ("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Sebastian//Gwaranci//PL\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\n"
+                   "UID:test-gwaranci@sebastian\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:20300101T090000Z\r\nDTEND:20300101T093000Z\r\n"
+                   "SUMMARY:Test Sebastiana\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+            try:
+                R.send_mail(ctx, c, to, "Test Sebastiana – Gwaranci", "Próbny mail z zaproszeniem.", ics=ics)
+                print("✅ Wyszedł. Sprawdź skrzynkę odbiorcy.")
+                return 0
+            except Exception as e:
+                print(f"❌ {type(e).__name__}: {e}")
+                return 1
+        n = c.execute("SELECT COUNT(*) FROM poczta_kolejka WHERE wyslano='' AND proby<12").fetchone()[0]
+        if n:
+            print(f"W kolejce czeka {n} mail(i) — Sebastian ponawia je sam co kilka minut.")
         if addr and pwd and "--zmien" not in args:
             print(f"Zaproszenia wysyłam ze skrzynki: {addr} (jako „{ctx.settings().get('nadawca')}”).")
             print("Inna skrzynka: python sebastian.py dodatek gwaranci poczta --zmien")
@@ -140,6 +156,22 @@ def cmd_calcom(ctx, args):
             if key:
                 ctx.set_secret("calcom_klucz", key)
                 print("Zapisane w pęku kluczy macOS.")
+            return 0
+        if args and args[0] == "test":                     # co cal.com mówi o wydarzeniu i ostatni błąd rezerwacji
+            last = R.meta_get(c, "calcom_ostatni_blad")
+            print("Ostatni błąd rezerwacji w cal.com: " + (last or "brak"))
+            for r in c.execute("SELECT osoba, calcom FROM gwaranci WHERE calcom!=''").fetchall():
+                user, ev = r["calcom"].split("/", 1)
+                code, js = R.calcom_http("GET", "/event-types", params={"username": user, "eventSlug": ev}, version="2024-06-14")
+                d = (js or {}).get("data")
+                d = d[0] if isinstance(d, list) and d else d
+                if code != 200 or not isinstance(d, dict):
+                    print(f"{r['calcom']}: cal.com {code} {str(js)[:200]}")
+                    continue
+                req = [f.get("slug") or f.get("name") for f in d.get("bookingFields") or [] if f.get("required") and not f.get("hidden")]
+                print(f"{r['calcom']}: długość {d.get('lengthInMinutes')} min (opcje: {d.get('lengthInMinutesOptions') or '—'}), "
+                      f"wymaga potwierdzenia: {bool(d.get('confirmationPolicy') or d.get('requiresConfirmation'))}, "
+                      f"pola obowiązkowe: {', '.join(map(str, req)) or '—'}, miejsca: {[l.get('type') for l in d.get('locations') or []]}")
             return 0
         if len(args) >= 2:
             print(_attach_calcom(c, " ".join(args[:-1]), args[-1]))

@@ -301,7 +301,8 @@ def make_app(ctx):
         errors = PB.after_booking(ctx, g.db, b)
         gp = R.person(g.db, b["gwarant"])
         return msg("Prośba wysłana 🎉", f"Twój gwarant: {gp['imie_nazwisko']}. Gdy zaakceptuje (najpóźniej w ciągu 24 h), dostaniesz maila "
-                   + ("z potwierdzeniem z cal.com." if b.get("calcom_uid") else "z zaproszeniem do kalendarza.") + (" (Uwaga: mail nie wyszedł — Sebastian dał znać Andrzejowi.)" if errors else ""),
+                   + ("z potwierdzeniem z cal.com." if b.get("calcom_uid") else "z zaproszeniem do kalendarza.") + (" (Mail do gwaranta wyjdzie za kilka minut — Gmail chwilowo nie odpowiadał.)" if errors and all("kolejce" in e for e in errors)
+                      else " (Uwaga: mail nie wyszedł — Sebastian dał znać Andrzejowi.)" if errors else ""),
                    ("Moje spotkania", url_for("moje")))
 
     @app.route("/moje")

@@ -357,3 +357,7 @@ Data: 2026-11-13. `test_rekrutacja` — 83 testy zaliczone; pozostałe zestawy z
 # Weryfikacja 2.13.1
 
 `GeminiLimits2131`: kolejność modeli (flash → starszy flash → flash-lite, bez preview i pro); dzienny limit (QuotaFailure *PerDay*) blokuje model do rana i następne zapytanie idzie innym; 503 → krótka przerwa i inny model; `retryDelay` z odpowiedzi Google; gdy wszystkie odpoczywają — przerwa bez zapytań; przepisywanie nie woła modelu lokalnego.
+
+# Weryfikacja 2.14.3
+
+`test_gwaranci.Naprawy2143`: cal.com odrzuca formularz → druga, prostsza próba, potem prośba mailem do tego samego gwaranta (z .ics), błąd w WhatsAppie i w meta; adept bez maila → droga mailowa bez cal.com; kolejka maili (ponowienie w `periodic`, komunikat „wyszedł za 2. razem”, złe hasło bez kolejki); SMTP: zerwane połączenie → 587, 587, 465; złe hasło → jasny błąd; domyślna skrzynka Sebastiana.

@@ -284,7 +284,7 @@ class Panel(Base):
 class FakeCal:
     """Udawane API cal.com: wolne terminy co 75 min (analiza) i co 30 min (krótsze), rezerwacje, statusy, odwołania."""
     def __init__(self):
-        self.calls, self.status, self.refuse = [], "pending", False
+        self.calls, self.status, self.refuse, self.invalid = [], "pending", False, False
 
     def __call__(self, method, path, params=None, body=None, version="2024-08-13", key=""):
         self.calls.append((method, path, params, body, key))
@@ -298,6 +298,8 @@ class FakeCal:
         if method == "POST" and path == "/bookings":
             if self.refuse:
                 return 400, {"error": {"message": "User either already has booking at this time or is not available"}}
+            if self.invalid:
+                return 400, {"error": {"message": "responses - {location}error_required_field"}}
             return 201, {"status": "success", "data": {"uid": "cal-uid-1", "status": "pending"}}
         if method == "GET" and path.startswith("/bookings/"):
             return 200, {"status": "success", "data": {"uid": path.split("/")[-1], "status": self.status}}
@@ -398,6 +400,75 @@ class CalCom(Base):
         self.assertEqual((g["calcom"], g["limit_tyg"], g["gotowe"]), ("wiktor-b/gwarant", 2, 1))
         out = GW.on_message(self.ctx, {"text": "gwaranci calcom Olga Ruda https://cal.com/olga/gw"})
         self.assertIn("cal.com podpięty", out)
+
+
+class Naprawy2143(CalCom):
+    """2.14.3: cal.com odrzuca formularz → prośba idzie mailem; Gmail zrywa połączenie → ponowienie i kolejka."""
+    def test_calcom_formularz_odrzucony_idzie_mailem(self):
+        adam = self.podepnij()
+        self.cal.invalid = True
+        start = dt.datetime.combine(MON, dt.time(10, 15), TZ)
+        b = R.book(self.c, self.st, "tomasz-solny", "analiza", start, when=NOW)
+        self.assertEqual((b["gwarant"], b["calcom_uid"]), (adam, ""))               # ten sam gwarant, bez „Termin zajęty”
+        self.assertIn("error_required_field", b["calcom_blad"])
+        posts = [x[3] for x in self.cal.calls if x[0] == "POST"]
+        self.assertEqual(len(posts), 2)
+        self.assertNotIn("bookingFieldsResponses", posts[1])                      # druga, najprostsza próba
+        PB.after_booking(self.ctx, self.c, b)
+        self.assertEqual([m["to"] for m in self.mails], [adam + "@example.com", "tomasz@example.com"])
+        self.assertTrue(self.mails[0]["ics"])
+        self.assertTrue(any("prośba poszła mailem" in t for t in self.ctx.sent))
+        self.assertIn("error_required_field", R.meta_get(self.c, "calcom_ostatni_blad"))
+
+    def test_adept_bez_maila_idzie_mailem_do_gwaranta(self):
+        adam = self.podepnij()
+        self.c.execute("UPDATE osoby SET email='' WHERE id='tomasz-solny'")
+        self.c.commit()
+        b = R.book(self.c, self.st, "tomasz-solny", "analiza", dt.datetime.combine(MON, dt.time(10, 15), TZ), when=NOW)
+        self.assertEqual((b["gwarant"], b["calcom_uid"]), (adam, ""))
+        self.assertFalse([x for x in self.cal.calls if x[0] == "POST"])
+
+    def test_kolejka_maili(self):
+        p = patch.object(R, "send_mail", side_effect=R.MailError("Gmail zerwał połączenie (SMTPServerDisconnected)"))
+        p.start()
+        err = R.send_or_queue(self.ctx, self.c, "gw@example.com", "Prośba", "treść", ics="X", booking_id=7)
+        p.stop()
+        self.assertIn("w kolejce", err)
+        self.assertEqual(R.flush_queue(self.ctx, self.c, NOW), [])                 # jeszcze nie pora
+        PB.periodic(self.ctx, self.c, when=dt.datetime.now(TZ) + dt.timedelta(minutes=5), refresh=False, mail=False)
+        self.assertEqual([(m["to"], m["ics"]) for m in self.mails], [("gw@example.com", "X")])
+        self.assertTrue(any("wyszedł za 2. razem" in t for t in self.ctx.sent))
+        with patch.object(R, "send_mail", side_effect=R.MailError("Gmail odrzucił hasło aplikacji")):
+            self.assertNotIn("kolejce", R.send_or_queue(self.ctx, self.c, "gw@example.com", "x", "y"))   # zły login — bez kolejki
+
+    def test_smtp_ponawia_i_przechodzi_na_465(self):
+        import smtplib
+        tried = []
+
+        class Box:
+            def __init__(self, host, port, timeout=60, context=None):
+                tried.append(port)
+                if len(tried) < 3:
+                    raise smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+            def ehlo(self): pass
+            def starttls(self, context=None): pass
+            def login(self, a, b): pass
+            def send_message(self, m): return {}
+            def quit(self): pass
+        from email.message import EmailMessage
+        with patch.object(R.smtplib, "SMTP", Box), patch.object(R.smtplib, "SMTP_SSL", Box):
+            R.smtp_send("seb@gmail.com", "abcd efgh", EmailMessage(), pause=0)
+        self.assertEqual(tried, [587, 587, 465])
+
+        class Bad(Box):
+            def __init__(self, *a, **k): pass
+            def login(self, a, b): raise smtplib.SMTPAuthenticationError(535, b"bad")
+        with patch.object(R.smtplib, "SMTP", Bad), self.assertRaises(R.MailError) as e:
+            R.smtp_send("seb@gmail.com", "x", EmailMessage(), pause=0)
+        self.assertIn("hasło aplikacji", str(e.exception))
+
+    def test_domyslna_skrzynka(self):
+        self.assertEqual(R.mailbox(self.ctx, self.c)[0], "sebastian.k.kwiatkowski@gmail.com")
 
 
 if __name__ == "__main__":
