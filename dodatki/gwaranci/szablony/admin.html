@@ -1,0 +1,25 @@
+{% extends "base.html" %}{% block body %}
+<h1>Administrator</h1><p class="sub">Gwaranci, osobiste linki, prośby o dostęp i rezerwacje.</p>
+{% if note %}<div class="ok">{{ note }}</div>{% endif %}
+{% if asks %}<div class="card" style="border-color:rgba(227,179,65,.45)"><h2>Prośby o dostęp</h2>
+{% for a in asks %}<div class="item"><div><b>{{ a.imie_nazwisko }}</b> · {{ a.email }} {% if a.przelozony %}<span class="muted">· od: {{ a.przelozony }}</span>{% endif %}</div>
+<form method="post" style="display:flex;gap:6px;flex-wrap:wrap"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="akcja" value="dodaj">
+<input type="hidden" name="imie_nazwisko" value="{{ a.imie_nazwisko }}"><input type="hidden" name="email" value="{{ a.email }}">
+<input name="przelozony" value="{{ a.przelozony }}" placeholder="przełożony" style="width:180px"><input name="stanowisko" value="Trainee" style="width:130px"><button class="btn sm">Dodaj</button></form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="akcja" value="prosba_ok"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn sec sm">Załatwione</button></form></div>{% endfor %}</div>{% endif %}
+<div class="card"><h2>Ludzie i osobiste linki</h2>
+<p class="small muted">Link wysyłasz każdemu raz (np. na WhatsAppie). Gwarant po wejściu przechodzi onboarding, adept od razu rezerwuje.</p>
+<div style="overflow:auto"><table><tr><th>Osoba</th><th>Stanowisko</th><th>Struktura</th><th>Gwarant</th><th>Link</th></tr>
+{% for p in order %}{% set gw = gws.get(p.id) %}<tr>
+<td><b>{{ p.imie_nazwisko }}</b><div class="small muted">{{ p.email or 'brak maila' }}</div></td>
+<td><form method="post" style="display:flex;gap:4px"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="akcja" value="stanowisko"><input type="hidden" name="osoba" value="{{ p.id }}"><input name="stanowisko" value="{{ p.stanowisko }}" style="width:170px;padding:6px 8px"><button class="btn sec sm">✓</button></form></td>
+<td class="small">{{ ppl[struct(p.id)].imie_nazwisko if struct(p.id) else '—' }}</td>
+<td class="small">{% if gw and gw.gotowe %}✓ {{ load[p.id][0] }}/{{ gw.limit_tyg }} w tyg.{% if gw.wstrzymany %} · wstrzymany{% endif %}{% if gw.blad %} · <span style="color:#fca5a5">⚠ kalendarz</span>{% endif %}{% elif gw %}onboarding…{% else %}—{% endif %}</td>
+<td><input readonly value="{{ base }}/l/{{ p.token }}" onclick="this.select()" style="width:230px;padding:6px 8px;font-size:12px"></td></tr>{% endfor %}
+</table></div></div>
+<div class="card"><h2>Rezerwacje</h2>
+{% for b in rows %}{% set s = parse(b.start) %}<div class="item"><div><b>{{ ppl.get(b.gwarant,{}).get('imie_nazwisko','?') }}</b> → {{ ppl.get(b.adept,{}).get('imie_nazwisko','?') }} · {{ TYPES[b.typ][0] }}<div class="small muted">{{ fdate(s) }}, {{ s.strftime('%H:%M') }} · {{ b.kategoria.replace('_',' ') }}</div></div><span class="tag t-{{ b.status }}">{{ STATUS[b.status] }}</span></div>{% else %}<p class="muted">Brak rezerwacji.</p>{% endfor %}
+</div>
+<div class="card"><h3>Dodaj osobę</h3><form method="post" style="display:flex;gap:8px;flex-wrap:wrap"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="akcja" value="dodaj">
+<input name="imie_nazwisko" placeholder="Imię Nazwisko" style="width:200px" required><input name="stanowisko" value="Trainee" style="width:150px"><input name="przelozony" placeholder="Przełożony" style="width:200px" required><input name="email" placeholder="e-mail (opcjonalnie)" style="width:220px"><button class="btn sm">Dodaj</button></form></div>
+{% endblock %}

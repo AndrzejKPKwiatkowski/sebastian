@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block body %}
+<div class="narrow card" style="padding:28px">
+  <h1>Potwierdź rezerwację</h1>
+  <p class="muted">{{ TYPES[typ][0] }} · {{ fdate(start) }}, {{ start.strftime('%H:%M') }}–{{ hm(start.hour*60+start.minute+TYPES[typ][1]) }}</p>
+  <div style="border:1px solid var(--line2);border-radius:12px;padding:16px;margin:14px 0;background:var(--bg)">
+    <div class="small muted">Twój gwarant</div>
+    <div style="font-size:20px;font-weight:700">{{ g_.imie_nazwisko }}</div>
+    <div class="small muted">{{ g_.stanowisko }}</div>
+    <div class="small" style="margin-top:10px">📍 {{ 'Na miejscu: ' ~ gdzie if loc=='miejsce' else 'Online' }}</div>
+  </div>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    <input type="hidden" name="typ" value="{{ typ }}"><input type="hidden" name="start" value="{{ start.isoformat() }}">
+    <input type="hidden" name="loc" value="{{ loc }}"><input type="hidden" name="gdzie" value="{{ gdzie }}">
+    <label>Krótko dla gwaranta (opcjonalnie): klient, cel spotkania</label>
+    <textarea name="notatka" maxlength="500" placeholder="np. Analiza dla rodziny 2+1, chcą zacząć oszczędzać na mieszkanie"></textarea>
+    <p class="small muted">Po rezerwacji dostaniesz maila z potwierdzeniem, a {{ g_.imie_nazwisko.split()[0] }} zaproszenie do kalendarza. Spotkanie jest ważne po akceptacji gwaranta (do 24 h).</p>
+    <p><button class="btn">Rezerwuję</button> <a class="btn sec" href="/rezerwuj?typ={{ typ }}">Anuluj</a></p>
+  </form>
+</div>{% endblock %}

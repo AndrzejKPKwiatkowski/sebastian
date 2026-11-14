@@ -1,0 +1,262 @@
+"""Dodatek Gwaranci (Sebastian 2.14) — spotkania gwaranckie Feniksów.
+
+Gwarant dostaje osobisty link, podłącza kalendarz (tylko zajętość), zaznacza kiedy może i ile spotkań w tygodniu.
+Adept wybiera typ i godzinę, Sebastian dobiera gwaranta (bezpośredni menedżer → pośredni → ta sama struktura → inna)
+i wysyła zaproszenie z Gmaila. Ty dostajesz krótkie powiadomienia na WhatsAppie.
+
+    python sebastian.py dodatek gwaranci usluga instaluj     # panel i praca w tle (start po zalogowaniu do Maca)
+    python sebastian.py dodatek gwaranci internet wlacz      # publiczny adres https (Tailscale Funnel)
+    python sebastian.py dodatek gwaranci linki               # osobiste linki do rozesłania
+"""
+import contextlib, getpass, os, plistlib, re, subprocess, sys
+from pathlib import Path
+
+from . import rdzen as R
+
+LABEL = "pl.sebastian.gwaranci"
+
+
+def _plist():
+    return Path.home() / "Library" / "LaunchAgents" / (LABEL + ".plist")
+
+
+def _root():
+    return Path(__file__).resolve().parents[2]
+
+
+def _base(ctx, c):
+    return (R.meta_get(c, "adres_publiczny") or ctx.settings().get("adres") or f"http://127.0.0.1:{ctx.settings().get('port', 8791)}").rstrip("/")
+
+
+def cmd_start(ctx, args):
+    from . import panel
+    panel.serve(ctx)
+    return 0
+
+
+def cmd_usluga(ctx, args):
+    action = (args[0] if args else "status").lower()
+    if sys.platform != "darwin":
+        print("Usługę instaluje się na Macu. Do prób: python sebastian.py dodatek gwaranci start")
+        return 1
+    uid, path = str(os.getuid()), _plist()
+    if action in ("instaluj", "usun", "usuń"):
+        subprocess.run(["launchctl", "bootout", "gui/" + uid, str(path)], capture_output=True)
+        if action != "instaluj":
+            path.unlink(missing_ok=True)
+            print("Usługa Gwaranci wyłączona. Dane zostają w data/dodatki/gwaranci/.")
+            return 0
+        root, data = _root(), ctx.folder().parents[1]
+        (data / "logs").mkdir(exist_ok=True)
+        py = root / ".venv" / "bin" / "python"
+        job = {"Label": LABEL, "ProgramArguments": [str(py if py.exists() else sys.executable), str(root / "sebastian.py"), "dodatek", "gwaranci", "start"],
+               "WorkingDirectory": str(root), "RunAtLoad": True, "KeepAlive": True, "ThrottleInterval": 20,
+               "EnvironmentVariables": {"SEBASTIAN_DATA": str(data), "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"},
+               "StandardOutPath": str(data / "logs" / "gwaranci.log"), "StandardErrorPath": str(data / "logs" / "gwaranci.err")}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(plistlib.dumps(job))
+        subprocess.run(["launchctl", "bootstrap", "gui/" + uid, str(path)], check=True)
+        print("Usługa Gwaranci działa i będzie startować po zalogowaniu do Maca.")
+        return cmd_adres(ctx, [])
+    r = subprocess.run(["launchctl", "print", f"gui/{uid}/{LABEL}"], capture_output=True, text=True)
+    print("Usługa: " + ("działa" if r.returncode == 0 and "state = running" in r.stdout else
+                         "zainstalowana, ale nie działa — zobacz data/logs/gwaranci.err" if r.returncode == 0 else "nie jest zainstalowana"))
+    return 0
+
+
+def cmd_internet(ctx, args):
+    """Tailscale Funnel: publiczny adres https://<mac>.<sieć>.ts.net prowadzący do panelu (tylko ten jeden port)."""
+    from . import panel as PN
+    action = (args[0] if args else "status").lower()
+    port = int(ctx.settings().get("port", 8791))
+    if action in ("wlacz", "włącz"):
+        code, out = PN._tailscale("funnel", "--bg", f"http://127.0.0.1:{port}")
+        print(out)
+        m = re.search(r"https://[a-z0-9.-]+\.ts\.net", out or "")
+        url = m.group(0) if m else (f"https://{PN.tailscale_name()}" if code == 0 and PN.tailscale_name() else "")
+        if code != 0 or not url:
+            print("\nNie udało się włączyć Funnel. Najczęściej trzeba go raz zezwolić w panelu Tailscale: otwórz link powyżej "
+                  "(jeśli jest) albo login.tailscale.com → Access controls → włącz „Funnel” dla tego Maca, i uruchom polecenie ponownie.")
+            return 1
+        with contextlib.closing(R.db(ctx)) as c:
+            R.meta_set(c, "adres_publiczny", url)
+        print(f"\n✅ Panel jest dostępny w internecie: {url}")
+        return 0
+    if action in ("wylacz", "wyłącz"):
+        code, out = PN._tailscale("funnel", "--https=443", "off")
+        print(out or "Funnel wyłączony.")
+        with contextlib.closing(R.db(ctx)) as c:
+            R.meta_set(c, "adres_publiczny", "")
+        return 0
+    code, out = PN._tailscale("funnel", "status")
+    print(out or "Funnel: brak danych.")
+    return 0
+
+
+def cmd_adres(ctx, args):
+    with contextlib.closing(R.db(ctx)) as c:
+        print(f"Panel Gwaranci: {_base(ctx, c)}")
+        if not R.meta_get(c, "adres_publiczny"):
+            print("  (Tylko na tym Macu i w Tailscale. Dla zespołu włącz: python sebastian.py dodatek gwaranci internet wlacz)")
+    return 0
+
+
+def cmd_poczta(ctx, args):
+    with contextlib.closing(R.db(ctx)) as c:
+        addr, pwd = R.mailbox(ctx, c)
+        if addr and pwd and "--zmien" not in args:
+            print(f"Zaproszenia wysyłam ze skrzynki: {addr} (jako „{ctx.settings().get('nadawca')}”).")
+            print("Inna skrzynka: python sebastian.py dodatek gwaranci poczta --zmien")
+            return 0
+        addr = input("Adres Gmail Sebastiana (np. sebastian.k.kwiatkowski@gmail.com): ").strip()
+        pwd = getpass.getpass("Hasło aplikacji Google (16 liter, nie zwykłe hasło; nie będzie widoczne): ")
+        R.meta_set(c, "poczta", addr)
+        ctx.set_secret("poczta", "".join(pwd.split()))
+        print("Zapisane w pęku kluczy macOS.")
+    return 0
+
+
+def cmd_linki(ctx, args):
+    with contextlib.closing(R.db(ctx)) as c:
+        base = _base(ctx, c)
+        if args:
+            p = R.find_person(c, " ".join(args))
+            if not p:
+                print("Nie znam tej osoby.")
+                return 1
+            print(f"{p['imie_nazwisko']}: {base}/l/{p['token']}")
+            return 0
+        ppl = R.people(c)
+        for p in sorted(ppl.values(), key=lambda p: (R.structure_of(ppl, p["id"]) or "", p["imie_nazwisko"])):
+            role = "gwarant" if R.can_guarantee(p) else "adept"
+            print(f"{p['imie_nazwisko']:<26} {role:<8} {base}/l/{p['token']}")
+    return 0
+
+
+def cmd_awans(ctx, args):
+    text = " ".join(args)
+    with contextlib.closing(R.db(ctx)) as c:
+        print(_promote(c, text))
+    return 0
+
+
+def _promote(c, text):
+    m = re.match(r"(.+?)\s+(?:na\s+)?((?:senior |vip )?planner(?: ii)?|consultant(?: ii)?|trainee|m[1-9].*|d[1-9].*)$", text.strip(), re.I)
+    if not m:
+        return "Napisz np.: awans Wiktor Król na Senior Planner"
+    p = R.find_person(c, m.group(1))
+    if not p:
+        return f"Nie znam osoby „{m.group(1)}”."
+    pos = m.group(2).strip()
+    pos = " ".join(w.upper() if re.fullmatch(r"(?i)ii|m\d|d\d|vip", w) else w.capitalize() for w in pos.split())
+    p = R.set_position(c, p["id"], pos)
+    return f"{p['imie_nazwisko']}: {pos}. Limit spotkań gwaranckich: {R.max_limit(p)} w tygodniu."
+
+
+def cmd_dodaj(ctx, args):
+    if len(args) < 2:
+        print('Użycie: python sebastian.py dodatek gwaranci dodaj "Imię Nazwisko" "Przełożony" [Stanowisko]')
+        return 1
+    with contextlib.closing(R.db(ctx)) as c:
+        try:
+            p = R.add_person(c, args[0], " ".join(args[2:]) or "Trainee", args[1])
+        except ValueError as e:
+            print(e)
+            return 1
+        print(f"Dodano: {p['imie_nazwisko']}. Link: {_base(ctx, c)}/l/{p['token']}")
+    return 0
+
+
+def cmd_struktura(ctx, args):
+    """Wczytuje data/dodatki/gwaranci/struktura.json: nowe osoby dopisuje, istniejącym poprawia stanowisko i przełożonego."""
+    import json
+    path = ctx.folder() / R.STRUCTURE_FILE
+    if not path.exists():
+        print(f"Brak pliku {path}.")
+        return 1
+    with contextlib.closing(R.db(ctx)) as c:
+        n = R.import_people(c, json.loads(path.read_text(encoding="utf-8")).get("osoby", []), update=True)
+        print(f"Struktura wczytana: {n} osób (nowe dopisane, istniejące zaktualizowane). Osobiste linki się nie zmieniły.")
+    return 0
+
+
+def status_text(ctx, c):
+    ppl = R.people(c)
+    ready = R.ready_guarantors(c)
+    lines = [f"Gwaranci gotowi: {len(ready)}"]
+    for pid, g in ready.items():
+        n, _ = R.week_load(c, pid, R.now(ctx))
+        lines.append(f"• {ppl[pid]['imie_nazwisko']} — {n}/{g['limit_tyg']} w tym tygodniu" + (" (wstrzymany)" if g["wstrzymany"] else "")
+                     + (f" ⚠ kalendarz: {g['blad'][:60]}" if g["blad"] else ""))
+    pend = c.execute("SELECT COUNT(*) n FROM rezerwacje WHERE status='czeka'").fetchone()["n"]
+    conf = c.execute("SELECT COUNT(*) n FROM rezerwacje WHERE status='potwierdzone'").fetchone()["n"]
+    asks = c.execute("SELECT COUNT(*) n FROM prosby WHERE status='nowa'").fetchone()["n"]
+    lines.append(f"Czeka na akceptację: {pend} · potwierdzone: {conf}" + (f" · prośby o dostęp: {asks}" if asks else ""))
+    lines.append(f"Panel: {_base(ctx, c)}")
+    return "\n".join(lines)
+
+
+def cmd_status(ctx, args):
+    with contextlib.closing(R.db(ctx)) as c:
+        print(status_text(ctx, c))
+        addr, pwd = R.mailbox(ctx, c)
+        print(f"Skrzynka zaproszeń: {addr or '— brak'}" + ("" if not addr or pwd else " (brak hasła!)"))
+    return 0
+
+
+def cmd_odswiez(ctx, args):
+    from . import przebieg as PB
+    with contextlib.closing(R.db(ctx)) as c:
+        for pid in R.ready_guarantors(c):
+            n, err = R.refresh_busy(c, pid)
+            print(f"{R.person(c, pid)['imie_nazwisko']}: {n} zajętych terminów" + (f" — błąd: {err}" if err else ""))
+        PB.periodic(ctx, c, refresh=False)
+    print("Gotowe.")
+    return 0
+
+
+def cmd_ustawienia(ctx, args):
+    for k, v in ctx.settings().items():
+        print(f"{k} = {v}")
+    return 0
+
+
+def cmd_ustaw(ctx, args):
+    if len(args) < 2:
+        print("Użycie: python sebastian.py dodatek gwaranci ustaw KLUCZ WARTOŚĆ")
+        return 1
+    print(f"{args[0]} = {ctx.set_setting(args[0], ' '.join(args[1:]))}")
+    return 0
+
+
+def on_message(ctx, msg):
+    """WhatsApp od właściciela: tylko wiadomości zaczynające się od „gwaranci”."""
+    text = (msg.get("text") or "").strip()
+    m = re.match(r"(?i)^gwaranci\b[\s:,-]*(.*)$", text)
+    if not m:
+        return None
+    rest = m.group(1).strip()
+    with contextlib.closing(R.db(ctx)) as c:
+        if not rest or re.match(r"(?i)^(stan|status)$", rest):
+            return status_text(ctx, c)
+        mm = re.match(r"(?i)^link\s+(.+)$", rest)
+        if mm:
+            p = R.find_person(c, mm.group(1))
+            return f"{p['imie_nazwisko']}: {_base(ctx, c)}/l/{p['token']}" if p else f"Nie znam osoby „{mm.group(1)}”."
+        mm = re.match(r"(?i)^awans\s+(.+)$", rest)
+        if mm:
+            return _promote(c, mm.group(1))
+        mm = re.match(r"(?i)^dodaj\s+(.+?)\s+od\s+(.+?)(?:\s*,\s*(.+))?$", rest)
+        if mm:
+            try:
+                p = R.add_person(c, mm.group(1), mm.group(3) or "Trainee", mm.group(2))
+            except ValueError as e:
+                return str(e)
+            return f"Dodano {p['imie_nazwisko']} (od: {mm.group(2)}). Link: {_base(ctx, c)}/l/{p['token']}"
+        return ("Gwaranci — polecenia: „gwaranci”, „gwaranci link Imię Nazwisko”, „gwaranci awans Imię Nazwisko na Planner”, "
+                "„gwaranci dodaj Imię Nazwisko od Imię Nazwisko”.")
+
+
+COMMANDS = {"start": cmd_start, "usluga": cmd_usluga, "internet": cmd_internet, "adres": cmd_adres, "poczta": cmd_poczta,
+            "linki": cmd_linki, "struktura": cmd_struktura, "awans": cmd_awans, "dodaj": cmd_dodaj, "status": cmd_status, "odswiez": cmd_odswiez,
+            "ustawienia": cmd_ustawienia, "ustaw": cmd_ustaw}

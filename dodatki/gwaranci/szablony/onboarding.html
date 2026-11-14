@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block css %}
+.grid{display:grid;grid-template-columns:52px repeat(6,1fr);gap:4px;user-select:none;-webkit-user-select:none}
+.grid .h{text-align:center;font-size:12px;color:var(--muted);text-transform:uppercase;padding-bottom:4px}
+.grid .t{font-size:12px;color:var(--muted);text-align:right;padding-right:6px;line-height:30px}
+.cell{height:30px;border-radius:7px;background:var(--subtle);border:0;cursor:pointer}
+.cell.on{background:var(--ink)}
+.presets .chip{cursor:pointer;background:transparent}
+.lim{display:flex;gap:6px;flex-wrap:wrap}.lim label{margin:0}
+.lim input{display:none}.lim span{display:inline-block;min-width:44px;text-align:center;border:1px solid var(--line2);border-radius:10px;padding:8px 10px;font-weight:600;color:var(--ink);cursor:pointer}
+.lim input:checked+span{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+{% endblock %}
+{% block body %}
+<div class="narrow" style="max-width:720px">
+<div class="steps"><span class="on"></span><span class="{{ 'on' if step in ('2','3') }}"></span><span class="{{ 'on' if step=='3' }}"></span></div>
+
+{% if step == '1' %}
+<h1>Podłącz swój kalendarz</h1>
+<p class="sub">Dzięki temu nikt nie zarezerwuje Cię w godzinach, w których masz klientów. Sebastian widzi <b style="color:var(--ink)">tylko zajęte godziny</b> — nie czyta tytułów ani opisów wydarzeń.</p>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<div class="card">
+  <h3>Jak skopiować link (Kalendarz Google na komputerze, ok. 30 sekund)</h3>
+  <ol class="howto">
+    <li>Otwórz <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener">ustawienia Kalendarza Google</a>.</li>
+    <li>Po lewej, w sekcji „Ustawienia moich kalendarzy”, kliknij swój kalendarz (zwykle Twoje imię i nazwisko).</li>
+    <li>Przewiń na sam dół do „Integracja kalendarza”.</li>
+    <li>Przy <b>„Tajny adres w formacie iCal”</b> kliknij ikonę kopiowania i wklej link poniżej.</li>
+  </ol>
+  <p class="small muted">Masz kilka kalendarzy z klientami (np. firmowy i prywatny)? Wklej każdy link w osobnej linii. Na telefonie te ustawienia są dostępne tylko w przeglądarce w wersji na komputer.</p>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    <label>Tajny adres w formacie iCal</label>
+    <textarea name="kalendarze" placeholder="https://calendar.google.com/calendar/ical/…/private-…/basic.ics" required>{{ gw.kalendarze|join('\n') }}</textarea>
+    <p style="margin-top:14px"><button class="btn">Sprawdź i dalej</button></p>
+  </form>
+</div>
+
+{% elif step == '2' %}
+<h1>Kiedy możesz być gwarantem?</h1>
+<p class="sub">{% if info %}✅ Kalendarz podłączony — widzę {{ info }} zajętych terminów w najbliższych tygodniach. {% endif %}Zaznacz godziny, w których zwykle możesz usiąść z adeptem. Godziny zajęte w kalendarzu i tak nie będą proponowane.</p>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post" id="f"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="dostepnosc" id="dost">
+<div class="card">
+  <div class="presets" style="margin-bottom:12px">
+    <span class="chip" data-p="pop">Popołudnia pn–pt 16–19</span>
+    <span class="chip" data-p="dzien">Dni robocze 9–17</span>
+    <span class="chip" data-p="clear">Wyczyść</span>
+  </div>
+  <div class="grid" id="grid"></div>
+  <p class="small muted" style="margin-top:10px">Kliknij albo przeciągnij po kratkach. Jedna kratka = jedna godzina.</p>
+</div>
+<div class="card">
+  <h3>Ile spotkań gwaranckich w tygodniu możesz zaproponować?</h3>
+  <p class="small muted">Twoje maksimum to {{ mx }} ({{ 'menedżer' if me.stanowisko[:1] in 'MD' else 'każdy awans daje jedno spotkanie więcej' }}). Po osiągnięciu limitu Twoje terminy znikają do końca tygodnia.</p>
+  <div class="lim">{% for i in range(1, mx+1) %}<label><input type="radio" name="limit" value="{{ i }}" {{ 'checked' if i==lim }}><span>{{ i }}</span></label>{% endfor %}</div>
+</div>
+<p><button class="btn">Zapisz</button> <a class="btn sec" href="?k=1">Wstecz</a></p>
+</form>
+<script>
+const init={{ gw.dostepnosc|tojson }};
+const days=['pon','wt','śr','czw','pt','sob'], H0=7, H1=21;
+const on=new Set();
+init.forEach(([d,a,b])=>{for(let h=Math.floor(a/60);h<Math.ceil(b/60);h++)on.add(d+':'+h)});
+const grid=document.getElementById('grid');
+function draw(){
+  let html='<div></div>'+days.map(d=>`<div class="h">${d}</div>`).join('');
+  for(let h=H0;h<H1;h++){html+=`<div class="t">${h}:00</div>`;for(let d=0;d<6;d++)html+=`<button type="button" class="cell ${on.has(d+':'+h)?'on':''}" data-k="${d}:${h}"></button>`}
+  grid.innerHTML=html;
+}
+draw();
+let painting=null;
+grid.addEventListener('mousedown',e=>{const k=e.target.dataset.k;if(!k)return;painting=!on.has(k);toggle(k);e.preventDefault()});
+grid.addEventListener('mouseover',e=>{const k=e.target.dataset.k;if(painting===null||!k)return;toggle(k,painting)});
+window.addEventListener('mouseup',()=>painting=null);
+grid.addEventListener('click',e=>{if(e.detail===0){const k=e.target.dataset.k;if(k)toggle(k)}});
+grid.addEventListener('touchstart',e=>{const k=e.target.dataset.k;if(k){toggle(k);e.preventDefault()}},{passive:false});
+function toggle(k,val){const v=val===undefined?!on.has(k):val;v?on.add(k):on.delete(k);const el=grid.querySelector(`[data-k="${k}"]`);if(el)el.classList.toggle('on',v)}
+document.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{
+  const p=b.dataset.p;if(p==='clear')on.clear();
+  if(p==='pop')for(let d=0;d<5;d++)for(let h=16;h<19;h++)on.add(d+':'+h);
+  if(p==='dzien')for(let d=0;d<5;d++)for(let h=9;h<17;h++)on.add(d+':'+h);
+  draw()});
+document.getElementById('f').onsubmit=()=>{
+  const out=[];for(let d=0;d<6;d++){let s=null;for(let h=H0;h<=H1;h++){const x=on.has(d+':'+h)&&h<H1;if(x&&s===null)s=h;if(!x&&s!==null){out.push([d,s*60,h*60]);s=null}}}
+  document.getElementById('dost').value=JSON.stringify(out);};
+</script>
+
+{% else %}
+<div class="card" style="text-align:center;padding:36px 24px">
+  <div style="font-size:42px">🎉</div>
+  <h1>Gotowe — jesteś gwarantem!</h1>
+  <p class="muted">Od teraz dostajesz tylko <b style="color:var(--ink)">gotowe zaproszenia do kalendarza</b> z przyciskami Akceptuję / Nie mogę. Dostępność i limit zmienisz w każdej chwili w panelu gwaranta.</p>
+  <a class="btn" href="/gwarant">Mój panel gwaranta</a>
+</div>
+{% endif %}
+</div>
+{% endblock %}

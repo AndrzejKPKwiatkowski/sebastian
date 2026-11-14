@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block body %}
+{% set a = ppl.get(b.adept, {}) %}{% set s = parse(b.start) %}
+<div class="narrow card" style="padding:28px">
+  <h1>{{ 'Akceptujesz spotkanie?' if odp=='tak' else 'Nie możesz w tym terminie?' }}</h1>
+  <p class="muted">{{ TYPES[b.typ][0] }} · {{ fdate(s) }}, {{ hm(s.hour*60+s.minute) }}–{{ hm(s.hour*60+s.minute+b.minuty) }}<br>
+  Adept: <b style="color:var(--ink)">{{ a.imie_nazwisko }}</b> · {{ place_label(b) }}</p>
+  {% if b.notatka %}<p class="small">„{{ b.notatka }}”</p>{% endif %}
+  {% if b.status != 'czeka' %}<div class="ok">Ta prośba ma już status: {{ STATUS.get(b.status, b.status) }}.</div>
+  {% else %}
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    {% if odp=='tak' %}<button class="btn">{{ 'Akceptuję, mogę być na miejscu' if b.miejsce=='miejsce' else 'Akceptuję' }}</button> <a class="btn sec" href="/decyzja/{{ tok }}/nie">Jednak nie mogę</a>
+    {% else %}<button class="btn red">Nie mogę</button> <a class="btn sec" href="/decyzja/{{ tok }}/tak">Jednak mogę</a>{% endif %}
+  </form>{% endif %}
+</div>{% endblock %}

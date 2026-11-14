@@ -1,0 +1,84 @@
+{
+  "id": "gwaranci",
+  "nazwa": "Gwaranci — spotkania gwaranckie Feniksów",
+  "wersja": "1.0.0",
+  "rdzen": "2.14",
+  "opis": "Panel dla zespołu (przez Tailscale Funnel): osobiste linki bez haseł, onboarding gwaranta (kalendarz → dostępność → limit), rezerwacja z automatycznym przydziałem gwaranta bez kolizji z jego kalendarzem, zaproszenia z Gmaila Sebastiana, przypomnienia, powiadomienia dla Ciebie na WhatsAppie.",
+  "domyslnie_wlaczony": true,
+  "uprawnienia": [
+    "whatsapp.wysylanie"
+  ],
+  "pomoc": [
+    "gwaranci — stan: gotowi gwaranci, prośby czekające na akceptację",
+    "gwaranci link Imię Nazwisko — osobisty link do wysłania tej osobie",
+    "gwaranci awans Imię Nazwisko na Senior Planner — nowe stanowisko (limit spotkań rośnie sam)",
+    "gwaranci dodaj Imię Nazwisko od Imię Nazwisko przełożonego — nowa osoba w strukturze"
+  ],
+  "polecenia": [
+    {
+      "nazwa": "usluga",
+      "opis": "instaluj / usun / status — panel i praca w tle (launchd)."
+    },
+    {
+      "nazwa": "internet",
+      "opis": "wlacz / wylacz / status — publiczny adres https przez Tailscale Funnel."
+    },
+    {
+      "nazwa": "adres",
+      "opis": "Adres panelu."
+    },
+    {
+      "nazwa": "poczta",
+      "opis": "Skrzynka Sebastiana do zaproszeń (domyślnie ta z dodatku Rekrutacja)."
+    },
+    {
+      "nazwa": "linki",
+      "opis": "Osobiste linki: wszystkie albo dla jednej osoby, np. linki Wiktor Król"
+    },
+    {
+      "nazwa": "struktura",
+      "opis": "Wczytuje struktura.json (osoby, stanowiska, przełożeni) — dopisuje nowe, poprawia istniejące."
+    },
+    {
+      "nazwa": "awans",
+      "opis": "Nowe stanowisko, np. awans Wiktor Król Senior Planner"
+    },
+    {
+      "nazwa": "dodaj",
+      "opis": "Nowa osoba: dodaj \"Imię Nazwisko\" \"Przełożony\" [Stanowisko]"
+    },
+    {
+      "nazwa": "status",
+      "opis": "Gwaranci, kalendarze, rezerwacje."
+    },
+    {
+      "nazwa": "odswiez",
+      "opis": "Odczytuje teraz kalendarze i odpowiedzi z Gmaila."
+    },
+    {
+      "nazwa": "start",
+      "opis": "Uruchamia panel w tym oknie Terminala (do prób)."
+    },
+    {
+      "nazwa": "ustawienia",
+      "opis": "Pokazuje ustawienia dodatku."
+    },
+    {
+      "nazwa": "ustaw",
+      "opis": "Zmienia ustawienie, np. ustaw okno_dni 35"
+    }
+  ],
+  "ustawienia": {
+    "port": 8791,
+    "adres": "",
+    "nadawca": "Sebastian · Asystent Krakowa inPartners",
+    "okno_dni": 35,
+    "wyprzedzenie_h": 24,
+    "bufor_min": 15,
+    "od_godz": 7,
+    "do_godz": 21,
+    "odswiezanie_min": 5,
+    "przypomnienie_h": 20,
+    "whatsapp": true
+  }
+}

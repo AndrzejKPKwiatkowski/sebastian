@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block body %}
+<div class="narrow">
+  <div class="card" style="padding:30px">
+    <div class="logo" style="width:44px;height:44px;font-size:20px">F</div>
+    <h1 style="margin-top:14px">Gwaranci Feniks</h1>
+    <p class="muted">Spotkanie gwaranckie w minutę. Wejdź przez swój <b style="color:var(--ink)">osobisty link</b> — dostajesz go od Andrzeja albo od swojego menedżera.</p>
+  </div>
+  <div class="card">
+    <h2>Nie masz jeszcze linku?</h2>
+    <p class="muted small">Zostaw dane — Sebastian przekaże prośbę i dostaniesz link.</p>
+    <form method="post" action="/dostep">
+      <label>Imię i nazwisko</label><input name="imie_nazwisko" required autocomplete="name">
+      <label>E-mail</label><input name="email" type="email" required autocomplete="email">
+      <label>Telefon (opcjonalnie)</label><input name="telefon" autocomplete="tel">
+      <label>Od kogo jesteś? (Twój przełożony)</label><input name="przelozony">
+      <p style="margin-top:16px"><button class="btn">Poproś o dostęp</button></p>
+    </form>
+  </div>
+</div>{% endblock %}

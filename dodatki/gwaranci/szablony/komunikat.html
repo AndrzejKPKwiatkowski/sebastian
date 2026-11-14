@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block body %}
+<div class="narrow card" style="text-align:center;padding:36px 24px">
+  <h1>{{ title }}</h1><p class="muted">{{ text }}</p>
+  {% if button %}<a class="btn" href="{{ button[1] }}">{{ button[0] }}</a>{% endif %}
+</div>{% endblock %}

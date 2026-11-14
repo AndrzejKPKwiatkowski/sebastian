@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block css %}
+.booker{display:grid;grid-template-columns:290px 1fr 250px;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.bk{padding:22px}.bk+.bk{border-left:1px solid var(--line)}
+.month{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.wd{font-size:11.5px;color:var(--muted);text-align:center;text-transform:uppercase;padding-bottom:6px}
+.day{aspect-ratio:1/1;border-radius:9px;display:grid;place-items:center;color:var(--dim);font-weight:500;position:relative;text-decoration:none}
+.day.av{background:var(--subtle);color:var(--ink);font-weight:600}.day.av:hover{outline:1px solid var(--ink)}
+.day.sel{background:var(--ink);color:var(--bg)}
+.dot{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--gold)}
+.time{display:flex;justify-content:center;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:9px;padding:9px;margin-bottom:8px;font-weight:600;text-decoration:none}
+.time:hover{border-color:var(--ink)}.time i{width:7px;height:7px;border-radius:50%;background:var(--green)}.time i.m{background:var(--gold)}
+.times{max-height:470px;overflow:auto}
+@media(max-width:940px){.booker{grid-template-columns:1fr}.bk+.bk{border-left:0;border-top:1px solid var(--line)}.times{max-height:none}}
+{% endblock %}
+{% block body %}
+{% set q = '&loc=' ~ loc ~ '&gdzie=' ~ (gdzie|urlencode) %}
+{% if request.args.get('brak') %}<div class="err">Wpisz, gdzie na miejscu proponujesz spotkanie.</div>{% endif %}
+{% if not ready %}<div class="card"><h2>Gwaranci jeszcze się podłączają</h2><p class="muted">Gdy pierwsi gwaranci przejdą onboarding, zobaczysz tu wolne terminy.</p></div>{% endif %}
+<div class="booker">
+  <div class="bk">
+    <div class="logo" style="width:36px;height:36px">F</div>
+    <div class="muted" style="margin-top:10px;font-weight:500">Gwaranci Feniks</div>
+    <h1 style="font-size:22px;margin:2px 0 10px">Spotkanie gwaranckie</h1>
+    <p class="small muted">Cześć {{ me.imie_nazwisko.split()[0] }}! Wybierz typ spotkania i termin — gwaranta dobierze system.</p>
+    <div style="margin-top:14px">{% for k, v in TYPES.items() %}<a class="chip {{ 'on' if k==typ }}" href="?typ={{ k }}{{ q }}">{{ v[0] }} · {{ dur(v[1]) }}</a>{% endfor %}</div>
+    <form method="get" style="margin-top:8px" id="lf">
+      <input type="hidden" name="typ" value="{{ typ }}">{% if sel %}<input type="hidden" name="d" value="{{ sel.isoformat() }}">{% endif %}
+      <a class="chip {{ 'on' if loc=='online' }}" href="?typ={{ typ }}&loc=online{% if sel %}&d={{ sel.isoformat() }}{% endif %}">Online</a>
+      <a class="chip {{ 'on' if loc=='miejsce' }}" href="?typ={{ typ }}&loc=miejsce{% if sel %}&d={{ sel.isoformat() }}{% endif %}">Na miejscu</a>
+      {% if loc=='miejsce' %}<input type="hidden" name="loc" value="miejsce">
+      <input name="gdzie" value="{{ gdzie }}" placeholder="Gdzie? np. u klienta, ul. …" style="margin-top:4px" onchange="this.form.submit()">
+      <div class="small muted" style="margin-top:4px">Gwarant potwierdzi, czy może tam być.</div>{% endif %}
+    </form>
+    <p class="small muted" style="margin-top:14px">✓ Wymaga potwierdzenia gwaranta (do 24 h)<br>
+    {% if boss %}Twój bezpośredni menedżer: <b style="color:var(--ink)">{{ boss.imie_nazwisko }}</b>{% endif %}</p>
+  </div>
+  <div class="bk">
+    {% set MN = ['styczeń','luty','marzec','kwiecień','maj','czerwiec','lipiec','sierpień','wrzesień','październik','listopad','grudzień'] %}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <b>{{ MN[month.month-1] }} <span class="muted">{{ month.year }}</span></b>
+      <span>{% if mo>0 %}<a class="chip" href="?typ={{ typ }}&m={{ mo-1 }}{{ q }}">‹</a>{% endif %}{% if mo<max_mo %}<a class="chip" href="?typ={{ typ }}&m={{ mo+1 }}{{ q }}">›</a>{% endif %}</span>
+    </div>
+    <div class="month">
+      {% for w in ['pon','wt','śr','czw','pt','sob','nd'] %}<div class="wd">{{ w }}</div>{% endfor %}
+      {% for i in range(month.weekday()) %}<div></div>{% endfor %}
+      {% for i in range(1, ndays+1) %}{% set d = month.replace(day=i) %}{% set a = avail.get(d) %}
+        {% if a %}<a class="day av {{ 'sel' if d==sel }}" href="?typ={{ typ }}&d={{ d.isoformat() }}&m={{ mo }}{{ q }}">{{ i }}{% if a.menedzer %}<span class="dot"></span>{% endif %}</a>
+        {% else %}<div class="day">{{ i }}</div>{% endif %}{% endfor %}
+    </div>
+    <p class="small muted" style="margin-top:12px"><span style="color:var(--gold)">●</span> wolny Twój bezpośredni menedżer · okno: 5 tygodni do przodu</p>
+  </div>
+  <div class="bk times">
+    {% if sel %}<div style="font-weight:600;margin-bottom:12px">{{ fdate(sel) }}</div>
+      {% for start, cand in day_slots %}<a class="time" href="/rezerwuj/potwierdz?typ={{ typ }}&start={{ start.isoformat()|urlencode }}{{ q }}"><i class="{{ 'm' if cand[0].poziom==0 }}"></i>{{ start.strftime('%H:%M') }}</a>{% endfor %}
+    {% else %}<p class="muted">Brak wolnych terminów w oknie 5 tygodni.</p>{% endif %}
+  </div>
+</div>
+{% if mine %}<div class="card" style="margin-top:16px"><h3>Twoje nadchodzące spotkania</h3>
+{% for b in mine %}{% set s = parse(b.start) %}<div class="item"><div><b>{{ TYPES[b.typ][0] }}</b> z {{ ppl[b.gwarant].imie_nazwisko }}<div class="small muted">{{ fdate(s) }}, {{ s.strftime('%H:%M') }} · {{ place_label(b) }}</div></div><span class="tag t-{{ b.status }}">{{ STATUS[b.status] }}</span></div>{% endfor %}
+</div>{% endif %}
+{% endblock %}

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>{% block title %}Gwaranci Feniks{% endblock %}</title>
+<style>
+:root{--bg:#101010;--surface:#1c1c1c;--subtle:#262626;--line:#2b2b2b;--line2:#3c3c3c;--ink:#fafafa;--muted:#a1a1aa;--dim:#71717a;--gold:#e3b341;--green:#4ade80;--red:#f87171}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:var(--ink)}button{font:inherit;color:inherit;cursor:pointer}
+header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;text-decoration:none}
+.logo{width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-weight:800}
+nav{display:flex;gap:4px;flex-wrap:wrap;margin-left:8px}
+nav a{color:var(--muted);text-decoration:none;padding:6px 11px;border-radius:8px;font-weight:500}
+nav a:hover,nav a.on{color:var(--ink);background:var(--subtle)}
+.who{margin-left:auto;color:var(--muted);font-size:13px}
+main{max-width:1120px;margin:0 auto;padding:26px 16px 70px}
+.narrow{max-width:600px;margin:0 auto}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.01em}h2{font-size:18px;margin:0 0 10px}h3{font-size:15px;margin:0 0 8px}
+.sub{color:var(--muted);margin:0 0 20px}.muted{color:var(--muted)}.small{font-size:13px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px;font-weight:500}
+input,select,textarea{font:inherit;width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line2);background:var(--bg);color:var(--ink);outline:none}
+input:focus,textarea:focus,select:focus{border-color:var(--ink)}textarea{min-height:90px;resize:vertical}
+.btn{display:inline-block;border:1px solid var(--ink);background:var(--ink);color:var(--bg);border-radius:10px;padding:10px 16px;font-weight:600;text-decoration:none}
+.btn:hover{opacity:.9}.btn.sec{background:transparent;color:var(--ink);border-color:var(--line2)}.btn.sec:hover{background:var(--subtle)}
+.btn.sm{padding:6px 11px;font-size:13px}.btn.red{background:var(--red);border-color:var(--red)}
+.chip{display:inline-block;border:1px solid var(--line2);border-radius:8px;padding:5px 10px;margin:0 6px 6px 0;font-size:13px;font-weight:500;text-decoration:none;color:var(--ink)}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.err{background:rgba(248,113,113,.12);color:#fca5a5;border-radius:10px;padding:10px 12px;margin:10px 0}
+.ok{background:rgba(74,222,128,.12);color:#86efac;border-radius:10px;padding:10px 12px;margin:10px 0}
+.tag{display:inline-block;font-size:12px;border-radius:6px;padding:2px 8px;font-weight:500;background:var(--subtle);color:var(--muted)}
+.t-czeka{background:rgba(234,179,8,.14);color:#fcd34d}.t-potwierdzone{background:rgba(74,222,128,.13);color:#86efac}
+.t-odrzucone,.t-wygaslo,.t-anulowane{background:rgba(248,113,113,.14);color:#fca5a5}
+.item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}.item:last-child{border-bottom:0}
+.steps{display:flex;gap:8px;margin-bottom:18px}.steps span{flex:1;height:4px;border-radius:4px;background:var(--subtle)}.steps span.on{background:var(--ink)}
+table{width:100%;border-collapse:collapse;font-size:14px}th{text-align:left;color:var(--muted);font-weight:500;font-size:12.5px;padding:8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:6px}.tabs a{padding:8px 12px;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:var(--ink);border-bottom-color:var(--ink)}
+ol.howto{padding-left:20px;margin:8px 0}ol.howto li{margin:6px 0}
+{% block css %}{% endblock %}
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/"><span class="logo">F</span>Gwaranci Feniks</a>
+  {% if me %}
+  <nav>
+    <a href="/rezerwuj" class="{{ 'on' if request.endpoint in ('rezerwuj','potwierdz') }}">Rezerwuj</a>
+    <a href="/moje" class="{{ 'on' if request.endpoint=='moje' }}">Moje spotkania</a>
+    {% if is_g %}<a href="/gwarant" class="{{ 'on' if request.endpoint in ('gwarant','onboarding') }}">Panel gwaranta</a>{% endif %}
+    {% if is_admin %}<a href="/admin" class="{{ 'on' if request.endpoint=='admin' }}">Administrator</a>{% endif %}
+  </nav>
+  <div class="who">{{ me.imie_nazwisko }} · <a href="/wyloguj" class="muted">wyloguj</a></div>
+  {% endif %}
+</header>
+<main>{% block body %}{% endblock %}</main>
+</body>
+</html>

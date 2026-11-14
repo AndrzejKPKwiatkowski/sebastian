@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block body %}
+<h1>Moje spotkania</h1><p class="sub">Spotkania, o które prosisz jako adept.</p>
+<div class="card">
+{% for b in rows %}{% set s = parse(b.start) %}
+<div class="item"><div><b>{{ TYPES[b.typ][0] }}</b> z {{ ppl.get(b.gwarant, {}).get('imie_nazwisko', '—') }}<div class="small muted">{{ fdate(s) }}, {{ s.strftime('%H:%M') }} · {{ place_label(b) }}</div></div>
+<div><span class="tag t-{{ b.status }}">{{ STATUS[b.status] }}</span>
+{% if b.status in ('czeka','potwierdzone') and s > t %}<form method="post" action="/moje/anuluj/{{ b.token }}" style="display:inline" onsubmit="return confirm('Odwołać spotkanie?')"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="btn sec sm">Odwołaj</button></form>{% endif %}</div></div>
+{% else %}<p class="muted">Nie masz jeszcze spotkań. <a href="/rezerwuj">Zarezerwuj pierwsze</a>.</p>{% endfor %}
+</div>{% endblock %}
