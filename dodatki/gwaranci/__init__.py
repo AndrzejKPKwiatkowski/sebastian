@@ -1,4 +1,4 @@
-"""Dodatek Gwaranci (Sebastian 2.14.3) — spotkania gwaranckie Feniksów.
+"""Dodatek Gwaranci (Sebastian 2.14.4) — spotkania gwaranckie Feniksów.
 
 Gwarant dostaje osobisty link, podłącza kalendarz (tylko zajętość), zaznacza kiedy może i ile spotkań w tygodniu.
 Adept wybiera typ i godzinę, Sebastian dobiera gwaranta (bezpośredni menedżer → pośredni → ta sama struktura → inna)
@@ -125,8 +125,14 @@ def cmd_poczta(ctx, args):
             print(f"Zaproszenia wysyłam ze skrzynki: {addr} (jako „{ctx.settings().get('nadawca')}”).")
             print("Inna skrzynka: python sebastian.py dodatek gwaranci poczta --zmien")
             return 0
-        addr = input("Adres Gmail Sebastiana (np. sebastian.k.kwiatkowski@gmail.com): ").strip()
+        addr = input(f"Adres Gmail Sebastiana [Enter = {R.SEB_MAIL}]: ").strip() or R.SEB_MAIL
+        if not R.EMAIL_OK.match(addr):
+            print(f"„{addr[:60]}” to nie jest adres e-mail — nic nie zmieniam.")
+            return 1
         pwd = getpass.getpass("Hasło aplikacji Google (16 liter, nie zwykłe hasło; nie będzie widoczne): ")
+        if len("".join(pwd.split())) != 16:
+            print("Hasło aplikacji Google ma 16 liter — nic nie zmieniam. Nowe: myaccount.google.com/apppasswords")
+            return 1
         R.meta_set(c, "poczta", addr)
         ctx.set_secret("poczta", "".join(pwd.split()))
         print("Zapisane w pęku kluczy macOS.")
@@ -157,22 +163,8 @@ def cmd_calcom(ctx, args):
                 ctx.set_secret("calcom_klucz", key)
                 print("Zapisane w pęku kluczy macOS.")
             return 0
-        if args and args[0] == "test":                     # co cal.com mówi o wydarzeniu i ostatni błąd rezerwacji
-            last = R.meta_get(c, "calcom_ostatni_blad")
-            print("Ostatni błąd rezerwacji w cal.com: " + (last or "brak"))
-            for r in c.execute("SELECT osoba, calcom FROM gwaranci WHERE calcom!=''").fetchall():
-                user, ev = r["calcom"].split("/", 1)
-                code, js = R.calcom_http("GET", "/event-types", params={"username": user, "eventSlug": ev}, version="2024-06-14")
-                d = (js or {}).get("data")
-                d = d[0] if isinstance(d, list) and d else d
-                if code != 200 or not isinstance(d, dict):
-                    print(f"{r['calcom']}: cal.com {code} {str(js)[:200]}")
-                    continue
-                req = [f.get("slug") or f.get("name") for f in d.get("bookingFields") or [] if f.get("required") and not f.get("hidden")]
-                print(f"{r['calcom']}: długość {d.get('lengthInMinutes')} min (opcje: {d.get('lengthInMinutesOptions') or '—'}), "
-                      f"wymaga potwierdzenia: {bool(d.get('confirmationPolicy') or d.get('requiresConfirmation'))}, "
-                      f"pola obowiązkowe: {', '.join(map(str, req)) or '—'}, miejsca: {[l.get('type') for l in d.get('locations') or []]}")
-            return 0
+        if args and args[0] == "test":                     # pełna diagnoza cal.com
+            return _calcom_test(ctx, c)
         if len(args) >= 2:
             print(_attach_calcom(c, " ".join(args[:-1]), args[-1]))
             return 0
@@ -184,6 +176,65 @@ def cmd_calcom(ctx, args):
         if not rows:
             print("Nikt nie ma jeszcze podpiętego cal.com.")
         print('Podpięcie: python sebastian.py dodatek gwaranci calcom "Imię Nazwisko" https://cal.com/nazwa/wydarzenie')
+    return 0
+
+
+def _calcom_test(ctx, c):
+    """Co cal.com mówi o każdym podpiętym wydarzeniu: konto, lista wydarzeń, ustawienia, wolne terminy; ostatnia odmowa rezerwacji."""
+    import datetime as dt, json
+    ok = lambda b: "tak" if b else "nie"
+    ppl = R.people(c)
+    rows = c.execute("SELECT osoba, calcom, blad, odczyt FROM gwaranci WHERE calcom!=''").fetchall()
+    if not rows:
+        print("Nikt nie ma podpiętego cal.com.")
+    for r in rows:
+        user, ev = r["calcom"].split("/", 1)
+        print(f"\n=== {ppl.get(r['osoba'], {}).get('imie_nazwisko', r['osoba'])} · https://cal.com/{r['calcom']}")
+        print(f"Ostatni odczyt wolnych terminów: {r['odczyt'][:16].replace('T', ' ') or 'jeszcze nie było'}"
+              + (f" · błąd: {r['blad']}" if r["blad"] else ""))
+        code, js = R.calcom_http("GET", "/event-types", params={"username": user}, version="2024-06-14")
+        data = (js or {}).get("data") if isinstance(js, dict) else None
+        events = data if isinstance(data, list) else ((data or {}).get("eventTypes") or []) if isinstance(data, dict) else []
+        if code != 200:
+            print(f"Konto „{user}”: cal.com odpowiada {code}: {str(js)[:300]}")
+        else:
+            slugs = [e.get("slug") for e in events]
+            print(f"Konto „{user}”: publiczne wydarzenia ({len(slugs)}): {', '.join(map(str, slugs)) or 'brak'}")
+            if ev not in slugs:
+                print(f"  ⚠ „{ev}” nie ma na liście — wydarzenie jest ukryte (Hidden) albo ma inny adres. "
+                      "Ukryte można rezerwować, ale sprawdź w cal.com, czy link się zgadza.")
+        d = next((e for e in events if e.get("slug") == ev), None)
+        if not d:
+            code2, js2 = R.calcom_http("GET", "/event-types", params={"username": user, "eventSlug": ev}, version="2024-06-14")
+            d2 = (js2 or {}).get("data") if isinstance(js2, dict) else None
+            d = d2[0] if isinstance(d2, list) and d2 else (d2 if isinstance(d2, dict) else None)
+        if d:
+            req = [f"{f.get('slug') or f.get('name')} ({f.get('type')})" for f in d.get("bookingFields") or []
+                   if f.get("required") and not f.get("hidden") and (f.get("slug") or f.get("name")) not in ("name", "email")]
+            print(f"Wydarzenie: „{d.get('title')}”, {d.get('lengthInMinutes')} min"
+                  + (f" (do wyboru: {d.get('lengthInMinutesOptions')})" if d.get("lengthInMinutesOptions") else "")
+                  + f", ukryte: {ok(d.get('hidden'))}, wymaga potwierdzenia: {ok(d.get('confirmationPolicy') or d.get('requiresConfirmation'))}")
+            print(f"  Lokalizacje: {[l.get('type') for l in d.get('locations') or []] or 'brak'}")
+            print(f"  Dodatkowe pola obowiązkowe: {', '.join(req) or 'brak'}"
+                  + ("  ⚠ Sebastian ich nie wypełnia — ustaw je w cal.com jako nieobowiązkowe" if req else ""))
+            print(f"  Minimalne wyprzedzenie: {d.get('minimumBookingNotice')} min · limity: {d.get('bookingLimitsCount') or '—'}")
+        else:
+            print("Ustawień wydarzenia nie widać publicznie (ukryte) — sprawdzam same wolne terminy.")
+        today = dt.date.today()
+        try:
+            slots = R.calcom_slots(r["calcom"], today, today + dt.timedelta(days=14), 60)
+            print(f"Wolne terminy na 14 dni: {len(slots)}" + (" · najbliższe: " + ", ".join(x.strftime("%d.%m %H:%M") for x in slots[:4]) if slots else
+                  "  ⚠ brak — sprawdź dostępność (Availability) w cal.com"))
+        except Exception as e:
+            print(f"Wolne terminy: błąd — {e}")
+    last = R.meta_get(c, "calcom_ostatni_blad")
+    print("\n=== Ostatnia odmowa rezerwacji: " + (last or "nie było (od 2.14.3)"))
+    raw = R.meta_get(c, "calcom_ostatnia_odpowiedz")
+    if raw:
+        with contextlib.suppress(Exception):
+            j = json.loads(raw)
+            print(f"  {j.get('at')} · kod {j.get('code')} · wysłane: {json.dumps(j.get('body'), ensure_ascii=False)[:400]}")
+            print(f"  odpowiedź cal.com: {j.get('odp')}")
     return 0
 
 

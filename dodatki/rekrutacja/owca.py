@@ -9,11 +9,18 @@ import contextlib, datetime as dt, hashlib, html as H, json, secrets
 from pathlib import Path
 
 from . import rdzen as R
+try:
+    import mail_szablon as MS                                   # wspólny wygląd maili Sebastiana (folder główny)
+except ImportError:                                             # pragma: no cover
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.insert(0, str(_P(__file__).resolve().parents[2]))
+    import mail_szablon as MS
 
 ART = Path(__file__).with_name("szablony") / "owca"
 GOALS = (10, 20, 30, 40, 50)
 FIRST_WEEK = 7
-INK, SOFT, BLUE, BG = "#1d1d1f", "#6e6e73", "#0071e3", "#f5f5f7"
+INK, SOFT, BLUE, BG = "#111111", "#86868b", "#111111", "#f4f4f2"     # jak w mail_szablon
 
 
 # ================================================================ dane dnia
@@ -210,25 +217,13 @@ def _bar(done, g):
 
 
 def _button(href, label, primary=True):
-    bg, fg = (BLUE, "#ffffff") if primary else ("#e8f1fc", BLUE)
-    return (f'<a href="{H.escape(href)}" style="display:inline-block;background:{bg};color:{fg};text-decoration:none;font-weight:600;'
-            f'font-size:15px;padding:11px 20px;border-radius:999px;margin:4px 4px 4px 0">{H.escape(label)}</a>')
+    return MS.button(label, href, primary)
 
 
 def _page(title, lead, body_html, art, footer=""):
-    font = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Helvetica,Arial,sans-serif"
-    return f'''<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{H.escape(title)}</title></head>
-<body style="margin:0;padding:0;background:{BG};font-family:{font};color:{INK}">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{BG}"><tr><td align="center" style="padding:28px 14px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:22px">
-<tr><td align="center" style="padding:30px 28px 0"><img src="cid:{art}" width="140" height="140" alt="Owca Sebastian" style="display:block;border:0"></td></tr>
-<tr><td style="padding:14px 32px 0;text-align:center"><div style="font-size:26px;line-height:32px;font-weight:700;letter-spacing:-0.3px">{H.escape(title)}</div>
-<div style="font-size:16px;line-height:23px;color:{SOFT};margin-top:8px">{H.escape(lead)}</div></td></tr>
-<tr><td style="padding:22px 32px 30px;font-size:15px;line-height:22px">{body_html}</td></tr>
-</table>
-<div style="font-size:12px;line-height:18px;color:#86868b;margin-top:14px;max-width:520px">{footer or "Owca Sebastian · Twój asystent rekrutacji. Przypomnienia wyłączysz w panelu: Ustawienia → Jak pracuję."}</div>
-</td></tr></table></body></html>'''
+    """Mail owcy w wspólnym, eleganckim stylu Sebastiana — z małą ilustracją owcy."""
+    return MS.render(title, body_html, subtitle=lead, image_cid=art, image_alt="Owca Sebastian", preheader=lead,
+                     footer=footer or "Owca Sebastian · asystent rekrutacji<br>Przypomnienia wyłączysz w panelu: Ustawienia → Jak pracuję.")
 
 
 def _stats(done, g, s, p):

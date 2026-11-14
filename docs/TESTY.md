@@ -361,3 +361,8 @@ Data: 2026-11-13. `test_rekrutacja` — 83 testy zaliczone; pozostałe zestawy z
 # Weryfikacja 2.14.3
 
 `test_gwaranci.Naprawy2143`: cal.com odrzuca formularz → druga, prostsza próba, potem prośba mailem do tego samego gwaranta (z .ics), błąd w WhatsAppie i w meta; adept bez maila → droga mailowa bez cal.com; kolejka maili (ponowienie w `periodic`, komunikat „wyszedł za 2. razem”, złe hasło bez kolejki); SMTP: zerwane połączenie → 587, 587, 465; złe hasło → jasny błąd; domyślna skrzynka Sebastiana.
+
+# Weryfikacja 2.14.4
+
+`Naprawy2143.test_calcom_test_pokazuje_szczegoly`: `calcom test` pokazuje wolne terminy, ostrzeżenie o ukrytym wydarzeniu i pełną odpowiedź cal.com na odmowę (kod 400, pole obowiązkowe).
+`test_mail_szablon`: układ, pomijanie pustych wierszy, jeden przycisk główny, ucieczka HTML, linki, list z podpisem; `Naprawy2143.test_maile_w_eleganckim_stylu`: maile Gwarantów w nowym stylu, bez emoji w tytule.

@@ -14,6 +14,13 @@ proste reguły. Pamięć leży lokalnie w bazie dodatku; Aga widzi ją w panelu 
 import contextlib, datetime as dt, json, re
 
 from . import rdzen as R
+try:
+    import mail_szablon as MS                                   # wspólny wygląd maili Sebastiana (folder główny)
+except ImportError:                                             # pragma: no cover
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.insert(0, str(_P(__file__).resolve().parents[2]))
+    import mail_szablon as MS
 
 DAYS = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"]
 WEEKDAYS = {"poniedzial": 0, "wtor": 1, "srod": 2, "czwart": 3, "piat": 4, "sobot": 5, "niedziel": 6}
@@ -471,8 +478,9 @@ def check_mail(ctx, send=None, fetch=None):
         if not answer:
             continue
         try:
-            send(seb, pwd, m["od"], A.re_subject(m["temat"] or "Rozmowa"), answer + "\n\n🐑 Owca Sebastian", name="Owca Sebastian",
-                 in_reply_to=m["message_id"], references=m.get("references", ""))
+            send(seb, pwd, m["od"], A.re_subject(m["temat"] or "Rozmowa"), answer + "\n\n— Owca Sebastian", name="Owca Sebastian",
+                 in_reply_to=m["message_id"], references=m.get("references", ""),
+                 html=MS.letter(answer, "Owca Sebastian", tagline="asystent rekrutacji"))
             n += 1
         except Exception as e:
             ctx.log.warning(f"Rekrutacja: odpowiedź do Agi nie wyszła ({type(e).__name__})")
@@ -539,7 +547,8 @@ def tick(ctx, send=None):
         sender, key = (seb, "sebastian") if seb and R.secret(ctx, "sebastian") else (me, "aga")
         if me and R.secret(ctx, key):
             with contextlib.suppress(Exception):
-                send(sender, R.secret(ctx, key), me, "🐑 Przypominam się, tak jak prosiłaś", text + "\n\n🐑 Owca Sebastian", name="Owca Sebastian")
+                send(sender, R.secret(ctx, key), me, "Przypominam się, tak jak prosiłaś", text + "\n\n— Owca Sebastian", name="Owca Sebastian",
+                     html=MS.letter(text, "Owca Sebastian", tagline="asystent rekrutacji"))
                 ok = True
     log(ctx, rem["kanal"] if ok else "mail", "sebastian", text)
     return bool(ok)

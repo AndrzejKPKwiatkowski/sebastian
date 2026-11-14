@@ -295,6 +295,10 @@ class FakeCal:
             day = MON.isoformat()
             starts = [dt.datetime.combine(MON, dt.time(9), TZ) + dt.timedelta(minutes=step * i) for i in range(4)]
             return 200, {"status": "success", "data": {day: [{"start": x.isoformat()} for x in starts]}}
+        if path == "/event-types":
+            if params.get("eventSlug"):
+                return 200, {"status": "success", "data": []}
+            return 200, {"status": "success", "data": [{"slug": "inne", "title": "Inne", "lengthInMinutes": 30}]}
         if method == "POST" and path == "/bookings":
             if self.refuse:
                 return 400, {"error": {"message": "User either already has booking at this time or is not available"}}
@@ -466,6 +470,27 @@ class Naprawy2143(CalCom):
         with patch.object(R.smtplib, "SMTP", Bad), self.assertRaises(R.MailError) as e:
             R.smtp_send("seb@gmail.com", "x", EmailMessage(), pause=0)
         self.assertIn("hasło aplikacji", str(e.exception))
+
+    def test_calcom_test_pokazuje_szczegoly(self):
+        import importlib, io, contextlib as cl
+        adam = self.podepnij()
+        self.cal.invalid = True
+        R.book(self.c, self.st, "tomasz-solny", "analiza", dt.datetime.combine(MON, dt.time(10, 15), TZ), when=NOW)
+        init = importlib.import_module(R.__name__.rsplit(".", 1)[0])
+        out = io.StringIO()
+        with patch.object(R, "calcom_http", self.cal), cl.redirect_stdout(out):
+            init._calcom_test(self.ctx, self.c)
+        text = out.getvalue()
+        self.assertIn("Wolne terminy na 14 dni", text)
+        self.assertIn("error_required_field", text)
+        self.assertIn("kod 400", text)
+        self.assertIn("ukryte (Hidden)", text)
+
+    def test_maile_w_eleganckim_stylu(self):
+        h = R.html_mail("Spotkanie potwierdzone 🎉", "Tekst", [("Kiedy", "jutro")], [("OK", "https://x")])
+        self.assertIn(">Spotkanie potwierdzone<", h)
+        self.assertNotIn("🎉", h)
+        self.assertIn("letter-spacing:.16em;text-transform:uppercase", h)
 
     def test_domyslna_skrzynka(self):
         self.assertEqual(R.mailbox(self.ctx, self.c)[0], "sebastian.k.kwiatkowski@gmail.com")

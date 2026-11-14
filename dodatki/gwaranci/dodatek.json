@@ -1,7 +1,7 @@
 {
   "id": "gwaranci",
   "nazwa": "Gwaranci — spotkania gwaranckie Feniksów",
-  "wersja": "1.1.1",
+  "wersja": "1.1.2",
   "rdzen": "2.14",
   "opis": "Panel dla zespołu (przez Tailscale Funnel): osobiste linki bez haseł, onboarding gwaranta (cal.com albo kalendarz Google → dostępność → limit), rezerwacja z automatycznym przydziałem gwaranta bez kolizji z jego kalendarzem, zaproszenia z Gmaila Sebastiana, przypomnienia, powiadomienia dla Ciebie na WhatsAppie.",
   "domyslnie_wlaczony": true,

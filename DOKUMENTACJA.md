@@ -1664,6 +1664,7 @@ Wzorzec aktualizatora (zob. 1.4, 2.1, 2.1.1–2.1.3, 2.2, 2.3):
 | 2.14.1 | 14.11.2026 | Gwaranci: **cal.com** — gwarant zamiast linku iCal wkleja link do swojego wydarzenia w cal.com; wolne terminy (z dostępnością, kalendarzami i limitami z cal.com) czytam co 5 min, rezerwacja powstaje od razu w cal.com gwaranta (akceptuje tam), statusy wracają do Sebastiana; gdy cal.com odmówi, biorę następnego gwaranta. Osoby z polem „calcom” w struktura.json mają cal.com podpięty od razu. Polecenia `calcom` (Terminal, WhatsApp) |
 | 2.14.2 | 14.11.2026 | WhatsApp: odpowiedź idzie w **ten sam czat**, z którego pisze właściciel (adresy „LID” — wiadomość wysłana na sam numer telefonu bywała przyjmowana przez serwer, ale nie docierała do telefonu); dziennik pokazuje adres czatu, wysyłkę i potwierdzenie doręczenia/przeczytania |
 | 2.14.3 | 14.11.2026 | Gwaranci: gdy cal.com nie przyjmie rezerwacji z innego powodu niż zajęty termin, prośba idzie do gwaranta mailem z zaproszeniem (zamiast ekranu „Termin zajęty”); prawdziwy błąd cal.com w WhatsAppie i w `calcom test`; Gmail: ponowienie przy zerwanym połączeniu, port 465, kolejka maili ponawiana w tle; domyślna skrzynka sebastian.k.kwiatkowski@gmail.com; `poczta test` |
+| 2.14.4 | 14.11.2026 | Jeden elegancki wygląd wszystkich maili Sebastiana (`mail_szablon.py`: Gwaranci, owca, powiadomienia i rozmowa w Rekrutacji; maile Agi do pracodawców bez zmian). Gwaranci: `calcom test` pokazuje szczegóły (lista wydarzeń konta, ukryte, długość, lokalizacje, pola obowiązkowe, wolne terminy na 14 dni, pełna odpowiedź cal.com na ostatnią odmowę); `poczta --zmien` przyjmuje tylko adres e-mail i 16-literowe hasło aplikacji |
 | 2.5.2 | 20.10.2026 | Poprawka nauki z rozmów WhatsApp: w procesie nauki moduł WhatsAppa nie był podłączony (`AttributeError: 'NoneType' object has no attribute 'TZ'` co 2 minuty i zablokowana kolejka). Dodatkowo: pozycja, która 3 razy z rzędu kończy się błędem, dostaje status „błąd” i nauka idzie dalej (`learn-retry` przywraca) |
 | 2.5.1 | 20.10.2026 | Diagnostyka „żona pisze, a Sebastian milczy”: odrzucone numery w logu i w `wa-status` (nazwa profilu, zamaskowany numer, bez treści, raz na godzinę), ostrzeżenie, gdy Sebastian jest na numerze właściciela, a lista zawiera inne osoby; w `wa-status` poziom dostępu i czy osoba została przywitana |
 | 2.5 | 20.10.2026 | **WhatsApp — pamięć rozmów i dostęp pełny**: rozmowy przechowywane na stałe, czytanie załączników (PDF, Office, OCR zdjęć — także wysłanych przez Ciebie), zapis historii przesłanej przy połączeniu, akta osób (`kto to Jan`, `wa-watch ludzie`, panel), nauka z rozmów (zakres `whatsapp`, bez Open WebUI); lista dozwolonych numerów z poziomem dostępu `prywatny`/`pelny` (`wa-user dodaj --dostep pelny`) |
@@ -1701,3 +1702,12 @@ Szczegóły każdej wersji: `docs/aktualizacje/AKTUALIZACJA_X_Y.md`.
 | **Ollama** | Program uruchamiający modele AI lokalnie na Macu |
 | **Open WebUI** | Aplikacja do czatu z lokalnymi modelami (w Dockerze) |
 | **OCR** | Rozpoznawanie tekstu ze skanów i zdjęć (Tesseract) |
+
+
+## Styl maili Sebastiana (od 2.14.4)
+
+Każdy mail, który Sebastian wysyła **od siebie**, składamy przez `mail_szablon.py`:
+- `render(tytuł, wstęp, rows=[(etykieta, wartość)], buttons=[(etykieta, adres)], outro, preheader=…)` — powiadomienia, zaproszenia, raporty;
+- `letter(tekst, podpis)` — odpowiedzi w rozmowie i przypomnienia, wyglądające jak list;
+- zawsze z wersją tekstową obok HTML; tytuł krótki, bez emoji; jeden przycisk główny; szczegóły w `rows`, nie w akapitach.
+Maile wysyłane w imieniu Agi (lub innej osoby) do pracodawców i klientów piszemy zwykłym tekstem, bez szablonu.

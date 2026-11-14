@@ -12,6 +12,13 @@ wysłanych aplikacji i rozpoznaje ich rodzaj. Wiadomości niezwiązane z rekruta
 import contextlib, datetime as dt, json, re
 
 from . import dokumenty as D, poczta as P, rdzen as R
+try:
+    import mail_szablon as MS                                   # wspólny wygląd maili Sebastiana (folder główny)
+except ImportError:                                             # pragma: no cover
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.insert(0, str(_P(__file__).resolve().parents[2]))
+    import mail_szablon as MS
 
 KINDS = {"zaproszenie": "zaproszenie na rozmowę", "oferta": "propozycja pracy", "pytanie": "pytanie lub prośba",
          "zadanie": "zadanie rekrutacyjne", "do_potwierdzenia": "potwierdź aplikację", "odmowa": "odmowa",
@@ -266,7 +273,9 @@ def notify_mail(ctx, subject, body, send, html="", images=None):
     sender, key = (seb, "sebastian") if seb and R.secret(ctx, "sebastian") else (me, "aga")
     if me and R.secret(ctx, key):
         with contextlib.suppress(Exception):
-            send(sender, R.secret(ctx, key), me, subject, body, name="Owca Sebastian" if html else "Sebastian", html=html, images=images)
+            html = html or MS.render(re.sub(r"^\W+\s*", "", subject), MS.text_to_html(body), preheader=body[:120],
+                                     brand="Sebastian", tagline="asystent rekrutacji")
+            send(sender, R.secret(ctx, key), me, subject, body, name="Owca Sebastian" if images else "Sebastian", html=html, images=images)
             from . import rozmowa as RZ
             RZ.log(ctx, "mail", "sebastian", body[:700], subject)
             return True

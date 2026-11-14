@@ -8,6 +8,14 @@ from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 from zoneinfo import ZoneInfo
 
+try:
+    import mail_szablon as MS                                   # wspólny wygląd maili Sebastiana (folder główny)
+except ImportError:                                             # pragma: no cover
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.insert(0, str(_P(__file__).resolve().parents[2]))
+    import mail_szablon as MS
+
 TZ = ZoneInfo("Europe/Warsaw")
 EMAIL_OK = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[A-Za-z]{2,}$")
 
@@ -491,6 +499,9 @@ def refresh_calcom(c, pid, days=40, when=None, http=None):
 TAKEN = re.compile(r"already has booking|not available|no available|unavailable|busy|slot|already booked|booking limit|conflict", re.I)
 
 
+CALCOM_LAST = {}                                             # ostatnia odpowiedź cal.com na rezerwację (do „calcom test”)
+
+
 class CalcomError(ValueError):
     def __init__(self, msg, taken=False):
         super().__init__(msg)
@@ -514,6 +525,8 @@ def calcom_book(ref, start, minutes, name, email, notes, http=None):
         body.pop("bookingFieldsResponses", None)
         body["attendee"].pop("language", None)
         code, js = http("POST", "/bookings", body=body)
+    CALCOM_LAST.update(at=dt.datetime.now(TZ).strftime("%d.%m %H:%M"), code=code, body={k: v for k, v in body.items() if k != "attendee"},
+                       odp=json.dumps(js, ensure_ascii=False)[:1500])
     if code not in (200, 201):
         raise CalcomError(_calcom_err(code, js), taken=bool(TAKEN.search(json.dumps(js, ensure_ascii=False))))
     d = js.get("data") or {}
@@ -682,6 +695,8 @@ def book(c, settings, a, typ, start, place="online", place_text="", note="", whe
                 taken = getattr(e, "taken", False)
                 calcom_err = str(e)[:300] or type(e).__name__
                 meta_set(c, "calcom_ostatni_blad", f"{dt.datetime.now(TZ):%d.%m %H:%M} · {snap.g[g].get('calcom')} · {calcom_err}")
+                if CALCOM_LAST:
+                    meta_set(c, "calcom_ostatnia_odpowiedz", json.dumps(CALCOM_LAST, ensure_ascii=False))
                 if taken or not EMAIL_OK.match(ppl[g].get("email", "") or ""):
                     with contextlib.suppress(Exception):
                         refresh_calcom(c, g, when=when, http=http)
@@ -730,6 +745,7 @@ def mailbox(ctx, c):
     """(adres, hasło aplikacji) skrzynki Sebastiana (domyślnie sebastian.k.kwiatkowski@gmail.com): własne ustawienie dodatku
     albo — w parze, adres razem z hasłem — skrzynka Sebastiana z dodatku Rekrutacja."""
     addr = meta_get(c, "poczta") or ""
+    addr = addr if EMAIL_OK.match(addr) else ""                # np. wklejone polecenie zamiast adresu
     pwd = None
     with contextlib.suppress(Exception):
         pwd = ctx.secret("poczta")
@@ -811,21 +827,9 @@ def description(ctx, c, b):
 
 
 def html_mail(title, intro, rows=(), buttons=(), outro=""):
-    """Prosty, elegancki mail w stylu Apple: jasne tło, karta, duże przyciski."""
-    e = lambda s: str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    rows_html = "".join(f'<tr><td style="padding:6px 0;color:#6e6e73;width:110px;vertical-align:top">{e(k)}</td>'
-                        f'<td style="padding:6px 0;color:#1d1d1f">{e(v)}</td></tr>' for k, v in rows)
-    btn_html = "".join(f'<a href="{u}" style="display:inline-block;margin:6px 8px 0 0;padding:12px 20px;border-radius:12px;'
-                       f'text-decoration:none;font-weight:600;background:{"#1d1d1f" if i == 0 else "#f2f2f7"};'
-                       f'color:{"#ffffff" if i == 0 else "#1d1d1f"}">{e(t)}</a>' for i, (t, u) in enumerate(buttons))
-    return (f'<div style="background:#f5f5f7;padding:28px 12px;font-family:-apple-system,BlinkMacSystemFont,\'SF Pro Text\',Inter,Segoe UI,Arial,sans-serif">'
-            f'<div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:18px;padding:28px">'
-            f'<div style="font-size:13px;color:#6e6e73;margin-bottom:6px">Sebastian · Asystent Krakowa inPartners</div>'
-            f'<div style="font-size:22px;font-weight:700;color:#1d1d1f;margin-bottom:12px">{e(title)}</div>'
-            f'<div style="font-size:15px;line-height:1.5;color:#1d1d1f">{intro}</div>'
-            f'<table style="width:100%;margin:16px 0;font-size:14px;border-top:1px solid #e5e5ea;border-bottom:1px solid #e5e5ea">{rows_html}</table>'
-            f'<div>{btn_html}</div>'
-            f'<div style="font-size:13px;line-height:1.5;color:#6e6e73;margin-top:18px">{outro}</div></div></div>')
+    """Mail w jednym, eleganckim stylu Sebastiana (mail_szablon)."""
+    return MS.render(re.sub(r"\s*[\U0001F300-\U0001FAFF\u2600-\u27BF]+\s*$", "", title), intro, rows, buttons, outro,
+                     preheader=re.sub(r"<[^>]+>", "", intro)[:120])
 
 
 def send_mail(ctx, c, to, subject, text, html="", ics="", method="REQUEST"):

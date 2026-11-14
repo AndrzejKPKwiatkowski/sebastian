@@ -132,7 +132,7 @@ def decide(ctx, c, b, yes, source="link"):
             with contextlib.suppress(Exception):
                 R.send_mail(ctx, c, a["email"], f"Potwierdzone: spotkanie gwaranckie z {g['imie_nazwisko']}, {_when(b)}",
                             f"{g['imie_nazwisko']} potwierdził(a) spotkanie.\n\n" + R.description(ctx, c, b),
-                            html=R.html_mail("Spotkanie potwierdzone 🎉", f"<b>{g['imie_nazwisko']}</b> potwierdził(a) Wasze spotkanie. "
+                            html=R.html_mail("Spotkanie potwierdzone", f"<b>{g['imie_nazwisko']}</b> potwierdził(a) Wasze spotkanie. "
                                              "Wpis jest w załączniku — kliknij „Tak”, żeby dodać go do kalendarza.", _rows(c, b),
                                              [("Moje spotkania", f"{url}/moje")],
                                              "Po spotkaniu: feedback po usłudze i kilka zdań podziękowania dla gwaranta."),
