@@ -834,6 +834,7 @@ class LinkFilterTests(unittest.TestCase):
         t.phones, t.lids = [OWNER, WIFE], {}
         t.log = None
         t.on_skip, t.skipped = None, {}
+        t.chats, t.pending = {}, {}
         return t
 
     def ev(self, sender, chat=None, from_me=False, group=False, text="pomoc", sender_server="s.whatsapp.net", alt="",
@@ -857,6 +858,11 @@ class LinkFilterTests(unittest.TestCase):
         self.assertIsNone(t.parse(self.ev("888", sender_server="lid")))
         v = t.parse(self.ev(OWNER, audio=True))
         self.assertEqual((v["kind"], v["audio_bytes"]), ("voice", b"OGGDATA"))
+        # 2.14.2: odpowiedź idzie w ten sam czat, z którego właściciel pisze (np. adres LID)
+        src = N.MessageSource(Chat=N.JID(User="777", Server="lid"), Sender=N.JID(User="777", Server="lid"), IsFromMe=False,
+                              IsGroup=False, SenderAlt=N.JID(User=OWNER, Server="s.whatsapp.net"))
+        t.parse(N.Message(Info=N.MessageInfo(MessageSource=src, ID="M9", Timestamp=int(time.time())), Message=E.Message(conversation="hej")))
+        self.assertEqual((t.target().User, t.target().Server), ("777", "lid"))
 
     def test_family_number_accepted_with_sender(self):
         t = self.transport(me="48700000000")

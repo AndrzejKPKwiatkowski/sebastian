@@ -39,6 +39,8 @@ class LinkedTransport:
         self.me = self.me_lid = None
         self.phones = [owner] + [p for p in others if p and p != owner]     # kto może pisać do Sebastiana
         self.lids = {}                                                    # identyfikator LID → numer
+        self.chats = {}                                                   # 2.14.2: numer → czat, z którego ta osoba pisze
+        self.pending = {}                                                 # 2.14.2: id wysłanej wiadomości → (czas, czat)
         self.sent_ids = set()
         self.thread = None
         self.on_skip, self.skipped = on_skip, {}                             # 2.5.1: kogo odrzucono (diagnostyka)
@@ -74,6 +76,21 @@ class LinkedTransport:
             if msg:
                 self.on_message(msg)
 
+        with contextlib.suppress(Exception):                             # 2.14.2: potwierdzenia doręczenia (diagnostyka)
+            from neonize.events import ReceiptEv
+
+            @c.event(ReceiptEv)
+            def _receipt(client, ev):
+                with contextlib.suppress(Exception):
+                    ids = [i for i in ev.MessageIDs if i in self.pending]
+                    if not ids:
+                        return
+                    kind = str(ev.Type).lower()
+                    word = "przeczytana" if "read" in kind else ("doręczona" if ("deliver" in kind or kind in ("", "0", "1")) else kind)
+                    for i in ids:
+                        t0, chat = self.pending.pop(i)
+                        self.log.info(f"WhatsApp: wiadomość {word} ({chat}, po {int(time.time() - t0)} s).")
+
         def _qr(client, data):          # w usłudze kod QR oznacza: sesja nieważna — nie pokazujemy go w logu
             if not self.needs_login:
                 self.log.warning("WhatsApp prosi o ponowne połączenie. Uruchom w Terminalu: python sebastian.py wa-login")
@@ -108,7 +125,19 @@ class LinkedTransport:
             if to and to != self.owner:
                 raise RuntimeError("rozmowy z rodziną działają tylko, gdy Sebastian ma osobny numer")
             return _jid(self.me)
-        return _jid(to or self.owner)
+        # 2.14.2: odpowiadam w ten sam czat, z którego ta osoba pisze (WhatsApp przenosi rozmowy na adresy „LID” —
+        # wiadomość wysłana na sam numer telefonu potrafi zostać przyjęta przez serwer, ale nie dojść do telefonu)
+        return self.chats.get(to or self.owner) or _jid(to or self.owner)
+
+    def _sent(self, resp, jid):
+        self.sent_ids.add(resp.ID)
+        where = f"{getattr(jid, 'Server', '?')}"
+        self.pending[resp.ID] = (time.time(), where)
+        if len(self.pending) > 200:
+            self.pending.pop(next(iter(self.pending)))
+        with contextlib.suppress(Exception):
+            self.log.info(f"WhatsApp: wysłano wiadomość (adres: {where}) — czekam na potwierdzenie doręczenia.")
+        return resp.ID
 
     # ---------------------------------------------------------------- odbiór
 
@@ -141,6 +170,11 @@ class LinkedTransport:
                 return None
             if src.Sender.Server == "lid":
                 self.lids[src.Sender.User] = who
+            if src.Chat.User:
+                if self.chats.get(who) is None or self.chats[who].User != src.Chat.User:
+                    with contextlib.suppress(Exception):
+                        self.log.info(f"WhatsApp: {mask(who)} pisze z czatu o adresie „{src.Chat.Server}” — odpowiadam w ten sam czat.")
+                self.chats[who] = src.Chat
         ts = info.Timestamp or 0
         ts = ts / 1000 if ts > 10_000_000_000 else ts
         m = ev.Message
@@ -177,16 +211,14 @@ class LinkedTransport:
     # ---------------------------------------------------------------- wysyłka
 
     def send_text(self, text, to=None):
-        resp = self.client.send_message(self.target(to), text)
-        self.sent_ids.add(resp.ID)
-        return resp.ID
+        jid = self.target(to)
+        return self._sent(self.client.send_message(jid, text), jid)
 
     def send_voice(self, ogg, to=None):
         msg = self.client.build_audio_message(Path(ogg).read_bytes(), ptt=True)
         msg.audioMessage.mimetype = "audio/ogg; codecs=opus"      # tak WhatsApp rozpoznaje głosówkę (PTT)
-        resp = self.client.send_message(self.target(to), msg)
-        self.sent_ids.add(resp.ID)
-        return resp.ID
+        jid = self.target(to)
+        return self._sent(self.client.send_message(jid, msg), jid)
 
     def typing(self, on, to=None):
         from neonize.utils.enum import ChatPresence, ChatPresenceMedia
