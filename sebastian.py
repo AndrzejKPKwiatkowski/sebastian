@@ -320,13 +320,21 @@ def demo():
         c.execute('INSERT INTO messages(source,scope,account,folder,validity,uid,mid,refs,sender,subject,date,body,flags,attachments,imported,analysis) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',('demo',scope,acct,'INBOX','DEMO',n,'','','demo@example.invalid',sub,now(),body,'','[]',now(),json.dumps(value)))
     c.commit(); c.close(); build_report(); print('Dodano 3 fikcyjne wiadomosci DEMO.')
 
+def panel_hosty():
+    """2.15: adresy, pod którymi wolno otworzyć panel: lokalnie i adres Tailscale Serve (data/centrum.json)."""
+    hosty={'127.0.0.1:8765','localhost:8765'}
+    try: hosty|=set(json.loads((DATA/'centrum.json').read_text()).get('panel_hosty',[]))
+    except Exception: pass
+    return hosty
+
+
 def make_app():
     from flask import Flask,request,session,redirect,render_template,abort
     app=Flask(__name__); app.secret_key=(DATA/'session.key').read_text()
     app.config.update(SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Strict',MAX_CONTENT_LENGTH=6*1024*1024)
     @app.before_request
     def protect():
-        if request.host not in ('127.0.0.1:8765','localhost:8765'): abort(403)
+        if request.host not in panel_hosty(): abort(403)
         if request.endpoint=='login': return
         if not session.get('ok'): return redirect('/login')
         if request.endpoint=='docs_upload': request.max_content_length=4*1024**3   # duże skany (Dokumenty)
