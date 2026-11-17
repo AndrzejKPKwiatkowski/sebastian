@@ -1,4 +1,4 @@
-"""Testy 2.14 / 2.14.1: dodatek Gwaranci (także gwaranci z cal.com). Bez sieci, bez Gmaila, bez WhatsAppa — wszystko udawane."""
+"""Testy 2.14–2.16.1: dodatek Gwaranci (także gwaranci z cal.com). Bez sieci, bez Gmaila, bez WhatsAppa — wszystko udawane."""
 import datetime as dt, json, os, re, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -281,6 +281,44 @@ class Panel(Base):
         other.post(f"/decyzja/{b['token']}/tak", data={"csrf": tok})
         self.assertEqual(R.booking(self.c, b["id"])["status"], "potwierdzone")
         self.assertIn("potwierdzone", self.app.get("/moje").get_data(as_text=True))
+
+    def test_pula_menedzera(self):
+        """2.16.1: adept rezerwuje dopiero, gdy jego bezpośredni menedżer udostępni swoje spotkania; widzi, ile terminów czeka."""
+        self.ready("Wiktor Buk", [[0, 600, 1080]], 3)
+        self.c.execute("UPDATE osoby SET email='beata@example.com' WHERE id='beata-klon'")
+        self.c.execute("UPDATE osoby SET email='kuba@example.com' WHERE id='kuba-dab'")
+        self.c.commit()
+        self.login("Beata Klon")
+        with patch.object(R, "now", return_value=NOW), patch.object(R, "fetch_ics", return_value=ics()):
+            html = self.app.get(f"/rezerwuj?typ=usluga&d={MON.isoformat()}").get_data(as_text=True)
+            self.assertIn("Rezerwacja czeka na Twojego menedżera", html)
+            self.assertIn("Kuba Dąb", html)
+            self.assertIn("time off", html)                                   # terminy widać …
+            self.assertNotIn("/rezerwuj/potwierdz?", html)                    # … ale nie da się ich wybrać
+            start = dt.datetime.combine(MON, dt.time(11), TZ).isoformat()
+            r = self.app.get("/rezerwuj/potwierdz", query_string={"typ": "usluga", "start": start, "loc": "online"})
+            self.assertIn("zablokowana", r.get_data(as_text=True))
+            tok = re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+            r = self.app.post("/rezerwuj/popros", data={"csrf": tok})
+            self.assertIn("Wysłane", r.get_data(as_text=True))
+            self.assertEqual(self.mails[-1]["to"], "kuba@example.com")
+            self.assertIn("Beata Klon", self.mails[-1]["subject"])
+            r = self.app.post("/rezerwuj/popros", data={"csrf": tok})
+            self.assertIn("już poszła", r.get_data(as_text=True))           # raz na 24 h
+            self.assertEqual(len([m for m in self.mails if m["to"] == "kuba@example.com"]), 1)
+            self.ready("Kuba Dąb", [[0, 600, 1080]], 3)                        # Kuba udostępnia spotkania
+            PB.notify_unlocked(self.ctx, self.c)
+            self.assertEqual(self.mails[-1]["to"], "beata@example.com")
+            self.assertIn("Możesz już rezerwować", self.mails[-1]["subject"])
+            html = self.app.get(f"/rezerwuj?typ=usluga&d={MON.isoformat()}").get_data(as_text=True)
+            self.assertNotIn("Rezerwacja czeka", html)
+            self.assertIn("/rezerwuj/potwierdz?", html)
+
+    def test_pula_menedzera_wylaczona(self):
+        self.ready("Wiktor Buk", [[0, 600, 1080]], 3)
+        self.assertEqual(R.pool_status(self.c, dict(self.st, pula_menedzera=False), "beata-klon")[0], True)
+        self.assertEqual(R.pool_status(self.c, self.ctx.settings(), "beata-klon")[0], False)
+        self.assertEqual(R.pool_status(self.c, self.ctx.settings(), "marek-dyrektor")[0], True)   # bez menedżera — bez blokady
 
     def test_admin_i_dostep(self):
         r = self.app.get("/rezerwuj")

@@ -11,11 +11,24 @@
 .time{display:flex;justify-content:center;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:9px;padding:9px;margin-bottom:8px;font-weight:600;text-decoration:none}
 .time:hover{border-color:var(--ink)}.time i{width:7px;height:7px;border-radius:50%;background:var(--green)}.time i.m{background:var(--gold)}
 .times{max-height:470px;overflow:auto}
+.lockbox{display:flex;gap:18px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;border:1px solid rgba(232,184,74,.45);background:rgba(232,184,74,.08);border-radius:16px;padding:20px 22px;margin-bottom:16px}
+.lockbox h2{margin:0 0 6px;font-size:19px}.lockbox p{margin:0;max-width:640px}
+.lockbox .big{font-size:30px;font-weight:700;color:var(--gold);line-height:1}
+.time.off{opacity:.45;cursor:not-allowed;filter:blur(.6px)}.time.off:hover{border-color:var(--line2)}
 @media(max-width:940px){.booker{grid-template-columns:1fr}.bk+.bk{border-left:0;border-top:1px solid var(--line)}.times{max-height:none}}
 {% endblock %}
 {% block body %}
 {% set q = '&loc=' ~ loc ~ '&gdzie=' ~ (gdzie|urlencode) %}
 {% if request.args.get('brak') %}<div class="err">Wpisz, gdzie na miejscu proponujesz spotkanie.</div>{% endif %}
+{% if locked %}<div class="lockbox">
+  <div>
+    <h2>Rezerwacja czeka na Twojego menedżera</h2>
+    <p class="muted">Aktualnie nie możesz wybrać spotkań gwaranckich, ponieważ <b style="color:var(--ink)">{{ boss.imie_nazwisko }}</b> — Twój bezpośredni menedżer — nie określił(a) jeszcze swojej dostępności. Skontaktuj się z nim/nią i poproś o udostępnienie swoich spotkań gwaranckich — wtedy od razu otrzymasz dostęp do całej puli.</p>
+    <form method="post" action="/rezerwuj/popros" style="margin-top:14px"><input type="hidden" name="csrf" value="{{ csrf() }}">
+      <button class="btn">Poproś menedżera o udostępnienie</button></form>
+  </div>
+  {% if avail %}<div style="text-align:right"><div class="big">{{ avail|length }}</div><div class="small muted">{{ 'dzień' if avail|length == 1 else 'dni' }} z wolnymi terminami<br>czeka na Ciebie w puli</div></div>{% endif %}
+</div>{% endif %}
 {% if not ready %}<div class="card"><h2>Gwaranci jeszcze się podłączają</h2><p class="muted">Gdy pierwsi gwaranci przejdą onboarding, zobaczysz tu wolne terminy.</p></div>{% endif %}
 <div class="booker">
   <div class="bk">
@@ -52,7 +65,7 @@
   </div>
   <div class="bk times">
     {% if sel %}<div style="font-weight:600;margin-bottom:12px">{{ fdate(sel) }}</div>
-      {% for start, cand in day_slots %}<a class="time" href="/rezerwuj/potwierdz?typ={{ typ }}&start={{ start.isoformat()|urlencode }}{{ q }}"><i class="{{ 'm' if cand[0].poziom==0 }}"></i>{{ start.strftime('%H:%M') }}</a>{% endfor %}
+      {% for start, cand in day_slots %}{% if locked %}<span class="time off" title="Odblokuje się, gdy Twój menedżer udostępni swoje spotkania"><i></i>{{ start.strftime('%H:%M') }}</span>{% else %}<a class="time" href="/rezerwuj/potwierdz?typ={{ typ }}&start={{ start.isoformat()|urlencode }}{{ q }}"><i class="{{ 'm' if cand[0].poziom==0 }}"></i>{{ start.strftime('%H:%M') }}</a>{% endif %}{% endfor %}
     {% else %}<p class="muted">Brak wolnych terminów w oknie 5 tygodni.</p>{% endif %}
   </div>
 </div>

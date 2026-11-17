@@ -670,6 +670,22 @@ def slots(c, settings, a, typ, day, when=None, snap=None):
     return out
 
 
+def manager_in_pool(c, mid):
+    """Menedżer dał swoje spotkania do wspólnej puli: przeszedł onboarding i ma limit > 0 (urlop/wstrzymanie się liczy)."""
+    g = guarantor(c, mid) if mid else None
+    return bool(g and g.get("gotowe") and int(g.get("limit_tyg") or 0) > 0)
+
+
+def pool_status(c, settings, a):
+    """(odblokowane, menedżer) — 2.16.1: adept rezerwuje gwarantów dopiero wtedy, gdy jego bezpośredni menedżer
+    udostępnił swoje spotkania gwaranckie (motywacja dla obu). Bez menedżera albo z wyłączonym ustawieniem — bez blokady."""
+    ppl = people(c)
+    boss = nearest_manager(ppl, a)
+    if not boss or not settings.get("pula_menedzera", True):
+        return True, ppl.get(boss) if boss else None
+    return manager_in_pool(c, boss), ppl.get(boss)
+
+
 def days_with_slots(c, settings, a, typ, when=None):
     when = when or dt.datetime.now(TZ)
     snap = Snapshot(c, settings)

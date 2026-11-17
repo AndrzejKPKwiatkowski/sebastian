@@ -184,9 +184,66 @@ def cancel_by_adept(ctx, c, b):
     return b
 
 
+def ask_manager(ctx, c, a, boss, when=None):
+    """Adept prosi swojego menedżera o udostępnienie spotkań gwaranckich. Raz na 24 h. Zwraca tekst dla adepta."""
+    when = when or R.now(ctx)
+    key = f"popros:{a['id']}:{boss['id']}"
+    last = R.meta_get(c, key)
+    if last and (when - R.parse(last)).total_seconds() < 24 * 3600:
+        return f"Prośba do {boss['imie_nazwisko']} już poszła — dostaniesz maila, gdy udostępni swoje spotkania."
+    R.meta_set(c, key, R.iso(when))
+    url = base_url(ctx, c)
+    first, af = boss["imie_nazwisko"].split()[0], a["imie_nazwisko"]
+    sent = False
+    if boss.get("email"):
+        rows = [("Kto czeka", f"{af} ({a['stanowisko']}) — i każda osoba z Twojej linii"),
+                ("Krok 1", "Kliknij „Udostępnij moje spotkania” — link loguje od razu, bez hasła."),
+                ("Krok 2", "Podłącz cal.com albo kalendarz (Google / Apple) — zajęte godziny będą blokowane same."),
+                ("Krok 3", "Zaznacz, kiedy możesz, wybierz liczbę spotkań w tygodniu i kliknij „Zapisz”.")]
+        intro = (f"Cześć {first}!<br><br><b>{af}</b> chce umówić spotkanie gwaranckie, ale osoby z Twojej linii mogą rezerwować "
+                 "gwarantów dopiero wtedy, gdy Ty udostępnisz swoje spotkania do wspólnej puli. To zajmie minutę — "
+                 "a Twój adept od razu dostanie dostęp do wszystkich wolnych terminów.")
+        with contextlib.suppress(Exception):
+            R.send_mail(ctx, c, boss["email"], f"{af} czeka na Twoje spotkania gwaranckie",
+                        f"Cześć {first}!\n\n{af} chce umówić spotkanie gwaranckie. Osoby z Twojej linii mogą rezerwować gwarantów, "
+                        f"gdy udostępnisz swoje spotkania. Zajmie to minutę: {url}/l/{boss['token']}\n",
+                        html=R.html_mail("Twój adept czeka na Twoje spotkania gwaranckie", intro, rows,
+                                         [("Udostępnij moje spotkania", f"{url}/l/{boss['token']}")],
+                                         "Gdy zapiszesz dostępność, Sebastian sam da znać adeptowi, że może rezerwować."))
+            sent = True
+    notify_owner(ctx, f"🔒 Gwaranci: {af} prosi {boss['imie_nazwisko']} o udostępnienie spotkań gwaranckich"
+                 + ("" if sent else " — brak maila menedżera w systemie, przekaż mu to proszę."), "pula")
+    return (f"Wysłane — {boss['imie_nazwisko']} dostał(a) maila z prośbą. Gdy udostępni swoje spotkania, dostaniesz od Sebastiana maila "
+            "i od razu zarezerwujesz termin." if sent else
+            f"Prośba zapisana — Sebastian przekaże ją {boss['imie_nazwisko']}. Napisz też do niego/niej bezpośrednio.")
+
+
+def notify_unlocked(ctx, c):
+    """Menedżer udostępnił spotkania → mail do adeptów, którzy o to prosili."""
+    url = base_url(ctx, c)
+    ppl = R.people(c)
+    for r in c.execute("SELECT k FROM meta WHERE k LIKE 'popros:%'").fetchall():
+        _, aid, bid = r["k"].split(":", 2)
+        if not R.manager_in_pool(c, bid):
+            continue
+        a, boss = ppl.get(aid), ppl.get(bid, {})
+        c.execute("DELETE FROM meta WHERE k=?", (r["k"],))
+        c.commit()
+        if a and a.get("email"):
+            with contextlib.suppress(Exception):
+                R.send_mail(ctx, c, a["email"], "Możesz już rezerwować spotkania gwaranckie",
+                            f"{boss.get('imie_nazwisko', 'Twój menedżer')} udostępnił(a) swoje spotkania gwaranckie. Zarezerwuj termin: {url}/rezerwuj\n",
+                            html=R.html_mail("Możesz już rezerwować", f"Cześć {a['imie_nazwisko'].split()[0]}! "
+                                             f"<b>{boss.get('imie_nazwisko', 'Twój menedżer')}</b> udostępnił(a) swoje spotkania gwaranckie — "
+                                             "masz dostęp do wszystkich wolnych terminów.", (),
+                                             [("Wybierz termin", f"{url}/l/{a['token']}")]))
+
+
 def periodic(ctx, c, when=None, refresh=True, mail=True):
     """Praca w tle: świeża zajętość gwarantów, odpowiedzi Tak/Nie z Gmaila, przypomnienia, wygasanie."""
     when = when or R.now(ctx)
+    with contextlib.suppress(Exception):
+        notify_unlocked(ctx, c)
     st = ctx.settings()
     if refresh:
         every = int(st.get("odswiezanie_min", 5)) * 60

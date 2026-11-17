@@ -270,11 +270,19 @@ def make_app(ctx):
         max_mo = (last_day.year - first.year) * 12 + last_day.month - first.month
         day_slots = R.slots(g.db, st, g.me["id"], typ, sel, t) if sel else []
         ppl = R.people(g.db)
-        boss = R.nearest_manager(ppl, g.me["id"])
+        unlocked, boss = R.pool_status(g.db, st, g.me["id"])
         mine = [dict(r) for r in g.db.execute("SELECT * FROM rezerwacje WHERE adept=? AND status IN ('czeka','potwierdzone') ORDER BY start", (g.me["id"],))]
         return page("rezerwuj.html", typ=typ, avail=avail, sel=sel, month=month, ndays=(nxt - month).days, mo=mo, max_mo=max_mo, day_slots=day_slots,
-                    loc=request.args.get("loc", "online"), gdzie=request.args.get("gdzie", ""), boss=ppl.get(boss), today=t.date(),
-                    mine=mine, ready=len(R.ready_guarantors(g.db)))
+                    loc=request.args.get("loc", "online"), gdzie=request.args.get("gdzie", ""), boss=boss, today=t.date(),
+                    mine=mine, ready=len(R.ready_guarantors(g.db)), locked=not unlocked)
+
+    @app.route("/rezerwuj/popros", methods=["POST"])
+    def popros():
+        unlocked, boss = R.pool_status(g.db, ctx.settings(), g.me["id"])
+        if unlocked or not boss:
+            return redirect(url_for("rezerwuj"))
+        text = PB.ask_manager(ctx, g.db, g.me, boss, when=now())
+        return msg("Prośba do menedżera", text, ("Wróć do kalendarza", url_for("rezerwuj")))
 
     @app.route("/rezerwuj/potwierdz", methods=["GET", "POST"])
     def potwierdz():
@@ -285,6 +293,11 @@ def make_app(ctx):
         loc = "miejsce" if request.values.get("loc") == "miejsce" else "online"
         gdzie = request.values.get("gdzie", "").strip()
         st = ctx.settings()
+        unlocked, boss = R.pool_status(g.db, st, g.me["id"])
+        if not unlocked:
+            return msg("Rezerwacja jeszcze zablokowana",
+                       f"{boss['imie_nazwisko']} — Twój bezpośredni menedżer — nie udostępnił(a) jeszcze swoich spotkań gwaranckich. "
+                       "Poproś go/ją o to, a od razu otrzymasz dostęp do całej puli terminów.", ("Wróć do kalendarza", url_for("rezerwuj")))
         if loc == "miejsce" and not gdzie:
             return redirect(url_for("rezerwuj", typ=typ, d=start.date().isoformat(), loc=loc, brak="1"))
         cand = R.Snapshot(g.db, st).candidates(g.me["id"], start, R.TYPES[typ][1])
