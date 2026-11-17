@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block css %}
+.howto-box{border-top:1px solid var(--line2);padding:10px 0}.howto-box summary{cursor:pointer;list-style:none;padding:4px 0}.howto-box summary::-webkit-details-marker{display:none}.howto-box summary:after{content:'  ›';color:var(--muted)}
 .grid{display:grid;grid-template-columns:52px repeat(6,1fr);gap:4px;user-select:none;-webkit-user-select:none}
 .grid .h{text-align:center;font-size:12px;color:var(--muted);text-transform:uppercase;padding-bottom:4px}
 .grid .t{font-size:12px;color:var(--muted);text-align:right;padding-right:6px;line-height:30px}
@@ -28,17 +29,36 @@
   </form>
 </div>
 <div class="card">
-  <h3>Nie masz cal.com? Podłącz Kalendarz Google (ok. 30 sekund)</h3>
-  <ol class="howto">
-    <li>Otwórz <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener">ustawienia Kalendarza Google</a>.</li>
-    <li>Po lewej, w sekcji „Ustawienia moich kalendarzy”, kliknij swój kalendarz (zwykle Twoje imię i nazwisko).</li>
-    <li>Przewiń na sam dół do „Integracja kalendarza”.</li>
-    <li>Przy <b>„Tajny adres w formacie iCal”</b> kliknij ikonę kopiowania i wklej link poniżej.</li>
-  </ol>
-  <p class="small muted">Masz kilka kalendarzy z klientami (np. firmowy i prywatny)? Wklej każdy link w osobnej linii. Na telefonie te ustawienia są dostępne tylko w przeglądarce w wersji na komputer.</p>
+  <h3>Nie masz cal.com? Podłącz Kalendarz Google albo Apple (ok. 30 sekund)</h3>
+  <details class="howto-box" {{ 'open' if not (gw.kalendarze and 'icloud' in (gw.kalendarze|join(' '))) }}>
+    <summary><b>Kalendarz Google</b></summary>
+    <ol class="howto">
+      <li>Otwórz <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener">ustawienia Kalendarza Google</a> (na komputerze albo w przeglądarce w wersji na komputer).</li>
+      <li>Po lewej, w sekcji „Ustawienia moich kalendarzy”, kliknij swój kalendarz (zwykle Twoje imię i nazwisko).</li>
+      <li>Przewiń na sam dół do „Integracja kalendarza”.</li>
+      <li>Przy <b>„Tajny adres w formacie iCal”</b> kliknij ikonę kopiowania i wklej link poniżej.</li>
+    </ol>
+  </details>
+  <details class="howto-box" {{ 'open' if gw.kalendarze and 'icloud' in (gw.kalendarze|join(' ')) }}>
+    <summary><b>Kalendarz Apple (iCloud) — iPhone, iPad, Mac</b></summary>
+    <p class="small"><b>Na iPhonie lub iPadzie</b></p>
+    <ol class="howto">
+      <li>Otwórz aplikację <b>Kalendarz</b> i stuknij <b>„Kalendarze”</b> na dole ekranu.</li>
+      <li>Stuknij <b>ⓘ</b> obok kalendarza, w którym masz spotkania z klientami (w sekcji iCloud).</li>
+      <li>Włącz <b>„Kalendarz publiczny”</b>, stuknij <b>„Udostępnij łącze…”</b>, potem <b>„Kopiuj”</b> i wklej link poniżej.</li>
+    </ol>
+    <p class="small"><b>Na Macu</b></p>
+    <ol class="howto">
+      <li>W aplikacji <b>Kalendarz</b> kliknij prawym przyciskiem swój kalendarz iCloud na liście po lewej i wybierz <b>„Udostępnij kalendarz…”</b>.</li>
+      <li>Zaznacz <b>„Kalendarz publiczny”</b>, skopiuj pokazany adres (zaczyna się od <code>webcal://</code>) i kliknij „Gotowe”.</li>
+    </ol>
+    <p class="small muted">Link do kalendarza publicznego działa jak tajny adres w Google: zna go tylko ten, komu go dasz, a Sebastian odczytuje z niego wyłącznie zajęte godziny.
+    Jeśli w aplikacji Kalendarz na iPhonie masz konto Google albo firmowe (Outlook/Exchange), podłącz je przez Google albo napisz do Andrzeja.</p>
+  </details>
+  <p class="small muted" style="margin-top:12px">Masz kilka kalendarzy z klientami (np. firmowy w Google i prywatny w Apple)? Wklej każdy link w osobnej linii.</p>
   <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}">
-    <label>Tajny adres w formacie iCal</label>
-    <textarea name="kalendarze" placeholder="https://calendar.google.com/calendar/ical/…/private-…/basic.ics" required>{{ gw.kalendarze|join('\n') }}</textarea>
+    <label>Link do kalendarza (Google: „Tajny adres w formacie iCal”, Apple: link kalendarza publicznego)</label>
+    <textarea name="kalendarze" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics&#10;webcal://p01-caldav.icloud.com/published/2/…" required>{{ gw.kalendarze|join('\n') }}</textarea>
     <p style="margin-top:14px"><button class="btn sec">Sprawdź i dalej</button></p>
   </form>
 </div>

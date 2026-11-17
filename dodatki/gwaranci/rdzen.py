@@ -335,11 +335,23 @@ def ready_guarantors(c):
     return out
 
 
+ICLOUD_INVITE = re.compile(r"icloud\.com/(calendar/share|share)", re.I)
+
+
+def calendar_link_problem(url):
+    """Podpowiedź, gdy wklejony link to nie adres kalendarza (np. zaproszenie iCloud dla konkretnej osoby)."""
+    if ICLOUD_INVITE.search(url or ""):
+        return ("To link z zaproszeniem dla konkretnej osoby, a nie adres kalendarza. W kalendarzu Apple włącz „Kalendarz publiczny” "
+                "i skopiuj link zaczynający się od webcal://")
+    return ""
+
+
 def clean_calendar_url(url):
-    """Akceptuję tajny adres iCal z Google (i każdy inny link .ics / webcal); webcal:// zamieniam na https://."""
+    """Akceptuję tajny adres iCal z Google, link do kalendarza publicznego iCloud (Apple) i każdy inny link .ics;
+    webcal:// zamieniam na https://."""
     u = (url or "").strip().strip("<>\"' ")
-    u = re.sub(r"^webcal://", "https://", u, flags=re.I)
-    if not re.match(r"^https://", u, flags=re.I):
+    u = re.sub(r"^webcals?://", "https://", u, flags=re.I)
+    if not re.match(r"^https://", u, flags=re.I) or ICLOUD_INVITE.search(u):
         return ""
     return u
 
@@ -350,7 +362,8 @@ def fetch_ics(url, timeout=25):
         data = r.read(15 * 1024 * 1024)
     text = data.decode("utf-8", errors="replace")
     if "BEGIN:VCALENDAR" not in text[:2000]:
-        raise ValueError("To nie jest link do kalendarza (brak danych iCal). Skopiuj „Tajny adres w formacie iCal”.")
+        raise ValueError("To nie jest link do kalendarza (brak danych iCal). Skopiuj „Tajny adres w formacie iCal” z Google "
+                         "albo link „Kalendarza publicznego” z Apple (webcal://…).")
     return text
 
 

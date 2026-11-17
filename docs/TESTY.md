@@ -366,3 +366,11 @@ Data: 2026-11-13. `test_rekrutacja` — 83 testy zaliczone; pozostałe zestawy z
 
 `Naprawy2143.test_calcom_test_pokazuje_szczegoly`: `calcom test` pokazuje wolne terminy, ostrzeżenie o ukrytym wydarzeniu i pełną odpowiedź cal.com na odmowę (kod 400, pole obowiązkowe).
 `test_mail_szablon`: układ, pomijanie pustych wierszy, jeden przycisk główny, ucieczka HTML, linki, list z podpisem; `Naprawy2143.test_maile_w_eleganckim_stylu`: maile Gwarantów w nowym stylu, bez emoji w tytule.
+
+# Weryfikacja 2.15.1
+
+`test_kalendarz_apple`: instrukcja Apple w panelu; link-zaproszenie iCloud → podpowiedź; Google + Apple (webcal→https) razem zapisane i odczytane.
+
+# Weryfikacja 2.16
+
+`Feedback216`: nauka bez modelu (programy z wymagań, bez Excela), z modelem tylko hasła obecne w ofercie lub słowach Agi, angielski (ogłoszenie po angielsku, „biegły angielski”), automatyczne pominięcie nowej oferty i ostrzeżenie dla dodanej ręcznie, oznaczanie czekających, panel: karta uwagi, „Zapisz i pomiń”, sekcja w Ustawieniach i usuwanie zasady.

@@ -1,5 +1,5 @@
 """Rekrutacja — oferta: pobranie strony ogłoszenia, wyciągnięcie danych, ocena dopasowania."""
-import html, html.parser, ipaddress, re, socket
+import contextlib, html, html.parser, ipaddress, re, socket
 from urllib.parse import urlparse
 
 from . import rdzen as R
@@ -132,18 +132,24 @@ def analyze(ctx, f, text, title="", url=""):
     """Dane oferty i ocena dopasowania. Bez modelu zwraca to, co da się ustalić regułami."""
     out = {"firma": "", "stanowisko": "", "miasto": "", "email": "", "ocena": None, "uzasadnienie": "", "rodo": "", "ostrzezenia": [],
            "social_media": False, "niedziele_wieczory": False, "tylko_prowizja": False,
-           "adres": "", "wynagrodzenie": salary(text), "wymagania": [], "obowiazki": [], "oferujemy": []}
+           "adres": "", "wynagrodzenie": salary(text), "wymagania": [], "obowiazki": [], "oferujemy": [], "po_angielsku": False}
     no_sales = any(x in R.SALES_AVOID for x in f["kryteria"].get("nie_chce", []))
     if no_sales and sales_hits(text) >= 3:
         out["ostrzezenia"].append("W ogłoszeniu często pojawia się sprzedaż albo obsługa klienta — sprawdź zakres obowiązków.")
     crit = f["kryteria"]
     w = f["warunki"]
+    learned = ""
+    with contextlib.suppress(Exception):
+        from . import preferencje as PF
+        with R.db(ctx) as c:
+            learned = PF.prompt_part(c)
     prompt = f"""Przeczytaj ogłoszenie o pracę i wypełnij JSON. Niczego nie zgaduj — gdy czegoś nie ma, zostaw pusty tekst.
 
 Kandydatka SZUKA pracy w obszarach: {'; '.join(crit.get('chce', []))}.
 NIE CHCE pracy, w której znaczną część stanowi: {'; '.join(crit.get('nie_chce', []))}.
 Jej warunki (tylko do oceny, NIE przepisuj ich do pól oferty): {w.get('umowa', '')}, {w.get('etat', '')}, praca w promieniu {w.get('dojazd_km', 50)} km od Krakowa lub zdalna.
 Krótko o niej: {' '.join(p['tekst'] for p in f['profil'][:3])}
+{learned}
 
 TYTUŁ STRONY: {title}
 OGŁOSZENIE:
@@ -157,6 +163,7 @@ JSON:
   "social_media": true/false (czy główną częścią pracy jest prowadzenie mediów społecznościowych lub tworzenie treści na nie),
   "niedziele_wieczory": true/false (czy ogłoszenie wymaga regularnej pracy w niedziele albo wieczorami/nocą),
   "tylko_prowizja": true/false (czy wynagrodzenie jest wyłącznie prowizyjne, bez stałej podstawy),
+  "po_angielsku": true/false (czy ogłoszenie jest napisane po angielsku albo wymaga biegłego angielskiego w pracy lub rekrutacji),
   "adres": "adres miejsca pracy (ulica, miasto), jeśli podany",
   "wynagrodzenie": "widełki lub kwota wynagrodzenia dokładnie jak w ogłoszeniu (np. „6500–7500 zł brutto”), pusty tekst, gdy nie podano",
   "wymagania": ["punkty: czego pracodawca wymaga — PRZEPISANE DOSŁOWNIE z ogłoszenia, bez zmieniania słów"],
@@ -194,6 +201,7 @@ JSON:
         out["social_media"] = got.get("social_media") is True
         out["niedziele_wieczory"] = got.get("niedziele_wieczory") is True
         out["tylko_prowizja"] = got.get("tylko_prowizja") is True
+        out["po_angielsku"] = got.get("po_angielsku") is True
         if no_sales and got.get("sprzedaz") is True and not out["ostrzezenia"]:
             out["ostrzezenia"].append("Model ocenia, że znaczną część tej pracy stanowi sprzedaż albo obsługa klienta.")
         if out["rodo"] and (not R.is_consent(out["rodo"]) or R.plain(out["rodo"])[:40] not in R.plain(text)):

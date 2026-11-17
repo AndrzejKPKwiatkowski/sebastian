@@ -39,6 +39,20 @@
     <div class="actions"><button class="btn ghost">Zapisz</button></div></form>
 </div>
 
+<div class="card" id="nauka">
+  <h2>Czego szukam — nauka z Twoich uwag</h2>
+  <p class="small soft">Tu jest wszystko, czego Sebastian nauczył się z Twoich uwag do ofert. Zasady działają przy każdej nowej ofercie; usuń te, które przestały być aktualne.</p>
+  <form method="post" action="{{ url_for('prefs') }}"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="angielski">
+    <label class="check"><input type="checkbox" name="angielski" value="1" {{ 'checked' if prefs.angielski }} onchange="this.form.submit()"> Pomijaj oferty po angielsku i wymagające biegłego angielskiego</label></form>
+  <label>Pomijam oferty, które wymagają</label>
+  {% if prefs.unikaj %}<div class="chips">{% for u in prefs.unikaj %}<form method="post" action="{{ url_for('prefs') }}" class="chip"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="usun_unikaj"><input type="hidden" name="i" value="{{ loop.index0 }}">{{ u.haslo }} <button class="x" title="Usuń">×</button></form>{% endfor %}</div>{% else %}<p class="small soft">Na razie nic.</p>{% endif %}
+  <form method="post" action="{{ url_for('prefs') }}" class="row" style="grid-template-columns:3fr 1fr;margin-top:8px"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="dodaj_unikaj">
+    <input type="text" name="haslo" placeholder="Dodaj sama, np. AutoCAD"><button class="btn ghost">Dodaj</button></form>
+  {% if prefs.lubi %}<label>Szukam więcej ofert z</label><div class="chips">{% for u in prefs.lubi %}<form method="post" action="{{ url_for('prefs') }}" class="chip"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="usun_lubi"><input type="hidden" name="i" value="{{ loop.index0 }}">{{ u.haslo }} <button class="x" title="Usuń">×</button></form>{% endfor %}</div>{% endif %}
+  {% if prefs.zasady %}<label>Twoje uwagi, które biorę pod uwagę przy ocenie</label>
+  <ul class="small">{% for z in prefs.zasady %}<li><form method="post" action="{{ url_for('prefs') }}" style="display:inline"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="co" value="usun_zasade"><input type="hidden" name="i" value="{{ loop.index0 }}">{{ z.tekst }} <button class="x" title="Usuń">×</button></form></li>{% endfor %}</ul>{% endif %}
+</div>
+
 <div class="card">
   <h2>Podpis pod listem</h2>
   <p class="small soft">Zdjęcie odręcznego podpisu (najlepiej na białym tle, PNG). Bez niego pod listem jest samo imię i nazwisko.</p>

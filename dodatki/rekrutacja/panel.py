@@ -6,6 +6,7 @@ dane dodatku Rekrutacja.
 import contextlib, datetime as dt, hmac, json, os, random, re, secrets, subprocess, threading, time
 from pathlib import Path
 
+from . import preferencje as PF
 from . import cbop as CB, dokumenty as D, gemini as GM, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, owca as OW, poczta as P, rdzen as R, rozmowa as RZ, wiedza as Wd, zrodla as Z
 
 HERE = Path(__file__).resolve().parent
@@ -97,6 +98,12 @@ def prepare(ctx, aid):
                 warn = warn + ["Ogłoszenie wymaga pracy w niedziele albo wieczorami."]
             if info.get("tylko_prowizja") and st0.get("bez_prowizji"):
                 warn = warn + ["Wynagrodzenie wyłącznie prowizyjne."]
+            with R.db(ctx) as c:                                        # 2.16: zasady z uwag Agi do wcześniejszych ofert
+                pw, likes = PF.check(c, a["tresc"], info.get("po_angielsku"))
+            warn = warn + pw
+            if likes and a.get("ocena") is not None:
+                a["ocena"] = min(100, a["ocena"] + 8)
+                a["ocena_opis"] = (a["ocena_opis"] + f" Lubisz takie oferty ({', '.join(likes[:3])}).").strip()
         a["klucz"] = R.dedupe_key(a["firma"], a["stanowisko"])
         if "kanal" not in a or not a["kanal"]:
             a["kanal"] = "{}"
@@ -1099,10 +1106,48 @@ def make_app(ctx, hosts=None):
         maps = ("https://www.google.com/maps/dir/?api=1&travelmode=transit&origin=" + quote(ctx.settings().get("dojazd_skad") or "Kraków")
                 + "&destination=" + quote(where)) if where and km != -1 else ""
         fit = info.get("dopasowanie") or []
-        return render_template("aplikacja.html", a=a, hist=hist, msgs=msgs, tab="", kit=F.kit(R.load_facts(ctx), a) if a["status"] == "formularz" else [],
+        return render_template("aplikacja.html", a=a, hist=hist, msgs=msgs, tab="", TAGS=PF.TAGS, TAGN=PF.TAG_NAMES, feedback=PF.feedback_for(g.db, aid), kit=F.kit(R.load_facts(ctx), a) if a["status"] == "formularz" else [],
                                info=info, where=where, km=km, maps=maps, fit=fit,
                                fit_count={k: sum(1 for x in fit if x["ocena"] == k) for k in ("mam", "czesciowo", "brak")},
                                KINDS=A.KINDS, editable=a["status"] in ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz", "blad", "zatwierdzona", "odrzucona"))
+
+    @app.route("/aplikacja/<int:aid>/uwaga", methods=["POST"])
+    def feedback(aid):
+        a = dict(get(aid))
+        tags = request.form.getlist("tag")
+        text = request.form.get("uwaga", "")
+        if not tags and not text.strip():
+            flash("Zaznacz, co nie pasuje, albo napisz kilka słów.")
+            return redirect(url_for("detail", aid=aid) + "#uwaga")
+        learned = PF.learn(ctx, aid, tags, text)
+        flagged = PF.flag_waiting(ctx, skip=aid) if learned else 0
+        msg = "Dzięki, zapisałem uwagę." + (" Na przyszłość: " + "; ".join(learned) + "." if learned else "")
+        if flagged:
+            msg += f" Oznaczyłem też {flagged} czekające oferty, które tego nie spełniają."
+        if request.form.get("co") == "pomin" and a["status"] not in R.SENT + ("wysylanie",):
+            R.set_status(g.db, ctx, aid, "odrzucona")
+            flash(msg + " Ofertę pominąłem.")
+            return redirect(url_for("todo"))
+        flash(msg)
+        return redirect(url_for("detail", aid=aid) + "#uwaga")
+
+    @app.route("/preferencje", methods=["POST"])
+    def prefs():
+        p = PF.load(g.db)
+        what, i = request.form.get("co", ""), request.form.get("i", "")
+        if what == "angielski":
+            p["angielski"] = bool(request.form.get("angielski"))
+        elif what in ("usun_unikaj", "usun_lubi", "usun_zasade") and i.isdigit():
+            key = {"usun_unikaj": "unikaj", "usun_lubi": "lubi", "usun_zasade": "zasady"}[what]
+            if int(i) < len(p[key]):
+                p[key].pop(int(i))
+        elif what == "dodaj_unikaj" and request.form.get("haslo", "").strip():
+            h = request.form["haslo"].strip()[:40]
+            if R.plain(h) not in {R.plain(u["haslo"]) for u in p["unikaj"]}:
+                p["unikaj"].append({"haslo": h, "skad": 0, "kiedy": R.stamp(ctx)})
+        PF.save(g.db, p)
+        flash("Zapisane.")
+        return redirect(url_for("settings") + "#nauka")
 
     @app.route("/aplikacja/<int:aid>", methods=["POST"])
     def act(aid):
@@ -1432,7 +1477,7 @@ def make_app(ctx, hosts=None):
         sources = g.db.execute("SELECT * FROM zrodla ORDER BY id").fetchall()
         firms = g.db.execute("SELECT COUNT(*) n, SUM(uzyta) u FROM firmy").fetchone()
         keys = {k: bool(R.secret(ctx, k)) for k in ("adzuna_id", "adzuna_key", "jooble", "brave", "gemini")}
-        return render_template("ustawienia.html", f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)), has_signature=bool(signature_path(ctx)), writer=D.writer_model(ctx), cbop_wynik=R.meta_get(g.db, "cbop_wynik"), gemini_status=GM.status(ctx),
+        return render_template("ustawienia.html", prefs=PF.load(g.db), f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)), has_signature=bool(signature_path(ctx)), writer=D.writer_model(ctx), cbop_wynik=R.meta_get(g.db, "cbop_wynik"), gemini_status=GM.status(ctx),
                                sources=sources, firms=firms, keys=keys)
 
     return app

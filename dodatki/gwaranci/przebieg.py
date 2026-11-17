@@ -43,7 +43,7 @@ def after_booking(ctx, c, b):
                                      f"Cześć {g['imie_nazwisko'].split()[0]}! <b>{a['imie_nazwisko']}</b> prosi Cię o spotkanie gwaranckie. "
                                      "Termin pasuje do Twojej dostępności i jest wolny w Twoim kalendarzu.",
                                      _rows(c, b), [("Akceptuję", f"{url}/decyzja/{b['token']}/tak"), ("Nie mogę", f"{url}/decyzja/{b['token']}/nie")],
-                                     "Możesz też odpowiedzieć przyciskami Tak / Nie w zaproszeniu Google Calendar. Prosimy o odpowiedź w ciągu 24 h."),
+                                     "Możesz też odpowiedzieć przyciskami Tak / Nie w zaproszeniu w swoim kalendarzu. Prosimy o odpowiedź w ciągu 24 h."),
                     ics=R._event_ics(ctx, c, b), booking_id=b["id"])
     if err:
         errors.append(f"mail do gwaranta: {err}")

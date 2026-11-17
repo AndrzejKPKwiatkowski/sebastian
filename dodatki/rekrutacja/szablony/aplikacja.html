@@ -50,6 +50,25 @@
   </div>
   {% endif %}
 
+  {% if a.tresc %}
+  <div class="card" id="uwaga">
+    <h2>Twoja uwaga do tej oferty</h2>
+    <p class="small soft">Napisz, co Ci tu nie pasuje (albo co Ci się podoba). Sebastian zapamięta to i będzie lepiej wybierał kolejne oferty.</p>
+    <form method="post" action="{{ url_for('feedback', aid=a.id) }}"><input type="hidden" name="csrf" value="{{ csrf() }}">
+      <div class="chips">{% for k, label in TAGS %}<label class="chip"><input type="checkbox" name="tag" value="{{ k }}"> {{ label }}</label>{% endfor %}</div>
+      <textarea name="uwaga" rows="3" style="min-height:70px;margin-top:10px" placeholder="Własnymi słowami, np. „wymagają znajomości programów geodezyjnych, których nie znam”"></textarea>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn ghost" name="co" value="zapisz">Zapisz uwagę</button>
+        {% if a.status not in ('wyslana','wyslana_recznie','pytanie','zaproszenie','rozmowa','oferta','przyjeta','odmowa','odrzucona','wysylanie') %}
+        <button class="btn danger" name="co" value="pomin">Zapisz i pomiń tę ofertę</button>{% endif %}
+      </div>
+    </form>
+    {% if feedback %}<div class="small soft" style="margin-top:12px">{% for u in feedback %}
+      <p style="margin:6px 0">{{ u.kiedy|dzien }} — {% for t in u.tagi|loads %}{{ TAGN.get(t, t) }}{% if not loop.last %}, {% endif %}{% endfor %}{% if u.tekst %}{% if u.tagi|loads %} · {% endif %}„{{ u.tekst }}”{% endif %}
+      {% if u.nauka %}<br><span>Sebastian: {{ u.nauka }}</span>{% endif %}</p>{% endfor %}</div>{% endif %}
+  </div>
+  {% endif %}
+
   {% if kit %}
   <div class="card">
     <h2>Wyślij przez formularz</h2>

@@ -1726,6 +1726,107 @@ class GeminiLimits2131(Gemini2120):
 
 
 
+GEO = OFFER + "\nWymagania:\n- znajomość programów AutoCAD i C-Geo\n- uprawnienia geodezyjne mile widziane\n"
+EN = ("We are looking for an Office Assistant to join our team in Krakow. You will support the team with the daily tasks and you will be "
+      "responsible for the office. We offer a stable job and the opportunity to grow with our company. Your tasks will be to handle the "
+      "mail, to organize meetings and to be the first point of contact for our guests. We are a friendly team and we work with you on "
+      "your development. If you are interested, send your CV to jobs@example.com and we will contact you.")
+
+
+class Feedback216(RekrutacjaBase):
+    """2.16: uwagi Agi do ofert → zasady, które Sebastian stosuje przy kolejnych ofertach."""
+    def setUp(self):
+        super().setUp()
+        self.PF = importlib.import_module(self.mod.__name__ + ".preferencje")
+        self.ready()
+
+    def offer(self, tresc=GEO, **kw):
+        aid = self.add(tresc=tresc, status="do_zatwierdzenia", firma="GeoFirma", stanowisko="Asystentka biura geodezyjnego", **kw)
+        with self.R.db(self.ctx) as c:
+            c.execute("UPDATE aplikacje SET analiza=? WHERE id=?", (json.dumps({"wymagania": ["znajomość programów AutoCAD i C-Geo",
+                                                                                              "uprawnienia geodezyjne mile widziane"]}), aid))
+            c.commit()
+        return aid
+
+    def test_bez_modelu_programy_i_ostrzezenia(self):
+        aid = self.offer()
+        other = self.offer()
+        with patch.object(self.D, "write", return_value=None):
+            learned = self.PF.learn(self.ctx, aid, ["programy"], "")
+        self.assertTrue(any("AutoCAD" in x for x in learned), learned)
+        with self.R.db(self.ctx) as c:
+            p = self.PF.load(c)
+            self.assertIn("AutoCAD", [u["haslo"] for u in p["unikaj"]])
+            self.assertNotIn("Excel", [u["haslo"] for u in p["unikaj"]])
+            warn, _ = self.PF.check(c, "Szukamy osoby. Wymagana znajomość AutoCAD.")
+            self.assertTrue(warn and "AutoCAD" in warn[0])
+            self.assertEqual(self.PF.check(c, OFFER)[0], [])
+        self.assertEqual(self.PF.flag_waiting(self.ctx, skip=aid), 1)
+        self.assertIn("AutoCAD", self.row(other)["ostrzezenia"])
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(len(self.PF.feedback_for(c, aid)), 1)
+
+    def test_model_tylko_prawdziwe_hasla(self):
+        aid = self.offer()
+        fake = {"unikaj": ["C-Geo", "SolidWorks", "Excel"], "lubi": [], "angielski": False,
+                "zasada": "Nie szuka pracy wymagającej programów geodezyjnych."}
+        with patch.object(self.D, "write", return_value=fake):
+            self.PF.learn(self.ctx, aid, ["programy"], "nie znam programów geodezyjnych")
+        with self.R.db(self.ctx) as c:
+            p = self.PF.load(c)
+            self.assertEqual([u["haslo"] for u in p["unikaj"]], ["C-Geo"])          # SolidWorks nie ma w ofercie, Excel to podstawa
+            self.assertIn("geodezyjnych", self.PF.prompt_part(c))
+
+    def test_angielski(self):
+        aid = self.offer(tresc=EN)
+        with patch.object(self.D, "write", return_value=None):
+            learned = self.PF.learn(self.ctx, aid, ["angielski"], "boję się rekrutacji po angielsku")
+        self.assertTrue(any("angielsku" in x for x in learned))
+        self.assertTrue(self.PF.mostly_english(EN))
+        self.assertFalse(self.PF.mostly_english(OFFER))
+        self.assertTrue(self.PF.english_required("Wymagamy: język angielski na poziomie biegłym (C1)."))
+        with self.R.db(self.ctx) as c:
+            self.assertTrue(self.PF.check(c, EN)[0])
+            self.assertFalse(self.PF.check(c, OFFER)[0])
+
+    def test_nowa_oferta_auto_pominieta(self):
+        with self.R.db(self.ctx) as c:
+            self.PF.save(c, {"angielski": False, "unikaj": [{"haslo": "AutoCAD", "skad": 0, "kiedy": ""}], "lubi": [], "zasady": []})
+        aid = self.add(zrodlo="auto", tresc=GEO)
+        ans = {"firma": "Geo", "stanowisko": "Asystentka", "miasto": "Kraków", "ocena": 85}
+        with patch.object(W, "ask", lambda prompt, **k: json.dumps(ans) if "Przeczytaj" in prompt else self.model(prompt)):
+            self.assertEqual(self.P.prepare(self.ctx, aid), "odrzucona")
+        self.assertIn("prosiłaś", self.row(aid)["notatka"])
+        aid2 = self.add(zrodlo="oferta", tresc=GEO)                                   # dodana ręcznie — tylko ostrzeżenie
+        with patch.object(W, "ask", lambda prompt, **k: json.dumps(ans) if "Przeczytaj" in prompt else self.model(prompt)):
+            self.assertNotEqual(self.P.prepare(self.ctx, aid2), "odrzucona")
+        self.assertIn("AutoCAD", self.row(aid2)["ostrzezenia"])
+
+    def test_panel(self):
+        from werkzeug.security import generate_password_hash
+        aid = self.offer()
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        html = cl.get(f"/aplikacja/{aid}").get_data(as_text=True)
+        self.assertIn("Twoja uwaga do tej oferty", html)
+        self.assertIn("Wymaga programów lub uprawnień", html)
+        with patch.object(self.D, "write", return_value=None):
+            r = cl.post(f"/aplikacja/{aid}/uwaga", data={"csrf": "t", "tag": ["programy"], "uwaga": "nie znam AutoCAD", "co": "pomin"})
+        self.assertEqual(self.row(aid)["status"], "odrzucona")
+        html = cl.get("/ustawienia").get_data(as_text=True)
+        self.assertIn("Czego szukam", html)
+        self.assertIn("AutoCAD", html)
+        cl.post("/preferencje", data={"csrf": "t", "co": "usun_unikaj", "i": "0"})
+        with self.R.db(self.ctx) as c:
+            self.assertNotIn("AutoCAD", [u["haslo"] for u in self.PF.load(c)["unikaj"]][:1])
+
+
 class Conversation213(RekrutacjaBase):
     """2.13: Sebastian odpisuje Adze, pamięta rozmowę, wstrzymuje owcę i przypomina w umówionym terminie."""
     def setUp(self):

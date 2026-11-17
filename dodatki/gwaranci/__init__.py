@@ -1,4 +1,4 @@
-"""Dodatek Gwaranci (Sebastian 2.14.4) — spotkania gwaranckie Feniksów.
+"""Dodatek Gwaranci (Sebastian 2.15.1) — spotkania gwaranckie Feniksów.
 
 Gwarant dostaje osobisty link, podłącza kalendarz (tylko zajętość), zaznacza kiedy może i ile spotkań w tygodniu.
 Adept wybiera typ i godzinę, Sebastian dobiera gwaranta (bezpośredni menedżer → pośredni → ta sama struktura → inna)

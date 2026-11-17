@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block body %}
 <div class="narrow card" style="padding:28px">
   <h1>Cześć {{ me.imie_nazwisko.split()[0] }}! 👋</h1>
-  <p class="muted">Na ten adres będą przychodzić zaproszenia do kalendarza. Najlepiej podaj adres, którego używasz z Kalendarzem Google.</p>
+  <p class="muted">Na ten adres będą przychodzić zaproszenia do kalendarza. Najlepiej podaj adres, którego używasz ze swoim kalendarzem online (Google, Apple, Outlook — dowolnym).</p>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
   <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}">
     <label>E-mail</label><input name="email" type="email" required value="{{ me.email }}" autocomplete="email">

@@ -214,6 +214,25 @@ class Panel(Base):
         m = re.search(r'name="csrf" value="([^"]+)"', html)
         return m.group(1) if m else ""
 
+    def test_kalendarz_apple(self):
+        self.login("Wiktor Buk")
+        tok = self.csrf("/dane")
+        self.app.post("/dane", data={"csrf": tok, "email": "wiktor@example.com"})
+        html = self.app.get("/gwarant/start").get_data(as_text=True)
+        self.assertIn("Kalendarz Apple (iCloud)", html)
+        self.assertNotIn("Kalendarzem Google", self.app.get("/dane").get_data(as_text=True))
+        self.assertIn("Kalendarz publiczny", html)
+        tok = self.csrf("/gwarant/start")
+        r = self.app.post("/gwarant/start?k=1", data={"csrf": tok, "kalendarze": "https://www.icloud.com/calendar/share/#2~abc"})
+        self.assertIn("zaproszeniem dla konkretnej osoby", r.get_data(as_text=True))           # zły link — jasna podpowiedź
+        apple = "webcal://p42-caldav.icloud.com/published/2/MTIzNDU2Nzg5"
+        with patch.object(R, "fetch_ics", return_value=ics(("10:00", "11:00", "Klient"))) as f:
+            r = self.app.post("/gwarant/start?k=1", data={"csrf": tok, "kalendarze": "https://calendar.google.com/x/basic.ics\n" + apple})
+        self.assertIn("k=2", r.headers["Location"])
+        self.assertEqual(R.guarantor(self.c, "wiktor-buk")["kalendarze"],
+                         ["https://calendar.google.com/x/basic.ics", "https://p42-caldav.icloud.com/published/2/MTIzNDU2Nzg5"])
+        self.assertIn("https://p42-caldav.icloud.com/published/2/MTIzNDU2Nzg5", [c.args[0] for c in f.call_args_list])
+
     def test_onboarding_gwaranta(self):
         self.login("Wiktor Buk")
         self.assertIn("/dane", self.app.get("/").headers["Location"])

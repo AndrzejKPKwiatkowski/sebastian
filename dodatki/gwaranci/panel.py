@@ -175,15 +175,18 @@ def make_app(ctx):
                             error=f"Nie udało się odczytać wydarzenia z cal.com ({err}). Sprawdź, czy link otwiera Twoją stronę rezerwacji.", info="")
             return redirect(url_for("onboarding", k="2", n=n))
         if request.method == "POST" and step == "1":
-            urls = [R.clean_calendar_url(u) for u in request.form.get("kalendarze", "").splitlines() if u.strip()]
-            urls = [u for u in urls if u][:4]
-            if not urls:
-                return page("onboarding.html", step="1", gw=gw, error="Wklej link zaczynający się od https:// (Tajny adres w formacie iCal).", info="")
+            raw = [u for u in request.form.get("kalendarze", "").splitlines() if u.strip()]
+            hint = next((R.calendar_link_problem(u) for u in raw if R.calendar_link_problem(u)), "")
+            urls = [u for u in (R.clean_calendar_url(u) for u in raw) if u][:4]
+            if hint or not urls:
+                return page("onboarding.html", step="1", gw=gw, info="",
+                            error=hint or "Wklej link zaczynający się od https:// albo webcal:// (Google: „Tajny adres w formacie iCal”, Apple: link kalendarza publicznego).")
             R.save_guarantor(g.db, g.me["id"], kalendarze=urls, calcom="")
             n, err = R.refresh_busy(g.db, g.me["id"], when=now())
             if err and not n:
                 return page("onboarding.html", step="1", gw=R.guarantor(g.db, g.me["id"]),
-                            error=f"Nie udało się odczytać kalendarza: {err}. Sprawdź, czy to „Tajny adres w formacie iCal”.", info="")
+                            error=f"Nie udało się odczytać kalendarza: {err}. Sprawdź, czy to „Tajny adres w formacie iCal” (Google) "
+                                  "albo link kalendarza publicznego (Apple).", info="")
             return redirect(url_for("onboarding", k="2", n=n))
         if request.method == "POST" and step == "2":
             avail = []
