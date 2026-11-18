@@ -328,6 +328,25 @@ def full_name(f):
     return f"{f['osoba'].get('imie', '')} {f['osoba'].get('nazwisko', '')}".strip()
 
 
+def tenure(od, do, today=None):
+    """„2 lata 8 mies.” z dat MM.RRRR (do „obecnie” = dziś); pusty tekst, gdy dat brak."""
+    import datetime as _dt
+    def ym(t, now):
+        t = plain(t or "")
+        if any(w in t for w in ("obecnie", "nadal", "teraz", "present")):
+            return now.year, now.month
+        m = re.search(r"(\d{1,2})[./-](\d{4})", t)
+        return (int(m.group(2)), int(m.group(1))) if m else None
+    now = today or _dt.date.today()
+    a, b = ym(od, now), ym(do, now)
+    if not a or not b or b < a:
+        return ""
+    n = (b[0] - a[0]) * 12 + b[1] - a[1] + 1
+    y, mth = divmod(n, 12)
+    yw = "" if not y else f"{y} rok" if y == 1 else f"{y} lata" if y % 10 in (2, 3, 4) and y % 100 not in (12, 13, 14) else f"{y} lat"
+    return " ".join(x for x in (yw, f"{mth} mies." if mth else "") if x)
+
+
 def facts_brief(f, ids=True):
     """Fakty jako tekst dla modelu (z numerami) i dla kontrolera prawdy (bez)."""
     tag = (lambda x: f"[{x['id']}] ") if ids else (lambda x: "")
@@ -338,7 +357,8 @@ def facts_brief(f, ids=True):
     out.append("DOŚWIADCZENIE:")
     for j in f["doswiadczenie"]:
         out.append(f"  {tag(j)}{j['stanowisko']} — {j.get('firma', '')}, {j.get('miejsce', '')} ({j.get('od', '')} – {j.get('do', '')})"
-                   + (" (opcjonalne)" if j.get("opcjonalne") and ids else ""))
+                   + (" (opcjonalne)" if j.get("opcjonalne") and ids else "")
+                   + (f" — staż: {tenure(j.get('od'), j.get('do'))}" if not ids and tenure(j.get("od"), j.get("do")) else ""))
         out += [f"      {tag(p)}{p['tekst']}" for p in j["punkty"]]
         if not ids and j.get("szczegoly"):                                   # dłuższe opisy — do listów i opisu, nie do CV
             out += [f"      · {t}" for t in j["szczegoly"]]

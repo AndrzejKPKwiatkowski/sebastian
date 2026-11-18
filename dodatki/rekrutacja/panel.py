@@ -7,6 +7,7 @@ import contextlib, datetime as dt, hmac, json, os, random, re, secrets, subproce
 from pathlib import Path
 
 from . import preferencje as PF
+from . import dojazd as DJ
 from . import cbop as CB, dokumenty as D, gemini as GM, formularze as F, kontakty as K, odpowiedzi as A, oferty as O, owca as OW, poczta as P, rdzen as R, rozmowa as RZ, wiedza as Wd, zrodla as Z
 
 HERE = Path(__file__).resolve().parent
@@ -89,7 +90,11 @@ def prepare(ctx, aid):
                 a[k] = a[k].strip() or info[k]                          # to, co wpisała Aga, ma pierwszeństwo
             a["email"] = a["email"].strip() or info["email"] or (found_mails[0] if found_mails and a["zrodlo"] != "auto" else "")
             a["ocena"], a["ocena_opis"], a["rodo"] = info["ocena"], info["uzasadnienie"], info["rodo"]
-            a["analiza"] = json.dumps({k: info.get(k) for k in ("adres", "wynagrodzenie", "wymagania", "obowiazki", "oferujemy")}, ensure_ascii=False)
+            extra = {"ocena_modelu": info["ocena"]}
+            with contextlib.suppress(Exception):                        # 2.19: czas dojazdu z domu Agi
+                extra["dojazd"] = DJ.compute(ctx, info, a)
+            a["analiza"] = json.dumps(dict({k: info.get(k) for k in ("adres", "wynagrodzenie", "wymagania", "obowiazki", "oferujemy")}, **extra),
+                                      ensure_ascii=False)
             warn = info["ostrzezenia"]
             st0 = ctx.settings()
             if info.get("social_media") and not _ok_social_f(f):
@@ -122,12 +127,15 @@ def prepare(ctx, aid):
                 why = warn[0].rstrip(".").lower()
             elif not R.in_area(a["miasto"], int(f["warunki"].get("dojazd_km") or 50)):
                 why = f"za daleko ({a['miasto']})"
+            elif DJ.too_far(ctx, analysis(a).get("dojazd"), O.netto_max(analysis(a).get("wynagrodzenie"))):
+                why = DJ.too_far(ctx, analysis(a).get("dojazd"), O.netto_max(analysis(a).get("wynagrodzenie")))
             elif not a["tresc"].strip():
                 why = "nie udało się odczytać ogłoszenia"
             if why:
                 with R.db(ctx) as c:
                     R.set_status(c, ctx, aid, "odrzucona", firma=a["firma"], stanowisko=a["stanowisko"], miasto=a["miasto"], tresc=a["tresc"],
-                                 klucz=a["klucz"], ocena=a.get("ocena"), ocena_opis=a.get("ocena_opis") or "", notatka="Pominięta automatycznie: " + why)
+                                 klucz=a["klucz"], ocena=a.get("ocena"), ocena_opis=a.get("ocena_opis") or "", notatka="Pominięta automatycznie: " + why,
+                                 analiza=a.get("analiza") or "")
                 return "odrzucona"
         if not a["firma"] and not a["stanowisko"]:
             notes.append("Nie udało się ustalić firmy ani stanowiska. Uzupełnij je, a przygotuję dokumenty.")
@@ -148,8 +156,16 @@ def prepare(ctx, aid):
         profile = D.tailored_profile(ctx, f, a)
         if profile:
             selection.update(profil_tekst=profile, profil_zrodlo="model", profil_model=profile)
-        a["analiza"] = json.dumps(dict(analysis(a), dopasowanie=D.match_report(ctx, f, a, analysis(a).get("wymagania")), v=2,
+        fit_now = D.match_report(ctx, f, a, analysis(a).get("wymagania"))
+        parts = D.score_parts(analysis(a).get("ocena_modelu", a.get("ocena")), fit_now, a.get("ocena"))
+        if parts:
+            a["ocena"] = parts["razem"]
+        a["analiza"] = json.dumps(dict(analysis(a), dopasowanie=fit_now, v=2, ocena_skladniki=parts or {}, ocena_v=1,
                                        list_v=3 if GM.available(ctx) else 2), ensure_ascii=False)
+        far = DJ.too_far(ctx, analysis(a).get("dojazd"), O.netto_max(analysis(a).get("wynagrodzenie")))
+        if far and a["zrodlo"] != "auto":
+            warn = warn + [far[:1].upper() + far[1:] + " — dłużej, niż chcesz (wyjątek tylko przy pensji powyżej "
+                           f"{int(float(ctx.settings().get('dojazd_wyjatek_netto', 6500)))} zł netto)."]
         letter, mail, by_model = D.compose(ctx, f, a, selection)
         notes += D.check(ctx, f, a, letter + ("\n\nOpis w CV: " + profile if profile else ""), mail, by_model=by_model)
         if not by_model:
@@ -408,17 +424,19 @@ def work_once(ctx):
     busy = False
     with contextlib.suppress(Exception):
         busy = Wd.work(ctx)                                           # import wiedzy ma pierwszeństwo — Aga czeka na wynik
-    with R.db(ctx) as c:
-        row = None if busy else c.execute("SELECT id FROM aplikacje WHERE status='nowa' AND zrodlo NOT IN ('auto','spontaniczna') ORDER BY id LIMIT 1").fetchone()
-        if not row and not busy and prepared_today < int(target * 1.3):
-            row = c.execute("SELECT id FROM aplikacje WHERE status='nowa' ORDER BY id LIMIT 1").fetchone()
+    row = None
+    if not busy:
+        with contextlib.suppress(Exception):
+            estimate_pay(ctx)                                         # 2.19.2: najpierw oferty, na których Aga zarobi więcej
+        row = next_to_prepare(ctx, manual_only=prepared_today >= int(target * 1.3))
     if row:
         prepare(ctx, row["id"])
     with R.db(ctx) as c:
         manual = time.time() - float(R.meta_get(c, "gemini_reczne", "0") or 0) < 300   # trwa polecenie „przepisz” — nie dzielę limitu
     if not busy and not manual:
         with contextlib.suppress(Exception):                          # czekające listy sprzed Gemini piszę na nowo (po jednym na obrót)
-            recheck_profile(ctx) or refresh_letter(ctx) or (None if row else (refresh_match(ctx) or refresh_details(ctx)))
+            recheck_profile(ctx) or refresh_letter(ctx) or (None if row else (refresh_match(ctx) or refresh_details(ctx)
+                                                                               or refresh_score_commute(ctx)))
     send_one(ctx)
     with contextlib.suppress(Exception):
         CB.run(ctx)                                                   # CBOP: raz na dobę wieczorem, gdy jest nazwa partnera
@@ -600,6 +618,104 @@ def refresh_details(ctx):
     return None
 
 
+def pay_key(ctx, a):
+    """Kolejność przygotowania: najpierw umowa o pracę (albo bez podanej umowy) z co najmniej 5000 zł na rękę,
+    od najwyższej kwoty; potem pozostałe z podaną pensją (od najwyższej); na końcu bez pensji — w kolejności dodania."""
+    info = analysis(a)
+    est = info.get("pensja_wstepna") or {}
+    net = est.get("netto_do")
+    if not net:
+        return (2, 0, a["id"])
+    floor = int(float(ctx.settings().get("priorytet_netto", 5000)))
+    top = est.get("umowa") in ("uop", "") and net >= floor
+    return (0 if top else 1, -net, a["id"])
+
+
+PAY_FETCH = True                                                     # w testach wyłączone — bez internetu
+
+
+def estimate_pay(ctx, budget=90.0, limit=40):
+    """Dla nowych ofert sprawdzam pensję przed przygotowaniem (bez modelu): z treści albo ze strony ogłoszenia."""
+    start = time.time()
+    with R.db(ctx) as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM aplikacje WHERE status='nowa' AND (analiza='' OR analiza NOT LIKE '%pensja_wstepna%') "
+                                           "ORDER BY id LIMIT ?", (limit,))]
+    for a in rows:
+        if time.time() - start > budget:
+            break
+        text = a.get("tresc") or ""
+        if len(text) < 300 and a.get("url") and PAY_FETCH:
+            with contextlib.suppress(Exception):
+                text = O.fetch(a["url"], deny=Z.blocked if a["zrodlo"] == "auto" else None)[0]
+        pay = O.salary(text)
+        est = O.pay_info(pay, text) or {}
+        est = {"netto_do": est.get("netto_do"), "umowa": est.get("umowa", O.contract(text)), "kwota": pay}
+        info = analysis(a)
+        info["pensja_wstepna"] = est
+        with R.db(ctx) as c:
+            c.execute("UPDATE aplikacje SET analiza=? WHERE id=? AND status='nowa'", (json.dumps(info, ensure_ascii=False), a["id"]))
+            c.commit()
+
+
+def next_to_prepare(ctx, manual_only=False):
+    """Następna oferta do przygotowania: najpierw dodane przez Agę, w każdej grupie od najlepiej płatnej."""
+    with R.db(ctx) as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM aplikacje WHERE status='nowa'")]
+    manual = [a for a in rows if a["zrodlo"] not in ("auto", "spontaniczna")]
+    pool = manual or ([] if manual_only else rows)
+    if not pool:
+        return None
+    best = min(pool, key=lambda a: pay_key(ctx, a))
+    return {"id": best["id"]}
+
+
+def refresh_score_commute(ctx):
+    """2.19: czekające oferty — procent dopasowania liczony jawnie (wszystkie naraz) i czas dojazdu (jedna na obrót).
+    Oferty znalezione automatycznie, do których dojazd jest za długi, odkładam (chyba że pensja powyżej progu)."""
+    changed = None
+    with R.db(ctx) as c:
+        rows = [dict(r) for r in c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(R.OPEN))}) AND analiza<>'' "
+                                           "AND analiza NOT LIKE '%\"ocena_v\": 1%'", R.OPEN)]
+        for a in rows:
+            info = analysis(a)
+            model = info.get("ocena_modelu", a.get("ocena"))
+            parts = D.score_parts(model, info.get("dopasowanie") or [], a.get("ocena"))
+            info.update(ocena_modelu=model, ocena_skladniki=parts or {}, ocena_v=1)
+            c.execute("UPDATE aplikacje SET analiza=?, ocena=? WHERE id=?",
+                      (json.dumps(info, ensure_ascii=False), parts["razem"] if parts else a.get("ocena"), a["id"]))
+            changed = a["id"]
+        c.commit()
+        home = (ctx.settings().get("dojazd_skad") or "").strip()
+        wait = ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz", "zatwierdzona")
+        todo = [dict(r) for r in c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(wait))}) AND length(tresc)>200 "
+                                           "ORDER BY id DESC LIMIT 200", wait)]
+    for a in todo:
+        info = analysis(a)
+        d = info.get("dojazd") or {}
+        if d.get("v") == DJ.WERSJA and d.get("skad") == home and not d.get("blad"):
+            continue
+        if d.get("blad") and d.get("proba") and time.time() - float(d["proba"]) < 3600:
+            continue
+        d = DJ.compute(ctx, info, a)
+        if d.get("blad"):
+            d["proba"] = time.time()
+        info["dojazd"] = d
+        far = DJ.too_far(ctx, d, O.netto_max(info.get("wynagrodzenie")))
+        with R.db(ctx) as c:
+            c.execute("UPDATE aplikacje SET analiza=? WHERE id=?", (json.dumps(info, ensure_ascii=False), a["id"]))
+            if far and a["zrodlo"] == "auto" and a["status"] in ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz"):
+                R.set_status(c, ctx, a["id"], "odrzucona", notatka="Pominięta automatycznie: " + far)
+                R.note(c, ctx, a["id"], "odłożona: " + far)
+            elif far:
+                warn = json.loads(a.get("ostrzezenia") or "[]")
+                text = far[:1].upper() + far[1:] + " — dłużej, niż chcesz."
+                if not any(w.startswith(text[:15]) for w in warn):
+                    c.execute("UPDATE aplikacje SET ostrzezenia=? WHERE id=?", (json.dumps(warn + [text], ensure_ascii=False), a["id"]))
+            c.commit()
+        return a["id"]
+    return changed
+
+
 def refresh_match(ctx):
     """Jedna czekająca aplikacja ze starym opisem dopasowania → nowe, czytelne wyjaśnienia (2.8.5)."""
     with R.db(ctx) as c:
@@ -760,10 +876,24 @@ def make_app(ctx, hosts=None):
         from markupsafe import Markup, escape
         u = str(url or "")
         ua = request.headers.get("User-Agent", "") if request else ""
-        if ctx.settings().get("edge", True) and "Windows" in ua and u.lower().startswith(("http://", "https://")):
+        if ctx.settings().get("edge", True) and "Windows" in ua and " Edg/" not in ua and u.lower().startswith(("http://", "https://")):
             return Markup(f'href="microsoft-edge:{escape(u)}"')
         return Markup(f'href="{escape(u)}" target="_blank" rel="noopener noreferrer"')
     app.jinja_env.globals["ext"] = ext
+    app.jinja_env.globals["na_reke"] = O.netto_text
+
+    @app.route("/edge.reg")
+    def edge_reg():
+        """2.19: plik dla Windows — Chrome otwiera linki microsoft-edge: z tego panelu bez pytania (zasada AutoLaunchProtocolsFromOrigins)."""
+        origin = f"{request.scheme}://{request.host}"
+        if not re.fullmatch(r"https?://[A-Za-z0-9.\-]+(:\d+)?", origin):
+            abort(400)
+        rule = json.dumps([{"allowed_origins": [origin], "protocol": "microsoft-edge"}]).replace("\\", "\\\\").replace('"', '\\"')
+        body = ("Windows Registry Editor Version 5.00\r\n\r\n[HKEY_CURRENT_USER\\Software\\Policies\\Google\\Chrome]\r\n"
+                f'"AutoLaunchProtocolsFromOrigins"="{rule}"\r\n')
+        from flask import Response
+        return Response(b"\xff\xfe" + body.encode("utf-16-le"), mimetype="application/octet-stream",
+                        headers={"Content-Disposition": "attachment; filename=Sebastian_Edge_bez_pytania.reg"})
 
     @app.context_processor
     def theme():
@@ -1187,7 +1317,10 @@ def make_app(ctx, hosts=None):
         maps = ("https://www.google.com/maps/dir/?api=1&travelmode=transit&origin=" + quote(ctx.settings().get("dojazd_skad") or "Kraków")
                 + "&destination=" + quote(where)) if where and km != -1 else ""
         fit = info.get("dopasowanie") or []
-        return render_template("aplikacja.html", a=a, hist=hist, msgs=msgs, tab="", TAGS=PF.TAGS, TAGN=PF.TAG_NAMES, feedback=PF.feedback_for(g.db, aid),
+        dj = info.get("dojazd") or {}
+        if dj.get("cel") and dj.get("skad") and km != -1:
+            maps = ("https://www.google.com/maps/dir/?api=1&travelmode=transit&origin=" + quote(dj["skad"]) + "&destination=" + quote(dj["cel"]))
+        return render_template("aplikacja.html", dj=dj, DJL=DJ.label, parts=info.get("ocena_skladniki") or {}, blocks=O.pretty(a["tresc"] or "", a["stanowisko"] or ""), a=a, hist=hist, msgs=msgs, tab="", TAGS=PF.TAGS, TAGN=PF.TAG_NAMES, feedback=PF.feedback_for(g.db, aid),
                                saved=request.args.get("zapisano") == "1", kit=F.kit(R.load_facts(ctx), a) if a["status"] == "formularz" else [],
                                info=info, where=where, km=km, maps=maps, fit=fit,
                                fit_count={k: sum(1 for x in fit if x["ocena"] == k) for k in ("mam", "czesciowo", "brak")},
@@ -1493,6 +1626,12 @@ def make_app(ctx, hosts=None):
                 for key in ("dojazd_skad", "model_pisania"):
                     if key in request.form:
                         ctx.set_setting(key, re.sub(r"[\r\n<>]", " ", request.form.get(key, "")).strip()[:120])
+                if request.form.get("dojazd_tryb") in ("lub", "i"):
+                    ctx.set_setting("dojazd_tryb", request.form["dojazd_tryb"])
+                for key, lo, hi in (("priorytet_netto", 0, 100000), ("dojazd_max_komunikacja", 10, 240), ("dojazd_max_samochod", 10, 240), ("dojazd_wyjatek_netto", 0, 100000)):
+                    with contextlib.suppress(ValueError, TypeError):
+                        if request.form.get(key, "").strip():
+                            ctx.set_setting(key, max(lo, min(hi, int(re.sub(r"\D", "", request.form[key]) or 0))))
             elif what == "podpis":
                 up = request.files.get("podpis")
                 for old in ("podpis.png", "podpis.jpg"):

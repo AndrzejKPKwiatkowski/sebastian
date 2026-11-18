@@ -215,14 +215,18 @@ def tailored_profile(ctx, f, app):
         return ""
     prompt = f"""Napisz opis do sekcji „Profil zawodowy” w CV kandydatki, dopasowany do tej oferty. Po polsku, w formach żeńskich.
 
-ŻELAZNA ZASADA: wyłącznie to, co jest w FAKTACH. Żadnych nowych umiejętności, narzędzi, lat doświadczenia, certyfikatów ani liczb spoza FAKTÓW.
+ŻELAZNA ZASADA: wyłącznie to, co jest w FAKTACH. Żadnych nowych umiejętności, narzędzi, certyfikatów ani liczb spoza FAKTÓW.
+Długość doświadczenia tylko wyliczona ze „stażu” przy stanowiskach (np. staż 2 lata 8 mies. → „blisko trzyletnim doświadczeniem”).
 Wybierz z FAKTÓW to, co najbardziej odpowiada wymaganiom oferty, i opisz to SŁOWAMI Z FAKTÓW.
 Z ogłoszenia NIE przenoś nazw stanowisk, narzędzi, systemów, metod, obszarów ani zadań, których nie ma w FAKTACH
 (jeśli oferta wymaga np. CMS, mailingu, Agile, a w FAKTACH tego nie ma — po prostu o tym nie pisz).
 Jeśli w FAKTACH jest liczba, która pasuje do oferty (np. ile dokumentów miesięcznie), możesz ją podać dokładnie tak jak w faktach.
 
-FORMA: 3–5 zdań, razem 55–95 słów, jak w OPISACH PROFILU NAPISANYCH PRZEZ KANDYDATKĘ (to wzór stylu i słownictwa):
-„Specjalistka z doświadczeniem w …”, „Posiadam praktykę w …”, „Wyróżniam się …”, „Sprawnie …/Łączę …”.
+FORMA: 4–5 zdań, razem 60–100 słów, jak w OPISACH PROFILU NAPISANYCH PRZEZ KANDYDATKĘ (to wzór stylu i słownictwa).
+PIERWSZE zdanie bez czasownika w 1. osobie, o niej jako o specjalistce: „Specjalistka z (blisko trzyletnim) doświadczeniem w …”.
+KAŻDE KOLEJNE zdanie w 1. osobie: „Posiadam praktykę w …”, „Wyróżniam się …”, „Potrafię …”, „Sprawnie …”, „Łączę …”,
+a ostatnie może mówić, jak wykorzysta doświadczenie u tego pracodawcy: „Chętnie wykorzystam swoje doświadczenie, aby …”
+(cel wzięty z OBOWIĄZKÓW oferty, ale opisany słowami z FAKTÓW).
 Wybierz ze wzorów i faktów to, co najlepiej odpowiada tej ofercie, i ułóż na nowo pod nią (nie kopiuj całego wzoru).
 Jeśli pasuje do oferty, dodaj JEDNĄ konkretną liczbę z FAKTÓW (np. ponad 100 planów finansowych, ok. 80 historii chorób miesięcznie,
 10 transmisji i 8 wywiadów, 4 awanse) — dokładnie tak, jak w faktach.
@@ -245,8 +249,8 @@ Zwróć JSON {{"profil": "..."}}"""
             if 15 <= words <= 120 and not rule_check(f, app, text) and not bad:
                 return text
             if bad:
-                feedback = ("\n\nPOPRAWKA: poprzednia wersja zawierała słowa spoza FAKTÓW: " + ", ".join(bad[:8]) +
-                            ". Napisz od nowa wyłącznie z FAKTÓW.")
+                feedback = ("\n\nPOPRAWKA: poprzednia wersja miała błędy: " + ", ".join(bad[:8]) +
+                            ". Napisz od nowa wyłącznie z FAKTÓW; od drugiego zdania w 1. osobie.")
     return ""
 
 
@@ -258,7 +262,7 @@ pracowalam rowniez takze ktore ktorych ktora swoich swoje swojej bardzo ponad mi
 codziennej codziennie biezacej biezaca sprawnie sprawna skutecznie skuteczna samodzielnie samodzielna dokladnie dokladnosc rzetelnie
 rzetelna odpowiedzialnie odpowiedzialna zaangazowanie zaangazowana komunikatywna komunikacja komunikacji kontakt kontaktow wsparcie
 wspieralam wspierajac roznych roznymi wielu kilku dobrze dobra posiadam praktyke praktyka praktyki wyrozniam lacze laczac
-potrafie chetnie""".split())
+potrafie chetnie wykorzystam wykorzystac aby blisko rocznym dwuletnim trzyletnim czteroletnim pieciioletnim""".split())
 
 
 def vocab_check(f, app, text):
@@ -279,8 +283,9 @@ def vocab_check(f, app, text):
     for w in re.findall(r"\b[A-Z]{2,}[A-Za-z0-9]*\b", text or ""):  # skróty: CMS, CRM, SAP…
         if R.plain(w)[:6] not in facts and w not in bad:
             bad.append(w)
-    if re.search(r"(^|[.!?]\s+)[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+uje\b", text or ""):
-        bad.append("3. osoba („koordynuje”)")
+    later = re.split(r"(?<=[.!?])\s+", (text or "").strip())[1:]        # 1. zdanie może być o „specjalistce”, kolejne w 1. osobie
+    if any(re.match(r"[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+uje\b|(Posiada|Wyróżnia się|Potrafi|Łączy|Dba|Ma)\b", s) for s in later):
+        bad.append("3. osoba w kolejnych zdaniach („koordynuje”, „posiada”) — od 2. zdania pisz „posiadam”, „wyróżniam się”")
     return bad + (unknown if len(unknown) >= 4 else [])
 
 
@@ -561,6 +566,22 @@ def clean_reason(text, requirement=""):
     t = re.sub(r"['\"„”‘’]", "", t)
     t = re.sub(r"\s{2,}", " ", t).strip(" ;:,.")
     return (t[:1].upper() + t[1:] + ".") if t else ""
+
+
+def score_parts(model_score, fit, shown=None):
+    """2.19: procent dopasowania liczony jawnie — 60% wymagania z ogłoszenia (✓ = 1, ◐ = ½, ✗ = 0),
+    40% zgodność z tym, czego Aga szuka (ocena modelu, z premią za oferty, które lubi). None, gdy brak listy wymagań."""
+    if not fit:
+        return None
+    n = len(fit)
+    have = sum(1 for x in fit if x["ocena"] == "mam") + 0.5 * sum(1 for x in fit if x["ocena"] == "czesciowo")
+    req = round(100 * have / n)
+    wish = model_score if isinstance(model_score, (int, float)) else (shown if isinstance(shown, (int, float)) else req)
+    if isinstance(shown, (int, float)) and isinstance(model_score, (int, float)) and shown > model_score:
+        wish = shown                                                # premia „lubisz takie oferty”
+    wish = max(0, min(100, int(wish)))
+    return {"razem": round(0.6 * req + 0.4 * wish), "wymagania": req, "oczekiwania": wish,
+            "mam": sum(1 for x in fit if x["ocena"] == "mam"), "czesciowo": sum(1 for x in fit if x["ocena"] == "czesciowo"), "n": n}
 
 
 def match_report(ctx, f, app, wymagania):

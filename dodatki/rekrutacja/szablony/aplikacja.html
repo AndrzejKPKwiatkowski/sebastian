@@ -32,13 +32,32 @@
   <div class="card">
     <h2>Oferta</h2>
     <div class="row">
-      <div><label>Wynagrodzenie</label><p>{{ info.wynagrodzenie or 'nie podano w ogłoszeniu' }}</p></div>
-      <div><label>Dojazd</label><p>{{ where or 'miejsce nie podane' }}{% if km == -1 %} · praca zdalna{% elif km %} · ok. {{ km }} km od Krakowa{% endif %}
-        {% if maps %}<br><a class="small" href="{{ maps }}" target="_blank" rel="noopener noreferrer">Sprawdź dojazd komunikacją ↗</a>{% endif %}</p></div>
+      <div><label>Wynagrodzenie</label><p>{{ info.wynagrodzenie or 'nie podano w ogłoszeniu' }}{% set nr = na_reke(info.wynagrodzenie, a.tresc) if info.wynagrodzenie else '' %}{% if nr %}<br><span class="small soft">{{ nr }}</span>{% endif %}</p></div>
+      <div><label>Miejsce pracy</label><p>{{ where or 'miejsce nie podane' }}{% if km == -1 %} · praca zdalna{% elif km %} · ok. {{ km }} km od Krakowa{% endif %}</p></div>
+    </div>
+    <div class="commute">
+      <h3>Czas dojazdu</h3>
+      {% if dj.samochod is defined or dj.komunikacja is defined %}
+      <div class="from"><span class="pin">⌖</span><div><span class="small soft">Z domu do {{ 'miejsca pracy' if dj.dokladny else 'miejscowości (adres w ogłoszeniu niedokładny)' }}</span><br><b>{{ dj.cel }}</b></div></div>
+      <div class="modes">
+        <div class="mode"><svg viewBox="0 0 24 24"><path d="M5 11l1.6-4.2A2 2 0 0 1 8.5 5.5h7a2 2 0 0 1 1.9 1.3L19 11M4 11h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1zM6.5 17v1.5M17.5 17v1.5"/><circle cx="7" cy="14" r="1"/><circle cx="17" cy="14" r="1"/></svg><span>Samochód</span><b>{{ DJL(dj.samochod) }}</b></div>
+        <div class="mode"><svg viewBox="0 0 24 24"><rect x="6" y="3.5" width="12" height="14" rx="3"/><path d="M6 11h12M9.5 21l1.5-3.5M14.5 21L13 17.5M10 3.5l-1-1.5M14 3.5l1-1.5"/><circle cx="9" cy="14.5" r=".8"/><circle cx="15" cy="14.5" r=".8"/></svg><span>Komunikacja</span><b>{{ DJL(dj.komunikacja) }}</b></div>
+        <div class="mode"><svg viewBox="0 0 24 24"><circle cx="5.5" cy="16" r="3.5"/><circle cx="18.5" cy="16" r="3.5"/><path d="M5.5 16l4-7h6l3 7M9.5 9L12 16h1.5M14 6h2.5"/></svg><span>Rower</span><b>{{ DJL(dj.rower) }}</b></div>
+        <div class="mode"><svg viewBox="0 0 24 24"><circle cx="13" cy="4" r="1.8"/><path d="M10 21l2-6 2.5 2.5V21M12 15l1-5.5-3.5 1.5L8 14M13 9.5l2 3 3 1"/></svg><span>Pieszo</span><b>{{ DJL(dj.pieszo) }}</b></div>
+      </div>
+      <p class="small soft" style="margin:8px 0 0">Komunikacja: przyjazd na 8:00 w dzień roboczy. Samochód bez korków.
+        {% if maps %}<a href="{{ maps }}" target="_blank" rel="noopener noreferrer">Trasa w Mapach Google ↗</a> · {% endif %}dane: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap</a>, <a href="https://transitous.org/sources/" target="_blank" rel="noopener noreferrer">Transitous</a></p>
+      {% elif dj.brak or dj.blad %}<p class="small soft">{{ (dj.brak or dj.blad)|capitalize }}.{% if maps %} <a href="{{ maps }}" target="_blank" rel="noopener noreferrer">Sprawdź w Mapach Google ↗</a>{% endif %}</p>
+      {% else %}<p class="small soft">Liczę czas dojazdu — pojawi się za kilka minut.</p>{% endif %}
     </div>
     {% if fit %}
     <label>Co się zgadza z ofertą{% if a.ocena is not none %} · dopasowanie {{ a.ocena }}%{% endif %}</label>
     <p class="small soft">masz: {{ fit_count.mam }} · częściowo: {{ fit_count.czesciowo }} · brakuje: {{ fit_count.brak }}</p>
+    {% if parts.razem is defined %}<div class="scorebox">
+      <div><span>Wymagania</span><b>{{ parts.wymagania }}%</b><i style="width:{{ parts.wymagania }}%"></i></div>
+      <div><span>To, czego szukasz</span><b>{{ parts.oczekiwania }}%</b><i style="width:{{ parts.oczekiwania }}%"></i></div>
+      <p class="small soft">Dopasowanie {{ parts.razem }}% = 60% wymagania (✓ liczy się w całości, ◐ w połowie) + 40% to, na ile rodzaj pracy i warunki
+        pasują do tego, czego szukasz.</p></div>{% endif %}
     <ul class="fit">{% for x in fit %}<li class="fit-{{ x.ocena }}"><b>{{ {'mam': '✓', 'czesciowo': '◐', 'brak': '✗'}[x.ocena] }}</b> {{ x.wymaganie }}{% if x.dlaczego %}<br><span class="small soft">{{ x.dlaczego|powod }}</span>{% endif %}</li>{% endfor %}</ul>
     {% elif info.wymagania %}
     <label>Wymagania</label><ul>{% for x in info.wymagania %}<li>{{ x }}</li>{% endfor %}</ul>
@@ -46,7 +65,12 @@
     {% if info.obowiazki %}<label>Co będziesz robić</label><ul>{% for x in info.obowiazki %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
     {% if info.oferujemy %}<label>Co oferują</label><ul>{% for x in info.oferujemy %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
     {% if not info %}<p class="small soft">Szczegóły (wymagania, wynagrodzenie, dopasowanie) pojawią się po kliknięciu „Przygotuj ponownie”.</p>{% endif %}
-    <details><summary>Pełna treść ogłoszenia</summary><div class="small" style="white-space:pre-wrap;margin-top:8px">{{ a.tresc }}</div></details>
+    <details class="offer-full"><summary>Pełna treść ogłoszenia</summary>
+      <div class="offer-text">{% for b in blocks %}
+        {% if b.typ == 'naglowek' %}<h3><span>{{ b.ikona }}</span>{{ b.tekst }}</h3>
+        {% elif b.typ == 'lista' %}<ul>{% for x in b.punkty %}<li>{{ x }}</li>{% endfor %}</ul>
+        {% else %}<p>{{ b.tekst }}</p>{% endif %}
+      {% endfor %}{% if not blocks %}<p style="white-space:pre-wrap">{{ a.tresc }}</p>{% endif %}</div></details>
   </div>
   {% endif %}
 

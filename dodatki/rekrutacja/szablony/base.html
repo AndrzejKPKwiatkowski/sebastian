@@ -105,6 +105,26 @@ ol.steps{padding-left:22px;margin:0 0 6px}ol.steps li{margin:6px 0}
 iframe.pdf{width:100%;height:600px;border:1px solid var(--line);border-radius:8px;background:#fff}
 footer.foot{max-width:1040px;margin:0 auto;padding:0 24px 40px;color:var(--soft);font-size:13px;display:flex;gap:8px;align-items:center}
 footer.foot i{width:8px;height:8px;border-radius:50%;background:var(--gold);display:inline-block}
+/* 2.19: dojazd, składniki dopasowania, ogłoszenie jak na portalu */
+.commute{margin:6px 0 18px;padding:16px 18px;border:1px solid var(--line2);border-radius:12px;background:#fff}
+.commute h3{margin:0 0 12px;font-size:17px}
+.commute .from{display:flex;gap:12px;align-items:center;border:1px solid var(--line2);border-radius:10px;padding:10px 14px;margin-bottom:14px}
+.commute .pin{color:var(--brand);font-size:22px;line-height:1}
+.commute .modes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
+.commute .mode svg{width:30px;height:30px;fill:none;stroke:var(--brand);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;display:block;margin:0 auto 6px}
+.commute .mode span{display:block;font-size:14px;color:var(--soft,#555)}.commute .mode b{display:block;margin-top:4px;font-size:15px}
+.scorebox{margin:4px 0 14px}.scorebox div{display:grid;grid-template-columns:150px 48px 1fr;align-items:center;gap:10px;margin:4px 0}
+.scorebox span{font-size:14px}.scorebox b{font-size:14px;text-align:right}
+.scorebox i{display:block;height:8px;border-radius:4px;background:var(--gold,#c9a54a);max-width:100%}
+.offer-full summary{cursor:pointer;font-weight:600;margin-top:8px}
+.offer-text{margin-top:12px;font-size:15px;line-height:1.6}
+.offer-text h3{display:flex;gap:10px;align-items:center;font-size:17px;margin:20px 0 8px;padding:8px 0 8px 12px;border-left:4px solid var(--gold,#c9a54a);background:linear-gradient(90deg,rgba(0,0,0,.03),transparent)}
+.offer-text h3 span{font-size:16px}
+.offer-text ul{margin:4px 0 10px;padding-left:4px;list-style:none}
+.offer-text li{position:relative;padding:4px 0 4px 22px}
+.offer-text li:before{content:"";position:absolute;left:4px;top:13px;width:7px;height:7px;border-radius:50%;background:var(--brand)}
+.offer-text p{margin:6px 0 10px}
+@media(max-width:560px){.commute .modes{grid-template-columns:repeat(2,1fr)}.scorebox div{grid-template-columns:110px 44px 1fr}}
 </style>
 </head>
 <body class="t-{{ theme|default('bordo') }}">

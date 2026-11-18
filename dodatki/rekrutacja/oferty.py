@@ -118,7 +118,9 @@ def sales_hits(text):
     return sum(low.count(w) for w in SALES)
 
 
-SALARY_RE = re.compile(r"(\d{1,2}[ .\u00a0]?\d{3}(?:[,.]\d{2})?\s*(?:-|–|—|do)\s*\d{1,2}[ .\u00a0]?\d{3}(?:[,.]\d{2})?|\b(?:od|do)\s+\d{1,2}[ .\u00a0]?\d{3})"
+SALARY_RE = re.compile(r"(\d{1,2}[ .\u00a0]?\d{3}(?:[,.]\d{2})?\s*(?:-|–|—|do)\s*\d{1,2}[ .\u00a0]?\d{3}(?:[,.]\d{2})?|\b(?:od|do)\s+\d{1,2}[ .\u00a0]?\d{3}"
+                       r"|\b\d{2,3}(?:[,.]\d{1,2})?\s*(?:-|–|—)\s*\d{2,3}(?:[,.]\d{1,2})?(?=\s*(?:zł|zl|pln)\s*/\s*(?:h|godz))"
+                       r"|\b\d{2,3}(?:[,.]\d{1,2})?(?=\s*(?:zł|zl|pln)\s*/\s*(?:h|godz))|\b\d{1,2}[ .\u00a0]?\d{3}(?:[,.]\d{2})?(?=\s*(?:zł|zl|pln)\s*(?:brutto|netto)))"
                        r"\s*(?:zł|zl|pln)(?:\s*(?:brutto|netto|/\s*(?:mies\w*|mc|msc|h|godz\w*)))*", re.I)
 
 
@@ -126,6 +128,84 @@ def salary(text):
     """Widełki z treści ogłoszenia (bez modelu)."""
     m = SALARY_RE.search(text or "")
     return re.sub(r"\s+", " ", m.group(0)).strip() if m else ""
+
+
+def uop_net(brutto):
+    """Na rękę z umowy o pracę, 2026: ZUS 13,71%, zdrowotna 9%, KUP 250 zł, PIT 12% (32% powyżej 120 000 zł rocznie),
+    PIT-2 (300 zł), bez ulgi dla młodych, bez statusu studenta, bez PPK. Np. 7000 zł brutto → 5101,67 zł."""
+    b = float(brutto)
+    social = round(b * 0.0976, 2) + round(b * 0.015, 2) + round(b * 0.0245, 2)
+    health = round((b - social) * 0.09, 2)
+    base = round(b - social - 250)
+    over = max(0, base - 10000)                                       # ok. 120 000 zł rocznie
+    tax = max(0, round((base - over) * 0.12 + over * 0.32 - 300))
+    return round(b - social - health - tax, 2)
+
+
+def contract(text):
+    """Rodzaj umowy z ogłoszenia: uop | zlecenie | b2b | pusty (nie wiadomo)."""
+    t = R.plain(text or "")
+    if re.search(r"umow\w* o prace|\buop\b|etat\b|zatrudnienie na podstawie umowy o prace", t):
+        return "uop"
+    if re.search(r"\bb2b\b|kontrakt|faktur|dzialalnosc gospodarcz", t):
+        return "b2b"
+    if re.search(r"zleceni", t):
+        return "zlecenie"
+    return ""
+
+
+def _amounts(t):
+    nums = []
+    for m in re.findall(r"\d[\d .]*(?:,\d{1,2})?", t):
+        raw = m.strip().rstrip(".")
+        whole = raw.split(",")[0].replace(" ", "")
+        whole = whole.replace(".", "") if re.fullmatch(r"\d{1,3}(\.\d{3})+", whole) else whole.split(".")[0]
+        with contextlib.suppress(ValueError):
+            nums.append(float(whole))
+    return nums
+
+
+def pay_info(pay, text=""):
+    """Wynagrodzenie miesięcznie: {od, do (kwoty z ogłoszenia, miesięcznie), netto_od, netto_do (na rękę), umowa, podane_netto}
+    albo None. Brutto liczone jak umowa o pracę (zlecenie — tak samo, w przybliżeniu); przy B2B kwota „na fakturę” bez przeliczania."""
+    t = R.plain(pay or "").replace("\xa0", " ")
+    nums = _amounts(t)
+    if not nums:
+        return None
+    hourly = bool(re.search(r"/\s*h\b|godz|hour|za godzine", t))
+    nums = [x * 168 for x in nums] if hourly else [x for x in nums if x >= 1000]
+    if not nums:
+        return None
+    lo, hi = min(nums), max(nums)
+    kind = contract(pay) or contract(text)
+    given_net = "netto" in t or "na reke" in t
+    if kind == "b2b" or given_net:
+        n_lo, n_hi = lo, hi
+    else:
+        n_lo, n_hi = uop_net(lo), uop_net(hi)
+    return {"od": round(lo), "do": round(hi), "netto_od": round(n_lo), "netto_do": round(n_hi), "umowa": kind,
+            "podane_netto": given_net, "godzinowo": hourly}
+
+
+def netto_max(pay, text=""):
+    """Górna kwota na rękę miesięcznie (zł) albo None."""
+    p = pay_info(pay, text)
+    return p["netto_do"] if p else None
+
+
+def netto_text(pay, text=""):
+    """Dopisek do wynagrodzenia w panelu, np. „na rękę ok. 4 401–5 102 zł (umowa o pracę: bez ulg, z PIT-2)”."""
+    p = pay_info(pay, text)
+    if not p:
+        return ""
+    fmt = lambda x: f"{x:,.0f}".replace(",", " ")
+    rng = fmt(p["netto_do"]) if p["netto_od"] == p["netto_do"] else f"{fmt(p['netto_od'])}–{fmt(p['netto_do'])}"
+    if p["umowa"] == "b2b":
+        return f"B2B: {rng} zł na fakturę — na rękę zależy od Twojej działalności (ZUS, podatek)"
+    if p["podane_netto"]:
+        return f"to już kwota na rękę{' (z ' + fmt(p['od']) + ' zł/mies. przy stawce godzinowej)' if p['godzinowo'] else ''}"
+    how = {"uop": "umowa o pracę", "zlecenie": "umowa zlecenie — w przybliżeniu"}.get(p["umowa"], "liczone jak umowa o pracę")
+    return f"na rękę ok. {rng} zł miesięcznie ({how}; bez ulg, z PIT-2, bez PPK)"
 
 
 SECTION_HEADS = {
@@ -146,6 +226,8 @@ def sections(text):
         line = raw.strip()
         if not line:
             continue
+        if END.match(line):
+            break
         head = re.sub(r"[:\s]+$", "", line)
         if len(head) <= 60 and not re.search(r"[.;]\s*\w", head):
             hit = next((k for k, rx in SECTION_HEADS.items() if re.fullmatch(rf"(?i)\W*({rx})\W*", head)), None)
@@ -160,6 +242,57 @@ def sections(text):
             if 3 <= len(item):
                 out[cur].append(item[:220])
     return out
+
+
+NOISE = re.compile(r"(?i)^(aplikuj( teraz)?|zapisz|zapisz ofertę|udostępnij|drukuj|zgłoś|zgłoś ofertę|zaloguj( się)?|zarejestruj( się)?|"
+                   r"menu|szukaj|wróć|pokaż (więcej|mniej)|rozwiń|zwiń|cookies?|akceptuj.*|ustawienia cookies|polityka prywatności|"
+                   r"regulamin|pracodawcy|dla firm|moje konto|powiadomienia|ok|tak|nie|x|×|[\W_]{1,3}|\d{1,2})$")
+END = re.compile(r"(?i)^(podobne oferty|inne oferty( tego pracodawcy)?|zobacz (też|również|podobne)|polecane oferty|"
+                 r"oferty dla ciebie|najnowsze oferty|©|copyright|pracuj\.pl\s*\d{4}|newsletter)")
+ICONS = {"obowiazki": "📋", "wymagania": "✔️", "oferujemy": "🎁", "inne": "▪️"}
+
+
+def pretty(text, title=""):
+    """Ogłoszenie jak na portalu: [{"typ": "naglowek"|"lista"|"akapit", ...}] — nagłówki sekcji, punkty i akapity, bez menu strony."""
+    lines = [re.sub(r"\s+", " ", x).strip() for x in (text or "").splitlines()]
+    lines = [x for x in lines if x and not NOISE.match(x)]
+    heads = [i for i, x in enumerate(lines) if len(x) <= 70 and re.fullmatch(
+        rf"(?i)\W*(?:(?:twój|twoje|twoja|nasze|nasz|nasza|co|czego)\s+)?({'|'.join(SECTION_HEADS.values())}|{OTHER_HEADS})(?:\s+\w+){{0,2}}\W*:?", x)]
+    start = 0
+    if title:                                                          # od tytułu stanowiska, gdy jest przed pierwszą sekcją
+        t = R.plain(title)[:40]
+        hit = next((i for i, x in enumerate(lines) if t and R.plain(x).startswith(t)), None)
+        if hit is not None and (not heads or hit < heads[0]):
+            start = hit
+    if not start and heads and heads[0] > 25:
+        start = max(0, heads[0] - 12)
+    out, cur, listy = [], None, False
+    for x in lines[start:]:
+        if END.match(x):
+            break
+        head = re.sub(r"[:\s]+$", "", x)
+        pre = r"\W*(?:(?:twój|twoje|twoja|nasze|nasz|nasza|co|czego|your|our)\s+)?"
+        kind = next((k for k, rx in SECTION_HEADS.items() if re.fullmatch(rf"(?i){pre}({rx})(?:\s+\w+){{0,2}}\W*", head)), None)
+        is_head = len(head) <= 70 and (kind or re.fullmatch(rf"(?i){pre}({OTHER_HEADS})\W*", head) or
+                                       (x.endswith(":") and len(head) <= 50 and not re.search(r"[.!?]", head)))
+        if is_head:
+            out.append({"typ": "naglowek", "tekst": head.strip(" •-–"), "ikona": ICONS.get(kind or "inne")})
+            cur, listy = None, bool(kind)
+            continue
+        bullet = bool(re.match(r"^[•·\-–—*▪●◦✓✔>]\s*", x))
+        item = re.sub(r"^[•·\-–—*▪●◦✓✔>]+\s*", "", x)
+        if bullet or (listy and len(item) <= 220):
+            if cur is None:
+                cur = {"typ": "lista", "punkty": []}
+                out.append(cur)
+            cur["punkty"].append(item)
+        else:
+            cur = None
+            if out and out[-1]["typ"] == "akapit" and len(out[-1]["tekst"]) < 600 and not re.search(r"[.!?]$", out[-1]["tekst"]):
+                out[-1]["tekst"] += " " + item
+            else:
+                out.append({"typ": "akapit", "tekst": item})
+    return out[:120]
 
 
 def analyze(ctx, f, text, title="", url=""):
@@ -203,7 +336,8 @@ JSON:
   "wymagania": ["punkty: czego pracodawca wymaga — PRZEPISANE DOSŁOWNIE z ogłoszenia, bez zmieniania słów"],
   "obowiazki": ["punkty: co będzie się robić na tym stanowisku — PRZEPISANE DOSŁOWNIE z ogłoszenia"],
   "oferujemy": ["krótkie punkty: co oferuje pracodawca (umowa, etat, benefity)"],
-  "ocena": liczba 0-100 (jak dobrze oferta pasuje do tego, czego kandydatka szuka i co umie),
+  "ocena": liczba 0-100 (jak dobrze RODZAJ pracy, zadania i warunki pasują do tego, czego kandydatka SZUKA i czego NIE CHCE;
+     nie oceniaj tu wymagań — spełnienie wymagań liczę osobno),
   "uzasadnienie": "1–2 krótkie zdania po polsku do Agi, w drugiej osobie (np. „Pasuje do Ciebie, bo… Uważaj na…”)"}}"""
     got = None
     try:

@@ -77,6 +77,12 @@ class RekrutacjaBase(Base):
         self.extra[-1].start()
         self.extra.append(patch.object(importlib.import_module(pkg + ".dokumenty"), "writer_model", lambda ctx: None))  # bez prawdziwego Ollamy
         self.extra[-1].start()
+        def no_net(*a, **k):
+            raise ConnectionError("bez internetu w testach")
+        self.extra.append(patch.object(importlib.import_module(pkg + ".dojazd"), "_get", no_net))   # mapy bez internetu (2.19)
+        self.extra[-1].start()
+        self.extra.append(patch.object(importlib.import_module(pkg + ".panel"), "PAY_FETCH", False))   # 2.19.2: bez pobierania stron
+        self.extra[-1].start()
         self.extra.append(patch.object(importlib.import_module(pkg + ".kontakty"), "find_email", lambda *a, **k: {}))   # bez internetu
         self.extra[-1].start()
         self.R = importlib.import_module(pkg + ".rdzen")
@@ -1087,7 +1093,7 @@ class LettersAndOffers282(RekrutacjaBase):
         cl = app.test_client()
         cl.post("/login", data={"haslo": "poprawne123"})
         page = cl.get(f"/aplikacja/{aid}").data.decode()
-        for part in ("Pobierz CV", "Pobierz list motywacyjny", "6000-7000 zł brutto", "ok. 15 km od Krakowa", "prawo jazdy kat. C", "brakuje: 1", "Sprawdź dojazd"):
+        for part in ("Pobierz CV", "Pobierz list motywacyjny", "6000-7000 zł brutto", "ok. 15 km od Krakowa", "prawo jazdy kat. C", "brakuje: 1", "Sprawdź w Mapach Google"):
             self.assertIn(part, page)
 
     def test_migration_prepares_waiting_again(self):
@@ -2096,6 +2102,192 @@ class Pool218(RekrutacjaBase):
             out = self.D.tailored_profile(self.ctx, f, {"stanowisko": "Sekretarka", "firma": "X", "tresc": OFFER})
         self.assertEqual(out, good)
         self.assertIn("OPISY PROFILU NAPISANE I ZATWIERDZONE PRZEZ KANDYDATKĘ", seen[0])
+
+
+class Commute219(RekrutacjaBase):
+    """2.19: czas dojazdu (4 sposoby), odkładanie ofert z za długim dojazdem, jawny procent, ogłoszenie jak na portalu, Edge bez pytania."""
+    HOME, WORK = (50.04, 19.90), (50.06, 19.94)
+
+    def fake_get(self, service, url, params=None, timeout=20):
+        if service == "nominatim":
+            q = params["q"]
+            if "Domowa" in q:
+                return [{"lat": str(self.HOME[0]), "lon": str(self.HOME[1]), "addresstype": "building"}]
+            return [{"lat": str(self.WORK[0]), "lon": str(self.WORK[1]), "addresstype": "road" if any(ch.isdigit() for ch in q) else "city"}]
+        if service == "osrm":
+            mins = {"routed-car": self.car, "routed-bike": 16, "routed-foot": 57}[next(k for k in ("routed-car", "routed-bike", "routed-foot") if k in url)]
+            return {"routes": [{"duration": mins * 60}]}
+        if service == "transitous":
+            self.transit_params = params
+            return {"itineraries": [{"duration": self.tram * 60}, {"duration": (self.tram + 9) * 60}]}
+        raise AssertionError(service)
+
+    def setUp(self):
+        super().setUp()
+        self.DJ = importlib.import_module(self.mod.__name__ + ".dojazd")
+        self.car, self.tram = 19, 28
+        self.extra.append(patch.object(self.DJ, "_get", self.fake_get))
+        self.extra[-1].start()
+        self.extra.append(patch.object(self.DJ, "_wait", lambda *a, **k: None))
+        self.extra[-1].start()
+        self.ctx.set_setting("dojazd_skad", "Domowa 5, 30-001 Kraków")
+
+    def test_compute_and_label(self):
+        d = self.DJ.compute(self.ctx, {"adres": "ul. Długa 1"}, {"miasto": "Kraków"})
+        self.assertEqual((d["samochod"], d["komunikacja"], d["rower"], d["pieszo"], d["dokladny"]), (19, 28, 16, 57, True))
+        self.assertTrue(self.transit_params["time"].endswith(("+01:00", "+02:00")) and "T08:00" in self.transit_params["time"])
+        self.assertEqual(self.DJ.label(75), "1 h 15 min")
+        self.assertEqual(self.DJ.compute(self.ctx, {"adres": ""}, {"miasto": "zdalnie"})["brak"], "praca zdalna")
+
+    def test_too_far_rule(self):
+        far = {"v": 1, "dokladny": True, "km": 30, "komunikacja": 70, "samochod": 30}
+        self.assertIn("za długi dojazd", self.DJ.too_far(self.ctx, far, 5000))   # tramwajem 70 min i więcej — odpada
+        self.assertEqual(self.DJ.too_far(self.ctx, far, 7000), "")              # pensja ponad 6500 netto — zostaje
+        self.assertEqual(self.DJ.too_far(self.ctx, dict(far, komunikacja=69), 5000), "")
+        self.assertIn("za długi dojazd", self.DJ.too_far(self.ctx, dict(far, komunikacja=30, samochod=41), 5000))   # samochodem > 40
+        self.assertEqual(self.DJ.too_far(self.ctx, dict(far, komunikacja=30, samochod=40), 5000), "")
+        self.ctx.set_setting("dojazd_tryb", "i")                               # tryb „oba naraz”
+        self.assertEqual(self.DJ.too_far(self.ctx, far, 5000), "")
+        self.assertIn("za długi dojazd", self.DJ.too_far(self.ctx, dict(far, samochod=45), 5000))
+        self.assertEqual(self.O.netto_max("8 000 – 9 500 zł brutto"), 6806)
+        self.assertEqual(self.O.netto_max("7000 zł netto"), 7000)
+        self.assertEqual(self.O.netto_max("40 zł/h brutto"), round(self.O.uop_net(40 * 168)))
+
+    def test_auto_offer_too_far_is_skipped(self):
+        self.ready()
+        self.car, self.tram = 58, 80
+        aid = self.add(zrodlo="auto", firma="Daleko Sp. z o.o.", stanowisko="Asystentka", miasto="Niepołomice")
+        self.WORK = (50.08, 20.30)                                           # ok. 29 km — miejscowość wystarczy
+        self.P.prepare(self.ctx, aid)
+        row = self.row(aid)
+        self.assertEqual(json.loads(row["analiza"])["dojazd"]["komunikacja"], 80)
+        self.assertEqual(row["status"], "odrzucona")
+        self.assertIn("za długi dojazd", row["notatka"])
+
+    def test_waiting_offers_get_commute_and_score(self):
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        with self.R.db(self.ctx) as c:                                      # jak oferta sprzed 2.19
+            info = json.loads(self.row(aid)["analiza"])
+            for k in ("dojazd", "ocena_v", "ocena_skladniki", "ocena_modelu"):
+                info.pop(k, None)
+            info["adres"] = "ul. Długa 1, Kraków"
+            info["dopasowanie"] = [{"wymaganie": "a", "ocena": "mam", "dlaczego": ""}, {"wymaganie": "b", "ocena": "mam", "dlaczego": ""},
+                                   {"wymaganie": "c", "ocena": "czesciowo", "dlaczego": ""}, {"wymaganie": "d", "ocena": "brak", "dlaczego": ""}]
+            c.execute("UPDATE aplikacje SET analiza=?, ocena=45 WHERE id=?", (json.dumps(info), aid))
+            c.commit()
+        self.P.refresh_score_commute(self.ctx)
+        row = self.row(aid)
+        info = json.loads(row["analiza"])
+        self.assertEqual(info["ocena_skladniki"]["wymagania"], 62)          # (2 + ½) z 4
+        self.assertEqual(row["ocena"], round(0.6 * 62 + 0.4 * 45))
+        self.assertEqual(info["dojazd"]["komunikacja"], 28)
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        page = cl.get(f"/aplikacja/{aid}").data.decode()
+        for part in ("Czas dojazdu", "Komunikacja", "28 min", "57 min", "To, czego szukasz", "Transitous"):
+            self.assertIn(part, page)
+        reg = cl.get("/edge.reg")
+        text = reg.data[2:].decode("utf-16-le")
+        self.assertIn("AutoLaunchProtocolsFromOrigins", text)
+        self.assertIn('\\"http://localhost\\"', text)
+        self.assertIn("microsoft-edge", text)
+        win_edge = cl.get(f"/aplikacja/{aid}", headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0) Chrome/130 Safari/537.36 Edg/130"}).data.decode()
+        self.assertNotIn('href="microsoft-edge:', win_edge)                 # już w Edge — zwykły link
+
+    def test_pretty_offer(self):
+        text = ("Menu\nZaloguj się\nAsystentka biura\nFirma X, Kraków\nTwój zakres obowiązków\nobsługa korespondencji\nprowadzenie kalendarza\n"
+                "Nasze wymagania\n• znajomość MS Office\n• komunikatywność\nOferujemy\numowa o pracę\nPodobne oferty\nInna oferta")
+        b = self.O.pretty(text, "Asystentka biura")
+        self.assertEqual(b[0], {"typ": "akapit", "tekst": "Asystentka biura Firma X, Kraków"})
+        heads = [x["tekst"] for x in b if x["typ"] == "naglowek"]
+        self.assertEqual(heads, ["Twój zakres obowiązków", "Nasze wymagania", "Oferujemy"])
+        self.assertEqual(b[2]["punkty"], ["obsługa korespondencji", "prowadzenie kalendarza"])
+        self.assertNotIn("Inna oferta", json.dumps(b, ensure_ascii=False))
+
+    def test_reapplying_218_data_keeps_agas_edits(self):
+        first = {"stanowiska_pule": [{"szukaj": ["zzoz"], "stanowisko": "Sekretarka medyczna", "firma": "ZZOZ", "punkty": ["A.", "B."], "szczegoly": ["X."]}],
+                 "profil_wzory": ["W1."]}
+        self.mod.apply_patch(self.ctx, first)
+        f = self.R.load_facts(self.ctx)
+        j = next(j for j in f["doswiadczenie"] if j["firma"] == "ZZOZ")
+        j["punkty"] = [{"tekst": "A poprawione przez Agę."}, {"tekst": "B."}]
+        f["profil_wzory"] = ["W1 poprawiony."]
+        self.R.save_facts(self.ctx, f)
+        again = json.loads(json.dumps(first))
+        again["stanowiska_pule"][0]["tylko_raz"] = True
+        again.update(tylko_raz=True, profil_wzory_dodaj=["W2."])
+        self.mod.apply_patch(self.ctx, again)
+        f = self.R.load_facts(self.ctx)
+        j = next(j for j in f["doswiadczenie"] if j["firma"] == "ZZOZ")
+        self.assertEqual(j["punkty"][0]["tekst"], "A poprawione przez Agę.")
+        self.assertEqual(f["profil_wzory"], ["W1 poprawiony.", "W2."])
+
+    def test_profile_first_sentence_then_first_person(self):
+        f = self.R.load_facts(self.ctx)
+        app = {"stanowisko": "Sekretarka", "tresc": OFFER}
+        ok = ("Specjalistka z doświadczeniem w administracji i prowadzeniu dokumentacji. Posiadam praktykę w archiwizacji dokumentacji. "
+              "Wyróżniam się dokładnością i samodzielnością.")
+        self.assertFalse([x for x in self.D.vocab_check(f, app, ok) if "osoba" in x])
+        bad = ok.replace("Posiadam praktykę", "Posiada praktykę")
+        self.assertTrue([x for x in self.D.vocab_check(f, app, bad) if "osoba" in x])
+        self.assertIn("staż: 2 lata 9 mies.", self.R.facts_brief(f, ids=False))   # 02.2022 – 10.2024
+        self.mod.apply_patch(self.ctx, {"profil_wzory_dodaj": ["Wzór A."]})
+        self.mod.apply_patch(self.ctx, {"profil_wzory_dodaj": ["Wzór A."]})
+        self.assertEqual(self.R.load_facts(self.ctx)["profil_wzory"], ["Wzór A."])
+
+
+class Pay2192(RekrutacjaBase):
+    """2.19.2: na rękę z brutto (umowa o pracę 2026, bez ulg, PIT-2) i kolejność przygotowania od najlepiej płatnych."""
+    def test_net_from_gross(self):
+        self.assertEqual(self.O.uop_net(7000), 5101.67)                     # zgodnie z kalkulatorami płac na 2026
+        self.assertEqual(round(self.O.uop_net(9785)), 7001)
+        self.assertEqual(round(self.O.uop_net(4806)), 3606)                 # płaca minimalna 2026
+        self.assertIn("na rękę ok. 4 761–5 442 zł", self.O.netto_text("6 500–7 500 zł brutto", "umowa o pracę"))
+        self.assertIn("na fakturę", self.O.netto_text("12 000 zł netto + VAT", "współpraca B2B"))
+        self.assertEqual(self.O.netto_text("5500 zł netto"), "to już kwota na rękę")
+        self.assertEqual(self.O.salary("Oferujemy 8000 zł brutto miesięcznie"), "8000 zł brutto")
+        self.assertEqual(self.O.salary("35 zł/h brutto"), "35 zł/h brutto")
+
+    def test_best_paid_first(self):
+        low = self.add(url="https://a.example/1", tresc="Umowa o pracę. Wynagrodzenie 5000 zł brutto. " * 10)
+        none = self.add(url="https://a.example/2", tresc="Umowa o pracę, bez podanej pensji. " * 10)
+        high = self.add(url="https://a.example/3", tresc="Umowa o pracę. Wynagrodzenie 8000 – 9000 zł brutto. " * 10)
+        mid = self.add(url="https://a.example/4", tresc="Umowa o pracę. Wynagrodzenie 7000 zł brutto. " * 10)
+        b2b = self.add(url="https://a.example/5", tresc="Współpraca B2B. 12 000 zł netto + VAT. " * 10)
+        self.P.estimate_pay(self.ctx)
+        order = []
+        for _ in range(5):
+            nxt = self.P.next_to_prepare(self.ctx)["id"]
+            order.append(nxt)
+            with self.R.db(self.ctx) as c:
+                c.execute("UPDATE aplikacje SET status='do_zatwierdzenia' WHERE id=?", (nxt,))
+                c.commit()
+        self.assertEqual(order, [high, mid, b2b, low, none])                 # UoP ≥ 5000 na rękę od najwyższej, potem reszta, na końcu bez pensji
+
+    def test_offer_page_shows_net(self):
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        with self.R.db(self.ctx) as c:
+            info = json.loads(self.row(aid)["analiza"])
+            info["wynagrodzenie"] = "7000 zł brutto"
+            c.execute("UPDATE aplikacje SET analiza=? WHERE id=?", (json.dumps(info), aid))
+            c.commit()
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        self.assertIn("na rękę ok. 5 102 zł", cl.get(f"/aplikacja/{aid}").data.decode())
 
 
 class Conversation213(RekrutacjaBase):

@@ -216,15 +216,22 @@ def apply_patch(ctx, patch):
                 j["opcjonalne"] = True
             jobs.append(j)
             pools.append(f"dodane stanowisko: {s['stanowisko']} (uzupełnij daty w Ustawieniach)")
+        elif j.get("szczegoly") and s.get("tylko_raz"):                   # już wgrane wcześniej — nie nadpisuję poprawek Agi
+            continue
         else:
             pools.append(f"{s['stanowisko']}: {len(s['punkty'])} punktów do wyboru")
         j["stanowisko"], j["firma"] = s["stanowisko"], s.get("firma", j.get("firma", ""))
         j["punkty"] = list(dict.fromkeys(s["punkty"]))
         j["szczegoly"] = list(s.get("szczegoly", []))
         added += 1
-    if patch.get("profil_wzory"):
+    if patch.get("profil_wzory") and not (patch.get("tylko_raz") and f.get("profil_wzory")):
         f["profil_wzory"] = list(dict.fromkeys(patch["profil_wzory"]))
         added += 1
+    for t in patch.get("profil_wzory_dodaj", []):                      # 2.19: kolejne wzory Agi, bez dublowania
+        cur = f.get("profil_wzory") or []
+        if n(t) not in {n(x) for x in cur}:
+            f["profil_wzory"] = cur + [t]
+            added += 1
     for k in patch.get("kursy_jesli_brak", []):
         if not any(n(k["zawiera"]) in n(x if isinstance(x, str) else x["tekst"]) for x in f["kursy"]):
             f["kursy"] = flat(f["kursy"]) + [k["tekst"]]

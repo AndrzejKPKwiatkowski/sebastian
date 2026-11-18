@@ -392,3 +392,19 @@ Data: 2026-11-13. `test_rekrutacja` — 83 testy zaliczone; pozostałe zestawy z
 `Pool218`: uzupełnienie faktów podmienia punkty i zostawia daty, dodaje brakujące stanowiska, kurs EFG tylko raz, MS Office;
 dłuższe opisy i wzory profilu trafiają do faktów dla listów, ale nie do wyboru punktów CV; wybór 3–5 punktów; „Edytuj CV” pokazuje
 całą listę i zapisuje zaznaczone + własny punkt; ustawienia nie gubią opisów i wzorów; opis profilu w 1. osobie z liczbą z faktów przechodzi.
+
+# Weryfikacja 2.19
+
+`Commute219` (usługi map udawane, w testach nigdy prawdziwy internet): 4 czasy dojazdu i przyjazd na 8:00 w dzień roboczy; reguła
+„komunikacją > 60 i samochodem > 50, chyba że netto > 6500”; przeliczanie pensji brutto/godzinowej; oferta automatyczna z za długim
+dojazdem odłożona; czekające oferty dostają dojazd i jawny procent (60/40); strona oferty z kartą dojazdu i składnikami; plik .reg dla Chrome;
+w Edge zwykły link; ogłoszenie jak na portalu (nagłówki, punkty, bez menu i „podobnych ofert”); opis profilu: od 2. zdania 1. osoba;
+staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
+
+# Weryfikacja 2.19.1
+
+`Commute219.test_too_far_rule`: komunikacją ≥ 70 min albo samochodem > 40 min — odpada; 69 i 40 zostają; pensja > 6500 netto — zostaje; tryb „i”.
+
+# Weryfikacja 2.19.2
+
+`Pay2192`: 7000 brutto → 5101,67 netto, 9785 → 7001, 4806 → 3606 (jak kalkulatory płac 2026); B2B bez przeliczania; kolejność: UoP ≥ 5000 netto od najwyższej, potem reszta z pensją, na końcu bez pensji; strona oferty pokazuje kwotę na rękę.

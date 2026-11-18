@@ -40,7 +40,18 @@
       <div><label>Przypomnienia (gdy brakuje do celu)</label><input type="text" name="owca_przypomnienia" value="{{ st.owca_przypomnienia }}"></div></div>
     <div class="row"><div><label>Skąd dojeżdżasz (do liczenia dojazdu, nie trafia do CV)</label><input type="text" name="dojazd_skad" value="{{ st.dojazd_skad }}" placeholder="np. ul. Długa 1, Kraków"></div>
       <div><label>Model do pisania listów</label><input type="text" name="model_pisania" value="{{ st.model_pisania }}" placeholder="auto"><p class="small soft">„auto” = Bielik (polski model), jeśli jest zainstalowany{% if writer %} — teraz: <b>{{ writer }}</b>{% else %} — teraz: główny model Sebastiana{% endif %}.</p></div></div>
+    <div class="row"><div><label>Najpierw przygotowuj oferty od (zł na rękę, umowa o pracę)</label><input type="text" name="priorytet_netto" value="{{ st.priorytet_netto or 5000 }}"></div><div></div></div>
+    <p class="small soft">Gdy czeka kilka ofert, Sebastian zaczyna od tych, gdzie zarobisz najwięcej. Brutto przelicza na rękę jak dla umowy o pracę: 2026, bez ulg i statusu studenta, z PIT-2, bez PPK.</p>
+    <label style="margin-top:14px">Dojazd — pomijaj oferty, gdy:</label>
+    <div class="row3"><div><label class="small">komunikacją (min) — tyle i więcej</label><input type="text" name="dojazd_max_komunikacja" value="{{ st.dojazd_max_komunikacja or 70 }}"></div>
+      <div><label class="small">samochodem (min) — więcej niż</label><input type="text" name="dojazd_max_samochod" value="{{ st.dojazd_max_samochod or 40 }}"></div>
+      <div><label class="small">chyba że pensja na rękę ponad (zł)</label><input type="text" name="dojazd_wyjatek_netto" value="{{ st.dojazd_wyjatek_netto or 6500 }}"></div></div>
+    <label class="small">Kiedy pomijać</label><select name="dojazd_tryb">
+      <option value="lub" {{ 'selected' if (st.dojazd_tryb or 'lub') == 'lub' }}>gdy za długo komunikacją LUB samochodem</option>
+      <option value="i" {{ 'selected' if st.dojazd_tryb == 'i' }}>dopiero gdy za długo i komunikacją, i samochodem</option></select>
+    <p class="small soft">Pensję brutto przeliczam na rękę jak wyżej.</p>
     <div class="actions"><button class="btn ghost">Zapisz</button></div></form>
+  {% if st.edge %}<p class="small soft" style="margin-top:10px">Chrome pyta „Open Microsoft Edge?” przy każdym ogłoszeniu? <a href="{{ url_for('edge_reg') }}">Pobierz plik dla Windows</a>, kliknij go dwa razy, zgódź się i uruchom Chrome ponownie — pytanie zniknie.</p>{% endif %}
 </div>
 
 <div class="card" id="nauka">
