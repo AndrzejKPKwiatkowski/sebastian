@@ -6,7 +6,7 @@
 {% if m.streszczenie %}<div class="note {{ 'ok' if m.rodzaj in ('zaproszenie','oferta') else ('err' if m.rodzaj == 'do_potwierdzenia' else 'info') }}">{{ m.streszczenie }}{% if m.termin %}<br><b>Termin:</b> {{ m.termin }}{% endif %}</div>{% endif %}
 {% if links or gmail %}
 <div class="actions" style="margin:0 0 14px">
-  {% for l in links[:4] %}<a class="btn {{ 'big' if loop.first and m.rodzaj == 'do_potwierdzenia' else 'ghost small' }}" href="{{ l.url }}" target="_blank" rel="noopener noreferrer" title="{{ l.url|host }}">{{ l.tekst }} ↗</a>{% endfor %}
+  {% for l in links[:4] %}<a class="btn {{ 'big' if loop.first and m.rodzaj == 'do_potwierdzenia' else 'ghost small' }}" {{ ext(l.url) }} title="{{ l.url|host }}">{{ l.tekst }} ↗</a>{% endfor %}
   {% if gmail %}<a class="btn plain small" href="{{ gmail }}" target="_blank" rel="noopener noreferrer">Otwórz w Gmailu ↗</a>{% endif %}
 </div>
 {% if links %}<p class="small soft" style="margin-top:-6px">Przyciski prowadzą do: {{ links[:4]|map(attribute='url')|map('host')|unique|join(', ') }}</p>{% endif %}

@@ -418,7 +418,7 @@ def work_once(ctx):
         manual = time.time() - float(R.meta_get(c, "gemini_reczne", "0") or 0) < 300   # trwa polecenie „przepisz” — nie dzielę limitu
     if not busy and not manual:
         with contextlib.suppress(Exception):                          # czekające listy sprzed Gemini piszę na nowo (po jednym na obrót)
-            refresh_letter(ctx) or (None if row else refresh_match(ctx))
+            recheck_profile(ctx) or refresh_letter(ctx) or (None if row else (refresh_match(ctx) or refresh_details(ctx)))
     send_one(ctx)
     with contextlib.suppress(Exception):
         CB.run(ctx)                                                   # CBOP: raz na dobę wieczorem, gdy jest nazwa partnera
@@ -539,6 +539,67 @@ def refresh_letter(ctx, statuses=REWRITE, only=None):
     return None
 
 
+def recheck_profile(ctx):
+    """Czekające CV z opisem pisanym pod ofertę: jeśli są w nim słowa spoza faktów (np. „CMS”, „Agile” z ogłoszenia),
+    wracam do Twojego zatwierdzonego opisu i składam CV na nowo (2.16.3). Po jednej aplikacji na obrót."""
+    with R.db(ctx) as c:
+        rows = c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(R.OPEN))}) AND wybor LIKE '%\"profil_zrodlo\": \"model\"%' "
+                         "AND wybor NOT LIKE '%\"profil_v\": 2%' ORDER BY id DESC LIMIT 1", R.OPEN).fetchall()
+    for r in rows:
+        a = dict(r)
+        f = R.load_facts(ctx)
+        sel = json.loads(a["wybor"] or "{}")
+        text = sel.get("profil_tekst") or ""
+        bad = D.vocab_check(f, a, text) + D.rule_check(f, a, text)
+        sel["profil_v"] = 2
+        if bad:
+            for k in ("profil_tekst", "profil_model", "profil_zrodlo"):
+                sel.pop(k, None)
+        with R.db(ctx) as c:
+            c.execute("UPDATE aplikacje SET wybor=? WHERE id=?", (json.dumps(sel, ensure_ascii=False), a["id"]))
+            c.commit()
+        if bad:
+            with contextlib.suppress(Exception):
+                cv, li = render_files(ctx, f, a, a["list"] or "", sel, a.get("rodo") or "")
+                with R.db(ctx) as c:
+                    c.execute("UPDATE aplikacje SET cv_plik=?, list_plik=? WHERE id=?", (cv, li, a["id"]))
+                    c.commit()
+            with R.db(ctx) as c:
+                R.note(c, ctx, a["id"], "opis w CV wrócił do Twojego zatwierdzonego (poprzedni zawierał rzeczy spoza Twoich faktów: "
+                       + ", ".join(bad[:5]) + ")")
+                c.commit()
+        return a["id"]
+    return None
+
+
+def refresh_details(ctx):
+    """Czekająca oferta bez wymagań i obowiązków (np. ucięta odpowiedź modelu) → jeszcze raz wyciągam punkty i dopasowanie (2.16.2)."""
+    with R.db(ctx) as c:
+        rows = c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(R.OPEN))}) AND length(tresc)>400 "
+                         "AND analiza NOT LIKE '%\"szczegoly_v\": 1%' ORDER BY id DESC LIMIT 30", R.OPEN).fetchall()
+    for r in rows:
+        a = dict(r)
+        info = analysis(a)
+        if info.get("wymagania") or info.get("obowiazki"):
+            continue
+        f = R.load_facts(ctx)
+        new = O.analyze(ctx, f, a["tresc"], a.get("stanowisko") or "", a.get("url") or "")
+        for k in ("wymagania", "obowiazki", "oferujemy", "adres", "wynagrodzenie"):
+            if new.get(k) and not info.get(k):
+                info[k] = new[k]
+        if info.get("wymagania"):
+            info["dopasowanie"] = D.match_report(ctx, f, a, info["wymagania"])
+            info["v"] = 2
+        info["szczegoly_v"] = 1
+        with R.db(ctx) as c:
+            c.execute("UPDATE aplikacje SET analiza=? WHERE id=?", (json.dumps(info, ensure_ascii=False), a["id"]))
+            if info.get("wymagania") or info.get("obowiazki"):
+                R.note(c, ctx, a["id"], "uzupełnione wymagania i obowiązki z ogłoszenia")
+            c.commit()
+        return a["id"]
+    return None
+
+
 def refresh_match(ctx):
     """Jedna czekająca aplikacja ze starym opisem dopasowania → nowe, czytelne wyjaśnienia (2.8.5)."""
     with R.db(ctx) as c:
@@ -629,6 +690,8 @@ def worker(ctx, stop):
         migrate_282(ctx)
         migrate_283(ctx)
         migrate_290(ctx)
+    with contextlib.suppress(Exception):
+        PF.cleanup(ctx)                                                # 2.16.3: bez „Kraków” itp. na liście „pomijam”
     while not stop.is_set():
         try:
             work_once(ctx)
@@ -691,6 +754,21 @@ def make_app(ctx, hosts=None):
                       PERMANENT_SESSION_LIFETIME=dt.timedelta(days=30), MAX_CONTENT_LENGTH=120 * 1024 * 1024)
     app.jinja_env.globals.update(STATUS=R.STATUS, STEPS=STEPS, TOOLS=R.TOOLS, LEVELS=R.LEVELS, WANT=R.WANT, AVOID=R.AVOID)
     app.jinja_env.filters["loads"] = lambda s: json.loads(s or "[]")
+
+    def ext(url):
+        """Atrybuty linku do ogłoszenia: na Windowsie (ustawienie „edge”) otwiera Microsoft Edge zamiast domyślnej przeglądarki."""
+        from markupsafe import Markup, escape
+        u = str(url or "")
+        ua = request.headers.get("User-Agent", "") if request else ""
+        if ctx.settings().get("edge", True) and "Windows" in ua and u.lower().startswith(("http://", "https://")):
+            return Markup(f'href="microsoft-edge:{escape(u)}"')
+        return Markup(f'href="{escape(u)}" target="_blank" rel="noopener noreferrer"')
+    app.jinja_env.globals["ext"] = ext
+
+    @app.context_processor
+    def theme():
+        t = str(ctx.settings().get("motyw") or "bordo")
+        return {"theme": t if t in ("bordo", "zielen", "krem") else "bordo"}
     app.jinja_env.filters["dzien"] = lambda s: (s or "")[:16].replace("T", " ")
     app.jinja_env.filters["czysty"] = P.clean_text
     app.jinja_env.filters["powod"] = lambda t: D.clean_reason(t)
@@ -910,6 +988,7 @@ def make_app(ctx, hosts=None):
             jobs.append({"stanowisko": request.form.get(f"d{i}_stanowisko", "").strip(), "firma": request.form.get(f"d{i}_firma", "").strip(),
                          "miejsce": request.form.get(f"d{i}_miejsce", "").strip(), "od": request.form.get(f"d{i}_od", "").strip(),
                          "do": request.form.get(f"d{i}_do", "").strip(), "punkty": lines(f"d{i}_punkty"),
+                         "szczegoly": lines(f"d{i}_szczegoly"),
                          "opcjonalne": bool(request.form.get(f"d{i}_opcjonalne"))})
         f["doswiadczenie"] = jobs
         edu = []
@@ -918,6 +997,8 @@ def make_app(ctx, hosts=None):
                         "tytul": request.form.get(f"w{i}_tytul", "").strip(), "okres": request.form.get(f"w{i}_okres", "").strip()})
         f["wyksztalcenie"] = edu
         f["kursy"], f["jezyki"], f["profil"] = lines("kursy"), lines("jezyki"), lines("profil")
+        if "profil_wzory" in request.form:
+            f["profil_wzory"] = lines("profil_wzory")
         if not f["osoba"]["imie"] or not f["osoba"]["nazwisko"] or not R.EMAIL_OK.match(f["osoba"]["email"]):
             return "Uzupełnij imię, nazwisko i poprawny adres e-mail."
         if len(f["profil"]) < 2:
@@ -1106,7 +1187,8 @@ def make_app(ctx, hosts=None):
         maps = ("https://www.google.com/maps/dir/?api=1&travelmode=transit&origin=" + quote(ctx.settings().get("dojazd_skad") or "Kraków")
                 + "&destination=" + quote(where)) if where and km != -1 else ""
         fit = info.get("dopasowanie") or []
-        return render_template("aplikacja.html", a=a, hist=hist, msgs=msgs, tab="", TAGS=PF.TAGS, TAGN=PF.TAG_NAMES, feedback=PF.feedback_for(g.db, aid), kit=F.kit(R.load_facts(ctx), a) if a["status"] == "formularz" else [],
+        return render_template("aplikacja.html", a=a, hist=hist, msgs=msgs, tab="", TAGS=PF.TAGS, TAGN=PF.TAG_NAMES, feedback=PF.feedback_for(g.db, aid),
+                               saved=request.args.get("zapisano") == "1", kit=F.kit(R.load_facts(ctx), a) if a["status"] == "formularz" else [],
                                info=info, where=where, km=km, maps=maps, fit=fit,
                                fit_count={k: sum(1 for x in fit if x["ocena"] == k) for k in ("mam", "czesciowo", "brak")},
                                KINDS=A.KINDS, editable=a["status"] in ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz", "blad", "zatwierdzona", "odrzucona"))
@@ -1119,17 +1201,21 @@ def make_app(ctx, hosts=None):
         if not tags and not text.strip():
             flash("Zaznacz, co nie pasuje, albo napisz kilka słów.")
             return redirect(url_for("detail", aid=aid) + "#uwaga")
-        learned = PF.learn(ctx, aid, tags, text)
-        flagged = PF.flag_waiting(ctx, skip=aid) if learned else 0
-        msg = "Dzięki, zapisałem uwagę." + (" Na przyszłość: " + "; ".join(learned) + "." if learned else "")
-        if flagged:
-            msg += f" Oznaczyłem też {flagged} czekające oferty, które tego nie spełniają."
+        fid = PF.save_feedback(ctx, aid, tags, text)                  # zapis od razu; nauka (model) w tle, żeby nic nie czekało
+
+        def learn_later():
+            with contextlib.suppress(Exception):
+                if PF.learn_from(ctx, fid):
+                    PF.flag_waiting(ctx, skip=aid)
+        if app.config.get("TESTING"):
+            learn_later()
+        else:
+            threading.Thread(target=learn_later, daemon=True, name="rekrutacja-uwaga").start()
         if request.form.get("co") == "pomin" and a["status"] not in R.SENT + ("wysylanie",):
             R.set_status(g.db, ctx, aid, "odrzucona")
-            flash(msg + " Ofertę pominąłem.")
+            flash("Zapisałem uwagę i pominąłem ofertę. Czego się z niej nauczyłem, zobaczysz w Ustawieniach → Czego szukam.")
             return redirect(url_for("todo"))
-        flash(msg)
-        return redirect(url_for("detail", aid=aid) + "#uwaga")
+        return redirect(url_for("detail", aid=aid, zapisano=1) + "#uwaga")
 
     @app.route("/preferencje", methods=["POST"])
     def prefs():
@@ -1146,6 +1232,7 @@ def make_app(ctx, hosts=None):
             if R.plain(h) not in {R.plain(u["haslo"]) for u in p["unikaj"]}:
                 p["unikaj"].append({"haslo": h, "skad": 0, "kiedy": R.stamp(ctx)})
         PF.save(g.db, p)
+        PF.flag_waiting(ctx)                                           # ostrzeżenia przy czekających ofertach według aktualnych zasad
         flash("Zapisane.")
         return redirect(url_for("settings") + "#nauka")
 
@@ -1244,9 +1331,13 @@ def make_app(ctx, hosts=None):
             return redirect(url_for("edit_cv", aid=aid, ok=1))
         profile, points = D.cv_content(f, sel)
         jobs = [j for j in sorted(f["doswiadczenie"], key=lambda j: (D._ym(j.get("do")), D._ym(j.get("od"))), reverse=True)]
-        rows = [{"j": j, "w_cv": j["id"] in sel["kolejnosc"],
-                 "punkty": (points.get(j["id"]) or [p["tekst"] for p in j["punkty"]][:D.POINTS_PER_JOB]),
-                 "wszystkie": [p["tekst"] for p in j["punkty"]], "wlasne": j["id"] in sel.get("wlasne_punkty", {})} for j in jobs]
+        rows = []
+        for j in jobs:
+            now = points.get(j["id"]) or [p["tekst"] for p in j["punkty"]][:D.POINTS_PER_JOB]
+            pool = [p["tekst"] for p in j["punkty"]]
+            rows.append({"j": j, "w_cv": j["id"] in sel["kolejnosc"], "punkty": now,
+                         "lista": [{"t": t, "on": True} for t in now if t in pool] + [{"t": t, "on": False} for t in pool if t not in now],
+                         "inne": [t for t in now if t not in pool], "wlasne": j["id"] in sel.get("wlasne_punkty", {})})
         return render_template("edytuj_cv.html", a=a, tab="", profil=profile, rows=rows, locked=locked, n=D.POINTS_PER_JOB,
                                zrodlo=sel.get("profil_zrodlo", ""), edited=bool(sel.get("wlasne_punkty") or sel.get("ukryte") or sel.get("pokazane")
                                                                                 or sel.get("profil_zrodlo") == "aga"))
@@ -1392,6 +1483,9 @@ def make_app(ctx, hosts=None):
                     ctx.set_setting(key, "tak" if request.form.get(key) else "nie")
                 ctx.set_setting("owca", "tak" if request.form.get("owca") else "nie")
                 ctx.set_setting("rozmowa", "tak" if request.form.get("rozmowa") else "nie")
+                ctx.set_setting("edge", "tak" if request.form.get("edge") else "nie")
+                if request.form.get("motyw") in ("bordo", "zielen", "krem"):
+                    ctx.set_setting("motyw", request.form["motyw"])
                 for key in ("owca_rano", "owca_przypomnienia"):
                     val = re.sub(r"\s+", "", request.form.get(key, ""))
                     if val and re.fullmatch(r"\d{1,2}:\d{2}(,\d{1,2}:\d{2})*", val):

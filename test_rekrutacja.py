@@ -849,8 +849,8 @@ class Corrections281(RekrutacjaBase):
         self.R.save_facts(self.ctx, f)
         f = self.R.load_facts(self.ctx)
         sel = self.D.clean_selection(f, {"kolejnosc": ["d1", "d2", "d3"]})
-        self.assertEqual(len(sel["punkty"]["d5"]), 3)                     # zawsze 3 punkty przy stanowisku
-        self.assertEqual(len(self.D.default_selection(f)["punkty"]["d5"]), 3)
+        self.assertEqual(len(sel["punkty"]["d5"]), 4)                     # bez wskazań modelu 4 punkty (2.18)
+        self.assertEqual(len(self.D.default_selection(f)["punkty"]["d5"]), 4)
         self.mod.apply_patch(self.ctx, {"osoba": {"adres": "", "miasto": "Kraków"}, "warunki": {"dojazd_km": 20}, "ustawienia": {"bez_prowizji": "tak"}})
         import fitz
         out = self.ctx.folder() / "cv3.pdf"
@@ -916,27 +916,30 @@ class Improvements282(RekrutacjaBase):
         f = self.jobs_with()
         d1 = [p["id"] for p in f["doswiadczenie"][0]["punkty"]]
         sel = self.D.clean_selection(f, {"kolejnosc": ["d1"], "punkty": {"d1": [d1[4], d1[0]]}})
-        self.assertEqual(sel["punkty"]["d1"], [d1[4], d1[0], d1[1]])
-        self.assertTrue(all(len(v) <= 3 for v in sel["punkty"].values()))
+        self.assertEqual(sel["punkty"]["d1"], [d1[4], d1[0], d1[1]])       # model wskazał 2 → uzupełnione do 3
+        self.assertTrue(all(len(v) <= 5 for v in sel["punkty"].values()))
         text = self.pdf_text(f, sel)
         pos = [text.find(x) for x in ("Kurs B", "Kurs C", "Kurs A", "Kurs bez roku")]
         self.assertTrue(all(p >= 0 for p in pos) and pos == sorted(pos), pos)
 
     def test_tailored_profile_only_from_facts(self):
         a = {"stanowisko": "Asystentka biura", "firma": "X", "tresc": OFFER, "zrodlo": "oferta"}
+        self.model.profile = ("Specjalistka z doświadczeniem w administracji, prowadzeniu i archiwizacji dokumentacji. "
+                              "Przygotowywałam raporty, koordynowałam terminy i pracuję dokładnie oraz samodzielnie.")
+        self.assertTrue(self.D.tailored_profile(self.ctx, self.facts, a).startswith("Specjalistka"))
         self.model.profile = ("Specjalistka ds. administracji z doświadczeniem w prowadzeniu i archiwizacji dokumentacji. "
                               "Koordynuje terminy, przygotowuje raporty i dba o porządek w obiegu dokumentów.")
-        self.assertTrue(self.D.tailored_profile(self.ctx, self.facts, a).startswith("Specjalistka"))
+        self.assertEqual(self.D.tailored_profile(self.ctx, self.facts, a), "")      # 3. osoba i „obieg” spoza faktów (2.16.3)
         self.model.profile = "Specjalistka z 12-letnim doświadczeniem w SAP, która zarządzała zespołem 40 osób w dziale administracji firmy."
         self.assertEqual(self.D.tailored_profile(self.ctx, self.facts, a), "")      # liczby i narzędzie spoza faktów — odrzucone
         self.ready()
-        self.model.profile = ("Specjalistka ds. administracji z doświadczeniem w prowadzeniu i archiwizacji dokumentacji. "
-                              "Koordynuje terminy i przygotowuje raporty.")
+        self.model.profile = ("Specjalistka z doświadczeniem w administracji, prowadzeniu i archiwizacji dokumentacji. "
+                              "Przygotowywałam raporty i koordynowałam terminy, pracując dokładnie.")
         aid = self.add()
         self.P.prepare(self.ctx, aid)
         sel = json.loads(self.row(aid)["wybor"])
         self.assertEqual((sel["profil_zrodlo"], sel["profil_model"][:12]), ("model", "Specjalistka"))
-        self.assertIn("Koordynuje terminy", self.pdf_text(self.R.load_facts(self.ctx), sel))
+        self.assertIn("Przygotowywałam raporty", self.pdf_text(self.R.load_facts(self.ctx), sel))
 
     def test_cv_edit_own_points_hide_and_restore(self):
         f = self.jobs_with(2)
@@ -1825,6 +1828,274 @@ class Feedback216(RekrutacjaBase):
         cl.post("/preferencje", data={"csrf": "t", "co": "usun_unikaj", "i": "0"})
         with self.R.db(self.ctx) as c:
             self.assertNotIn("AutoCAD", [u["haslo"] for u in self.PF.load(c)["unikaj"]][:1])
+
+
+LONG = """Asystentka biura zarządu
+Firma Testowa Sp. z o.o., Kraków
+
+Twoje zadania:
+• prowadzenie kalendarza zarządu
+• organizacja spotkań i podróży służbowych
+- obsługa korespondencji
+
+Wymagania:
+• doświadczenie w pracy biurowej
+• dobra organizacja pracy
+• znajomość pakietu MS Office
+
+Oferujemy:
+• umowę o pracę
+• pracę w Krakowie
+
+O firmie
+Jesteśmy firmą z tradycjami.
+""" + ("Dodatkowy opis firmy. " * 40)
+
+
+class Details2162(RekrutacjaBase):
+    """2.16.2: wymagania i obowiązki nie znikają (ucięta odpowiedź modelu); linki do ogłoszeń w Edge na Windows."""
+    def setUp(self):
+        super().setUp()
+        self.O = importlib.import_module(self.mod.__name__ + ".oferty")
+        self.GM = importlib.import_module(self.mod.__name__ + ".gemini")
+        self.ready()
+
+    def test_sections(self):
+        cut = self.O.sections(LONG)
+        self.assertEqual(cut["obowiazki"], ["prowadzenie kalendarza zarządu", "organizacja spotkań i podróży służbowych", "obsługa korespondencji"])
+        self.assertEqual(cut["wymagania"][0], "doświadczenie w pracy biurowej")
+        self.assertEqual(cut["oferujemy"], ["umowę o pracę", "pracę w Krakowie"])                  # „O firmie” kończy sekcję
+
+    def test_bez_modelu_i_z_ucietym(self):
+        with patch.object(W, "ask", return_value=None):
+            out = self.O.analyze(self.ctx, self.R.load_facts(self.ctx), LONG)
+        self.assertEqual(len(out["wymagania"]), 3)
+        self.assertEqual(len(out["obowiazki"]), 3)
+        g = {"wymagania": ["Gemini: doświadczenie"], "obowiazki": ["Gemini: kalendarz"], "oferujemy": []}
+        with patch.object(W, "ask", return_value=json.dumps({"firma": "Testowa", "ocena": 70})), \
+             patch.object(self.GM, "available", return_value=True), patch.object(self.GM, "ask_json", return_value=g) as gm:
+            out = self.O.analyze(self.ctx, self.R.load_facts(self.ctx), LONG)
+        self.assertTrue(gm.called)
+        self.assertEqual((out["firma"], out["wymagania"]), ("Testowa", ["Gemini: doświadczenie"]))
+
+    def test_uzupelnianie_w_tle(self):
+        aid = self.add(tresc=LONG, status="do_zatwierdzenia", analiza=json.dumps({"wymagania": [], "obowiazki": [], "wynagrodzenie": ""}))
+        with patch.object(W, "ask", return_value=None), patch.object(self.D, "match_report", return_value=[{"wymaganie": "x", "ocena": "mam", "dlaczego": ""}]):
+            self.assertEqual(self.P.refresh_details(self.ctx), aid)
+        info = json.loads(self.row(aid)["analiza"])
+        self.assertEqual(len(info["wymagania"]), 3)
+        self.assertEqual(info["dopasowanie"][0]["ocena"], "mam")
+        self.assertIsNone(self.P.refresh_details(self.ctx))                                 # drugi raz nie
+
+    def test_edge(self):
+        from werkzeug.security import generate_password_hash
+        aid = self.add(url="https://praca.example.pl/oferta/1", status="do_zatwierdzenia")
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        win = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130"}
+        mac = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Safari/605"}
+        self.assertIn('href="microsoft-edge:https://praca.example.pl/oferta/1"', cl.get(f"/aplikacja/{aid}", headers=win).get_data(as_text=True))
+        html = cl.get(f"/aplikacja/{aid}", headers=mac).get_data(as_text=True)
+        self.assertIn('href="https://praca.example.pl/oferta/1" target="_blank"', html)
+        self.ctx.set_setting("edge", "nie")
+        self.assertNotIn("microsoft-edge:", cl.get(f"/aplikacja/{aid}", headers=win).get_data(as_text=True))
+
+
+COMMS = OFFER + "\nSpecjalista ds. komunikacji wewnętrznej. Wymagania: obsługa systemów CMS i narzędzi mailingowych, praca w Agile, kampanie."
+
+
+class Truth2163(RekrutacjaBase):
+    """2.16.3: opis w CV tylko z faktów; uwagi bez „Kraków” na liście „pomijam”; zapis uwagi od razu."""
+    def setUp(self):
+        super().setUp()
+        self.PF = importlib.import_module(self.mod.__name__ + ".preferencje")
+        self.ready()
+
+    def test_opis_z_ogloszenia_odrzucony(self):
+        f = self.R.load_facts(self.ctx)
+        a = {"tresc": COMMS, "stanowisko": "Specjalista ds. komunikacji wewnętrznej", "firma": "Uczelnia", "zrodlo": "auto"}
+        bad = self.D.vocab_check(f, a, "Specjalistka ds. komunikacji wewnętrznej z doświadczeniem w obsłudze systemów CMS i mailingowych. "
+                                       "Koordynuje harmonogramy kampanii zgodnie z zasadami Agile.")
+        self.assertTrue({"CMS", "Agile"} <= set(bad) or "cms" in " ".join(bad).lower(), bad)
+        self.assertTrue(any("3. osoba" in x for x in bad))
+        own = " ".join(p["tekst"] for p in f["profil"][:2])
+        self.assertEqual(self.D.vocab_check(f, a, own), [])                          # zatwierdzone zdania Agi przechodzą
+        fake = {"profil": "Specjalistka ds. komunikacji wewnętrznej z doświadczeniem w obsłudze systemów CMS, mailingu i pracy w Agile."}
+        with patch.object(self.D, "write", return_value=fake) as w:
+            self.assertEqual(self.D.tailored_profile(self.ctx, f, dict(a, id=1)), "")
+        self.assertEqual(w.call_count, 2)                                              # jedna poprawka, potem zatwierdzony opis
+        self.assertIn("spoza FAKTÓW", w.call_args_list[1].args[1])
+
+    def test_gotowe_cv_poprawione_w_tle(self):
+        aid = self.add(tresc=COMMS, status="do_zatwierdzenia", stanowisko="Specjalista ds. komunikacji wewnętrznej")
+        sel = dict(self.D.default_selection(self.R.load_facts(self.ctx)), profil_zrodlo="model",
+                   profil_tekst="Specjalistka ds. komunikacji wewnętrznej, obsługa systemów CMS i mailingowych, Agile.",
+                   profil_model="Specjalistka ds. komunikacji wewnętrznej, obsługa systemów CMS i mailingowych, Agile.")
+        with self.R.db(self.ctx) as c:
+            c.execute("UPDATE aplikacje SET wybor=?, list='List.' WHERE id=?", (json.dumps(sel, ensure_ascii=False), aid))
+            c.commit()
+        self.assertEqual(self.P.recheck_profile(self.ctx), aid)
+        new = json.loads(self.row(aid)["wybor"])
+        self.assertNotIn("profil_tekst", new)
+        self.assertIsNone(self.P.recheck_profile(self.ctx))
+        with self.R.db(self.ctx) as c:
+            self.assertTrue(c.execute("SELECT 1 FROM historia WHERE aplikacja_id=? AND co LIKE 'opis w CV wrócił%'", (aid,)).fetchone())
+
+    def test_bez_miejsc_na_liscie_pomijam(self):
+        aid = self.add(tresc=GEO + "\nPraca w Krakowie, Kraków, zespół AI.", status="do_zatwierdzenia")
+        fake = {"unikaj": ["Kraków", "AI", "AutoCAD"], "lubi": [], "angielski": False, "zasada": ""}
+        with patch.object(self.D, "write", return_value=fake):
+            self.PF.learn(self.ctx, aid, ["programy"], "")
+        with self.R.db(self.ctx) as c:
+            self.assertEqual([u["haslo"] for u in self.PF.load(c)["unikaj"]], ["AutoCAD"])
+            self.PF.save(c, dict(self.PF.load(c), unikaj=[{"haslo": "Kraków", "skad": 0, "kiedy": ""}, {"haslo": "AI", "skad": 0, "kiedy": ""}]))
+            c.execute("UPDATE aplikacje SET ostrzezenia=? WHERE id=?", (json.dumps(["Wymaga: Kraków — prosiłaś, żeby takie oferty pomijać.",
+                                                                                   "Wymaga: Kraków, AI — prosiłaś, żeby takie oferty pomijać.", "Inne."]), aid))
+            c.commit()
+        self.assertEqual(sorted(self.PF.cleanup(self.ctx)), ["AI", "Kraków"])
+        self.assertEqual(json.loads(self.row(aid)["ostrzezenia"]), ["Inne."])
+
+    def test_ogolna_uwaga_bez_zasady(self):
+        aid = self.add(tresc=GEO, status="do_zatwierdzenia")
+        with patch.object(self.D, "write") as w:
+            self.PF.learn(self.ctx, aid, [], "całkiem spoko.")
+        self.assertFalse(w.called)
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(self.PF.load(c)["zasady"], [])
+            self.assertEqual(self.PF.feedback_for(c, aid)[0]["nauka"], "zapisane — bez nowych zasad")
+
+    def test_zapis_od_razu_w_panelu(self):
+        from werkzeug.security import generate_password_hash
+        aid = self.add(tresc=GEO, status="do_zatwierdzenia")
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        r = cl.post(f"/aplikacja/{aid}/uwaga", data={"csrf": "t", "uwaga": "całkiem spoko.", "co": "zapisz"})
+        self.assertIn("zapisano=1", r.headers["Location"])
+        html = cl.get(r.headers["Location"]).get_data(as_text=True)
+        self.assertIn("✓ Zapisane", html)
+        self.assertIn("„całkiem spoko.”", html)
+
+
+class Look217(RekrutacjaBase):
+    def test_kolory_panelu(self):
+        from werkzeug.security import generate_password_hash
+        self.ready()
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        self.assertIn('<body class="t-bordo">', cl.get("/").get_data(as_text=True))
+        self.ctx.set_setting("motyw", "zielen")
+        html = cl.get("/ustawienia").get_data(as_text=True)
+        self.assertIn('<body class="t-zielen">', html)
+        self.assertIn("Butelkowa zieleń i złoto", html)
+        self.ctx.set_setting("motyw", "<script>")
+        self.assertIn('<body class="t-bordo">', cl.get("/").get_data(as_text=True))
+
+
+class Pool218(RekrutacjaBase):
+    """2.18: pula punktów do CV, dłuższe opisy do listów, wzory opisu profilu, wybór punktów w „Edytuj CV”."""
+    PATCH = {"stanowiska_pule": [
+        {"szukaj": ["sekretarka medyczna", "zzoz"], "stanowisko": "Sekretarka medyczna", "firma": "ZZOZ w Czarnkowie",
+         "punkty": [f"Punkt medyczny {i}." for i in range(1, 9)], "szczegoly": ["Prowadzenie ponad 80 historii chorób miesięcznie.", "Obsługa administracyjna pacjentów i porządek w dokumentacji."]},
+        {"szukaj": ["żłob"], "stanowisko": "Pomoc opiekunki w żłobku", "firma": "Małe Cuda", "opcjonalne": True,
+         "punkty": ["Opieka nad dziećmi."]}],
+        "kursy_jesli_brak": [{"zawiera": "efg", "tekst": "EFG® – European Financial Guide (2025)"}],
+        "narzedzia": [{"nazwa": "MS Office", "poziom": ""}],
+        "profil_wzory": ["Specjalistka z doświadczeniem w administracji. Wyróżniam się dokładnością."]}
+
+    def test_patch_pool_details_and_examples(self):
+        self.mod.apply_patch(self.ctx, self.PATCH)
+        self.mod.apply_patch(self.ctx, self.PATCH)                       # drugi raz niczego nie dubluje
+        f = self.R.load_facts(self.ctx)
+        jobs = {j["stanowisko"]: j for j in f["doswiadczenie"]}
+        self.assertEqual(len(f["doswiadczenie"]), 3)
+        med = jobs["Sekretarka medyczna"]
+        self.assertEqual((med["od"], med["firma"], len(med["punkty"])), ("02.2022", "ZZOZ w Czarnkowie", 8))   # daty zostają
+        self.assertTrue(jobs["Pomoc opiekunki w żłobku"]["opcjonalne"])
+        self.assertEqual(sum("EFG" in k["tekst"] for k in f["kursy"]), 1)
+        self.assertIn("MS Office", [t["nazwa"] for t in f["narzedzia"]])
+        brief = self.R.facts_brief(f, ids=False)
+        self.assertIn("80 historii chorób", brief)                        # do listów
+        self.assertIn("Wyróżniam się dokładnością", brief)
+        self.assertNotIn("80 historii chorób", self.R.facts_brief(f))     # do wyboru punktów CV — tylko punkty
+
+    def test_selection_three_to_five(self):
+        self.mod.apply_patch(self.ctx, self.PATCH)
+        f = self.R.load_facts(self.ctx)
+        jid = next(j["id"] for j in f["doswiadczenie"] if j["stanowisko"] == "Sekretarka medyczna")
+        ids = [p["id"] for p in next(j for j in f["doswiadczenie"] if j["id"] == jid)["punkty"]]
+        for asked, want in ((ids[:1], 3), (ids[:4], 4), (ids[:7], 5)):
+            sel = self.D.clean_selection(f, {"kolejnosc": [jid], "punkty": {jid: asked}})
+            self.assertEqual(len(sel["punkty"][jid]), want)
+            self.assertEqual(sel["punkty"][jid][0], asked[0])
+
+    def test_edit_page_lists_pool_and_saves_choice(self):
+        self.mod.apply_patch(self.ctx, self.PATCH)
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        page = cl.get(f"/aplikacja/{aid}/cv").data.decode()
+        self.assertIn("Wybierz punkty", page)
+        self.assertIn("Punkt medyczny 8.", page)                          # cała lista do wyboru
+        f = self.R.load_facts(self.ctx)
+        jid = next(j["id"] for j in f["doswiadczenie"] if j["stanowisko"] == "Sekretarka medyczna")
+        others = [j["id"] for j in f["doswiadczenie"] if not j.get("opcjonalne")]
+        form = {"csrf": "t", "co": "zapisz", "profil": "", "pokaz": others,
+                f"p_{jid}": ["Punkt medyczny 8.", "Punkt medyczny 2.", "Mój punkt", ""]}
+        self.assertEqual(cl.post(f"/aplikacja/{aid}/cv", data=form).status_code, 302)
+        sel = json.loads(self.row(aid)["wybor"])
+        self.assertEqual(sel["wlasne_punkty"][jid], ["Punkt medyczny 8.", "Punkt medyczny 2.", "Mój punkt"])
+
+    def test_settings_keep_details_and_examples(self):
+        self.mod.apply_patch(self.ctx, self.PATCH)
+        self.ready()
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        html = cl.get("/ustawienia").get_data(as_text=True)
+        self.assertIn("Prowadzenie ponad 80 historii chorób miesięcznie.", html)
+        self.assertIn("Wyróżniam się dokładnością", html)
+
+    def test_profile_uses_examples_and_numbers(self):
+        self.mod.apply_patch(self.ctx, self.PATCH)
+        f = self.R.load_facts(self.ctx)
+        seen = []
+        good = ("Specjalistka z doświadczeniem w administracji i prowadzeniu dokumentacji medycznej. Posiadam praktykę w prowadzeniu "
+                "ponad 80 historii chorób miesięcznie oraz w obsłudze administracyjnej pacjentów. Wyróżniam się dokładnością, "
+                "samodzielnością i bardzo dobrą organizacją pracy, dbając o terminowość i porządek w dokumentacji.")
+        def fake_write(ctx, prompt, **kw):
+            seen.append(prompt)
+            return {"profil": good}
+        with patch.object(self.D, "write", fake_write):
+            out = self.D.tailored_profile(self.ctx, f, {"stanowisko": "Sekretarka", "firma": "X", "tresc": OFFER})
+        self.assertEqual(out, good)
+        self.assertIn("OPISY PROFILU NAPISANE I ZATWIERDZONE PRZEZ KANDYDATKĘ", seen[0])
 
 
 class Conversation213(RekrutacjaBase):

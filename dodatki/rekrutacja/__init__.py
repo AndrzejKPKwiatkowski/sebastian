@@ -206,6 +206,29 @@ def apply_patch(ctx, patch):
             if hit and n(rule["na"]) not in {n(x) for x in j["punkty"]}:
                 j["punkty"][hit[0]] = rule["na"]
                 added += 1
+    pools = []
+    for s in patch.get("stanowiska_pule", []):                          # 2.18: pełna lista punktów do CV + dłuższe opisy do listów
+        keys = [n(k) for k in s.get("szukaj", [])]
+        j = next((j for j in jobs if any(k and k in n(j["stanowisko"] + " " + j.get("firma", "")) for k in keys)), None)
+        if j is None:
+            j = {"stanowisko": s["stanowisko"], "firma": s.get("firma", ""), "miejsce": "", "od": "", "do": "", "punkty": []}
+            if s.get("opcjonalne"):
+                j["opcjonalne"] = True
+            jobs.append(j)
+            pools.append(f"dodane stanowisko: {s['stanowisko']} (uzupełnij daty w Ustawieniach)")
+        else:
+            pools.append(f"{s['stanowisko']}: {len(s['punkty'])} punktów do wyboru")
+        j["stanowisko"], j["firma"] = s["stanowisko"], s.get("firma", j.get("firma", ""))
+        j["punkty"] = list(dict.fromkeys(s["punkty"]))
+        j["szczegoly"] = list(s.get("szczegoly", []))
+        added += 1
+    if patch.get("profil_wzory"):
+        f["profil_wzory"] = list(dict.fromkeys(patch["profil_wzory"]))
+        added += 1
+    for k in patch.get("kursy_jesli_brak", []):
+        if not any(n(k["zawiera"]) in n(x if isinstance(x, str) else x["tekst"]) for x in f["kursy"]):
+            f["kursy"] = flat(f["kursy"]) + [k["tekst"]]
+            added += 1
     f["doswiadczenie"] = jobs
     tools = [{"nazwa": t["nazwa"], "poziom": t["poziom"]} for t in f["narzedzia"]]
     tools = [t for t in tools if not any(n(x) in n(t["nazwa"]) for x in patch.get("narzedzia_usun", []))]
@@ -225,6 +248,10 @@ def apply_patch(ctx, patch):
         f["warunki"][k] = v
     for k, v in (patch.get("ustawienia") or {}).items():
         ctx.set_setting(k, v)
+    if pools:                                                           # kopia faktów przed dużą zmianą
+        import shutil, time as _t
+        with contextlib.suppress(Exception):
+            shutil.copy(R.facts_path(ctx), R.facts_path(ctx).with_name(f"fakty.kopia-{_t.strftime('%Y%m%d-%H%M%S')}.json"))
     R.save_facts(ctx, f)
     hist = 0
     with R.db(ctx) as c:
@@ -238,7 +265,8 @@ def apply_patch(ctx, patch):
             R.note(c, ctx, cur.lastrowid, "dopisana z historii poszukiwań (przed Sebastianem)")
             hist += 1
         c.commit()
-    return f"Baza faktów: dodane {added}. Historia aplikacji: dopisane {hist}."
+    return (f"Baza faktów: dodane {added}. Historia aplikacji: dopisane {hist}." +
+            "".join(f"\n    {x}" for x in pools if x.startswith("dodane")))
 
 
 def cmd_przepisz(ctx, args):

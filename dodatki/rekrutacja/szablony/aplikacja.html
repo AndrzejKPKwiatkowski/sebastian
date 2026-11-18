@@ -24,9 +24,9 @@
     <a class="btn ghost small" href="{{ url_for('file', aid=a.id, which='cv', pobierz=1) }}">Pobierz CV</a>
     <a class="btn ghost small" href="{{ url_for('file', aid=a.id, which='list', pobierz=1) }}">Pobierz list motywacyjny</a>
     {% if editable %}<a class="btn ghost small" href="{{ url_for('edit_cv', aid=a.id) }}">Edytuj CV</a>{% endif %}
-    {% if a.url and a.url.lower().startswith(('http://', 'https://')) %}<a class="btn plain small" href="{{ a.url }}" target="_blank" rel="noopener noreferrer">Otwórz ogłoszenie ↗</a>{% endif %}
+    {% if a.url and a.url.lower().startswith(('http://', 'https://')) %}<a class="btn plain small" {{ ext(a.url) }}>Otwórz ogłoszenie ↗</a>{% endif %}
   </div>
-  {% elif a.url and a.url.lower().startswith(('http://', 'https://')) %}<p class="small"><a href="{{ a.url }}" target="_blank" rel="noopener noreferrer">Otwórz ogłoszenie ↗</a></p>{% endif %}
+  {% elif a.url and a.url.lower().startswith(('http://', 'https://')) %}<p class="small"><a {{ ext(a.url) }}>Otwórz ogłoszenie ↗</a></p>{% endif %}
 
   {% if a.tresc %}
   <div class="card">
@@ -54,7 +54,8 @@
   <div class="card" id="uwaga">
     <h2>Twoja uwaga do tej oferty</h2>
     <p class="small soft">Napisz, co Ci tu nie pasuje (albo co Ci się podoba). Sebastian zapamięta to i będzie lepiej wybierał kolejne oferty.</p>
-    <form method="post" action="{{ url_for('feedback', aid=a.id) }}"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    {% if saved %}<p class="ok-note">✓ Zapisane. Sebastian przemyśli uwagę w ciągu minuty — co z niej wyciągnął, pojawi się poniżej i w Ustawieniach → Czego szukam.</p>{% endif %}
+    <form method="post" action="{{ url_for('feedback', aid=a.id) }}" onsubmit="var f=this;setTimeout(function(){f.querySelectorAll('button').forEach(function(b){b.disabled=true});f.querySelector('button').textContent='Zapisuję…'},0)"><input type="hidden" name="csrf" value="{{ csrf() }}">
       <div class="chips">{% for k, label in TAGS %}<label class="chip"><input type="checkbox" name="tag" value="{{ k }}"> {{ label }}</label>{% endfor %}</div>
       <textarea name="uwaga" rows="3" style="min-height:70px;margin-top:10px" placeholder="Własnymi słowami, np. „wymagają znajomości programów geodezyjnych, których nie znam”"></textarea>
       <div class="actions" style="margin-top:10px">
@@ -65,7 +66,7 @@
     </form>
     {% if feedback %}<div class="small soft" style="margin-top:12px">{% for u in feedback %}
       <p style="margin:6px 0">{{ u.kiedy|dzien }} — {% for t in u.tagi|loads %}{{ TAGN.get(t, t) }}{% if not loop.last %}, {% endif %}{% endfor %}{% if u.tekst %}{% if u.tagi|loads %} · {% endif %}„{{ u.tekst }}”{% endif %}
-      {% if u.nauka %}<br><span>Sebastian: {{ u.nauka }}</span>{% endif %}</p>{% endfor %}</div>{% endif %}
+      <br><span>Sebastian: {{ u.nauka or 'jeszcze myśli…' }}</span></p>{% endfor %}</div>{% endif %}
   </div>
   {% endif %}
 
@@ -73,7 +74,7 @@
   <div class="card">
     <h2>Wyślij przez formularz</h2>
     <ol class="steps">
-      <li>{% if a.url.lower().startswith(('http://', 'https://')) %}<a href="{{ a.url }}" target="_blank" rel="noopener noreferrer">Otwórz ogłoszenie ↗</a>{% else %}Otwórz ogłoszenie{% endif %} i kliknij „Aplikuj”.</li>
+      <li>{% if a.url.lower().startswith(('http://', 'https://')) %}<a {{ ext(a.url) }}>Otwórz ogłoszenie ↗</a>{% else %}Otwórz ogłoszenie{% endif %} i kliknij „Aplikuj”.</li>
       <li>Pobierz <a href="{{ url_for('file', aid=a.id, which='cv', pobierz=1) }}">CV</a> i <a href="{{ url_for('file', aid=a.id, which='list', pobierz=1) }}">list motywacyjny</a>, a potem dołącz je w formularzu.</li>
       <li>Pola przepisz stąd jednym kliknięciem.</li>
       <li>Po wysłaniu wróć tutaj i kliknij „Wysłałam sama”.</li>

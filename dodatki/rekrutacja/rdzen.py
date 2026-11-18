@@ -340,6 +340,8 @@ def facts_brief(f, ids=True):
         out.append(f"  {tag(j)}{j['stanowisko']} — {j.get('firma', '')}, {j.get('miejsce', '')} ({j.get('od', '')} – {j.get('do', '')})"
                    + (" (opcjonalne)" if j.get("opcjonalne") and ids else ""))
         out += [f"      {tag(p)}{p['tekst']}" for p in j["punkty"]]
+        if not ids and j.get("szczegoly"):                                   # dłuższe opisy — do listów i opisu, nie do CV
+            out += [f"      · {t}" for t in j["szczegoly"]]
     out.append("WYKSZTAŁCENIE:")
     out += [f"  {e.get('uczelnia', '')}: {e.get('kierunek', '')}, {e.get('tytul', '')} ({e.get('okres', '')})" for e in f["wyksztalcenie"]]
     out.append("KURSY: " + "; ".join(f"{tag(k)}{k['tekst']}" for k in f["kursy"]))
@@ -351,6 +353,9 @@ def facts_brief(f, ids=True):
     out.append(f"Dostępność: {w.get('dostepnosc', '')}. Forma: {w.get('umowa', '')}, {w.get('etat', '')}.")
     for q, a in (f.get("odpowiedzi") or {}).items():
         out.append(f"Dodatkowo — {q}: {a}")
+    if not ids and f.get("profil_wzory"):
+        out.append("OPISY PROFILU NAPISANE I ZATWIERDZONE PRZEZ KANDYDATKĘ (jej słowa o sobie):")
+        out += [f"  — {t}" for t in f["profil_wzory"]]
     return "\n".join(out)
 
 

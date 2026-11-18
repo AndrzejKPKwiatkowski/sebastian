@@ -12,6 +12,9 @@
 <p class="small soft">Z tych zdań składam początek CV: do każdej oferty wybieram 3–4 najlepiej pasujące. Każde zdanie w osobnej linii. Niczego do nich nie dopisuję.</p>
 <textarea name="profil" rows="6">{% for p in f.profil %}{{ p.tekst }}
 {% endfor %}</textarea>
+<label style="margin-top:12px">Twoje wzory opisu (każdy opis w jednej linii) — na ich stylu Sebastian pisze opis pod konkretną ofertę</label>
+<textarea name="profil_wzory" rows="6">{% for t in f.profil_wzory or [] %}{{ t }}
+{% endfor %}</textarea>
 
 <h3 style="margin-top:28px">Doświadczenie</h3>
 <p class="small soft">Daty i nazwy trafiają do CV dokładnie tak, jak tutaj. Punkty wpisuj po jednym w linii.</p>
@@ -24,8 +27,11 @@
   <div class="row3"><div><label>Miejscowość</label><input type="text" name="d{{ loop.index0 }}_miejsce" value="{{ j.miejsce or '' }}"></div>
   <div><label>Od</label><input type="text" name="d{{ loop.index0 }}_od" value="{{ j.od or '' }}" placeholder="MM.RRRR"></div>
   <div><label>Do</label><input type="text" name="d{{ loop.index0 }}_do" value="{{ j.do or '' }}" placeholder="MM.RRRR albo obecnie"></div></div>
-  <label>Co robiłam (po jednym punkcie w linii)</label>
+  <label>Punkty do CV — Sebastian wybiera z nich 3–5 pod ofertę (po jednym w linii)</label>
   <textarea name="d{{ loop.index0 }}_punkty" rows="3">{% for p in j.punkty or [] %}{{ p.tekst }}
+{% endfor %}</textarea>
+  <label>Dłuższy opis do listów motywacyjnych (po jednym zdaniu w linii; nie trafia do CV)</label>
+  <textarea name="d{{ loop.index0 }}_szczegoly" rows="3">{% for t in j.szczegoly or [] %}{{ t }}
 {% endfor %}</textarea>
   <label class="check small"><input type="checkbox" name="d{{ loop.index0 }}_opcjonalne" value="1" {{ 'checked' if j.opcjonalne }}> pokazuj w CV tylko wtedy, gdy pasuje do oferty</label>
   {% if j.stanowisko %}<label class="check small"><input type="checkbox" name="d{{ loop.index0 }}_usun" value="1"> usuń to stanowisko z bazy</label>{% endif %}

@@ -60,7 +60,8 @@ def chronological(f, ids):
     return sorted(ids, key=lambda i: (_ym(by[i].get("do")), _ym(by[i].get("od"))), reverse=True)
 
 
-POINTS_PER_JOB = 3
+POINTS_PER_JOB = 4          # domyślnie (bez modelu); model wybiera 3–5 najlepiej pasujących
+POINTS_MIN, POINTS_MAX = 3, 5
 
 
 def courses_newest_first(kursy):
@@ -97,7 +98,8 @@ def clean_selection(f, sel):
     for j in f["doswiadczenie"]:
         ids = [p["id"] for p in j["punkty"]]
         got = [x for x in dict.fromkeys((sel.get("punkty") or {}).get(j["id"]) or []) if x in ids]
-        points[j["id"]] = (got + [x for x in ids if x not in got])[:POINTS_PER_JOB]   # 3 najważniejsze dla oferty
+        want = max(POINTS_MIN, min(POINTS_MAX, len(got))) if got else POINTS_PER_JOB
+        points[j["id"]] = (got + [x for x in ids if x not in got])[:want]   # 3–5 najważniejszych dla oferty
     hidden = [x for x in dict.fromkeys(sel.get("ukryte") or []) if x in jobs]
     if hidden and len(hidden) < len(order):
         order = [x for x in order if x not in hidden]
@@ -194,8 +196,9 @@ FAKTY:
 Zwróć JSON:
 {{"kolejnosc": [numery stanowisk d… od NAJLEPIEJ PASUJĄCEGO do oferty (np. przy ofercie pedagogicznej najpierw praca z dziećmi i praktyki,
      przy gastronomii najpierw gastronomia, przy biurze najpierw administracja); stanowiska oznaczone (opcjonalne) dodaj tylko, gdy pasują],
-  "punkty": {{"d1": [DOKŁADNIE 3 numery punktów tego stanowiska, które najbardziej zwiększą szansę na tę pracę; najważniejszy pierwszy;
-     punkty z liczbami i konkretnymi efektami mają pierwszeństwo, gdy pasują do oferty]}},
+  "punkty": {{"d1": [3 albo 4 numery punktów tego stanowiska (5 tylko, gdy stanowisko bardzo pasuje do oferty), które najlepiej
+     odpowiadają WYMAGANIOM i OBOWIĄZKOM z ogłoszenia; najważniejszy pierwszy; punkty z liczbami i efektami
+     (np. ponad 100 planów, 80 historii chorób, 10 transmisji, 4 awanse) mają pierwszeństwo, gdy pasują do oferty]}},
   "profil": [3 albo 4 numery zdań p…, w kolejności czytania],
   "umiejetnosci": [do 6 numerów u…],
   "narzedzia": [do 7 numerów n…]}}"""
@@ -212,12 +215,18 @@ def tailored_profile(ctx, f, app):
         return ""
     prompt = f"""Napisz opis do sekcji „Profil zawodowy” w CV kandydatki, dopasowany do tej oferty. Po polsku, w formach żeńskich.
 
-ŻELAZNA ZASADA: wyłącznie to, co jest w FAKTACH. Żadnych nowych umiejętności, narzędzi, lat doświadczenia, liczb ani certyfikatów.
-Wybierz z FAKTÓW to, co najbardziej odpowiada wymaganiom oferty, i nazwij to słowami bliskimi ogłoszeniu.
+ŻELAZNA ZASADA: wyłącznie to, co jest w FAKTACH. Żadnych nowych umiejętności, narzędzi, lat doświadczenia, certyfikatów ani liczb spoza FAKTÓW.
+Wybierz z FAKTÓW to, co najbardziej odpowiada wymaganiom oferty, i opisz to SŁOWAMI Z FAKTÓW.
+Z ogłoszenia NIE przenoś nazw stanowisk, narzędzi, systemów, metod, obszarów ani zadań, których nie ma w FAKTACH
+(jeśli oferta wymaga np. CMS, mailingu, Agile, a w FAKTACH tego nie ma — po prostu o tym nie pisz).
 Jeśli w FAKTACH jest liczba, która pasuje do oferty (np. ile dokumentów miesięcznie), możesz ją podać dokładnie tak jak w faktach.
 
-FORMA: 2 albo 3 zdania, razem 35–65 słów. Styl CV, bez „ja”, bez nazwy firmy, bez frazesów („z pasją”, „dynamiczny”),
-bez myślników. Pierwsze zdanie mówi, kim jest kandydatka w kontekście tej roli (np. „Specjalistka ds. …”, „Pedagożka …”).
+FORMA: 3–5 zdań, razem 55–95 słów, jak w OPISACH PROFILU NAPISANYCH PRZEZ KANDYDATKĘ (to wzór stylu i słownictwa):
+„Specjalistka z doświadczeniem w …”, „Posiadam praktykę w …”, „Wyróżniam się …”, „Sprawnie …/Łączę …”.
+Wybierz ze wzorów i faktów to, co najlepiej odpowiada tej ofercie, i ułóż na nowo pod nią (nie kopiuj całego wzoru).
+Jeśli pasuje do oferty, dodaj JEDNĄ konkretną liczbę z FAKTÓW (np. ponad 100 planów finansowych, ok. 80 historii chorób miesięcznie,
+10 transmisji i 8 wywiadów, 4 awanse) — dokładnie tak, jak w faktach.
+Bez nazwy firmy, bez frazesów („z pasją”, „dynamiczny”), bez myślników. Nigdy w 3. osobie („koordynuje”, „promuje”).
 
 OFERTA: {app.get('stanowisko') or '(zapytanie o współpracę)'} — {app.get('firma') or ''}
 {(app.get('tresc') or '')[:3000]}
@@ -226,13 +235,53 @@ FAKTY:
 {R.facts_brief(f, ids=False)}
 
 Zwróć JSON {{"profil": "..."}}"""
-    with contextlib.suppress(Exception):
-        out = write(ctx, prompt, max_tokens=300, temperature=0.3)
-        text = re.sub(r"\s+", " ", re.sub(r"[ \t]*[—–][ \t]*", ", ", str((out or {}).get("profil") or ""))).strip()
-        words = len(text.split())
-        if 15 <= words <= 90 and not rule_check(f, app, text):
-            return text
+    feedback = ""
+    for attempt in range(2):
+        with contextlib.suppress(Exception):
+            out = write(ctx, prompt + feedback, max_tokens=500, temperature=0.3)
+            text = re.sub(r"\s+", " ", re.sub(r"[ \t]*[—–][ \t]*", ", ", str((out or {}).get("profil") or ""))).strip()
+            words = len(text.split())
+            bad = vocab_check(f, app, text)
+            if 15 <= words <= 120 and not rule_check(f, app, text) and not bad:
+                return text
+            if bad:
+                feedback = ("\n\nPOPRAWKA: poprzednia wersja zawierała słowa spoza FAKTÓW: " + ", ".join(bad[:8]) +
+                            ". Napisz od nowa wyłącznie z FAKTÓW.")
     return ""
+
+
+GENERIC = set("""specjalistka specjalista doswiadczeniem doswiadczenie doswiadczenia kompleksowej kompleksowa obsludze obsluga obslugi
+prowadzeniu prowadzenie prowadzilam prowadzac wspolpracy wspolpracowalam wspolpraca zespolem zespole zespolu dbajac dbalosc terminowosc
+organizacji organizacja organizowalam organizowanie koordynowaniu koordynowalam koordynacji koordynacja dokumentacji dokumentacja
+zadania zadan zadaniami umiejetnosci umiejetnosc wiedza wiedzy osobami osobom klientami klientow klientow pracownikami praca pracy
+pracowalam rowniez takze ktore ktorych ktora swoich swoje swojej bardzo ponad miesiecznie przez wraz oraz dzieki zakresie zakres
+codziennej codziennie biezacej biezaca sprawnie sprawna skutecznie skuteczna samodzielnie samodzielna dokladnie dokladnosc rzetelnie
+rzetelna odpowiedzialnie odpowiedzialna zaangazowanie zaangazowana komunikatywna komunikacja komunikacji kontakt kontaktow wsparcie
+wspieralam wspierajac roznych roznymi wielu kilku dobrze dobra posiadam praktyke praktyka praktyki wyrozniam lacze laczac
+potrafie chetnie""".split())
+
+
+def vocab_check(f, app, text):
+    """Słowa w opisie, których nie ma w faktach: wzięte z ogłoszenia (najczęstsza zmyślona rzecz: „CMS”, „Agile”) albo zupełnie nowe."""
+    def stems(s):
+        return {w[:6] for w in re.findall(r"[a-z0-9+#]{4,}", R.plain(s))}
+    facts = stems(R.facts_brief(f, ids=False))
+    offer = stems((app.get("tresc") or "") + " " + (app.get("stanowisko") or ""))
+    bad, unknown = [], []
+    for w in dict.fromkeys(re.findall(r"[a-ząćęłńóśźż0-9+#]{4,}", (text or "").lower())):
+        p = R.plain(w)
+        if p in GENERIC or p[:6] in facts or len(p) < 4:
+            continue
+        if p[:6] in offer or re.fullmatch(r"[a-z]*[A-Z0-9]{2,}[a-z]*", w):
+            bad.append(w)                                          # z ogłoszenia, a nie z faktów
+        else:
+            unknown.append(w)
+    for w in re.findall(r"\b[A-Z]{2,}[A-Za-z0-9]*\b", text or ""):  # skróty: CMS, CRM, SAP…
+        if R.plain(w)[:6] not in facts and w not in bad:
+            bad.append(w)
+    if re.search(r"(^|[.!?]\s+)[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+uje\b", text or ""):
+        bad.append("3. osoba („koordynuje”)")
+    return bad + (unknown if len(unknown) >= 4 else [])
 
 
 # ================================================================ CV (ReportLab) — układ jak w dotychczasowym CV Agi

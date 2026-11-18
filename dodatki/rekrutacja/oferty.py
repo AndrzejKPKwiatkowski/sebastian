@@ -128,6 +128,40 @@ def salary(text):
     return re.sub(r"\s+", " ", m.group(0)).strip() if m else ""
 
 
+SECTION_HEADS = {
+    "wymagania": r"wymagania|wymagamy|oczekujemy|czego oczekujemy|nasze oczekiwania|kogo szukamy|twoje kwalifikacje|twój profil|"
+                 r"tw[oó]j profil|mile widziane|requirements|our requirements|kwalifikacje",
+    "obowiazki": r"obowiązki|obowiazki|zakres obowiązków|zakres zadań|twoje zadania|zadania|czym będziesz się zajmować|"
+                 r"co będziesz robić|twój zakres|responsibilities|your responsibilities",
+    "oferujemy": r"oferujemy|co oferujemy|co zyskujesz|benefity|to oferujemy|we offer|what we offer|zapewniamy",
+}
+OTHER_HEADS = r"o firmie|o nas|informacje|klauzula|aplikuj|jak aplikować|kontakt|o pracodawcy|lokalizacja|wynagrodzenie|rodo|about us"
+
+
+def sections(text):
+    """Wymagania / obowiązki / oferujemy wycięte z ogłoszenia po nagłówkach — gdy model nie odpowie albo utnie odpowiedź."""
+    out = {k: [] for k in SECTION_HEADS}
+    cur = None
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        head = re.sub(r"[:\s]+$", "", line)
+        if len(head) <= 60 and not re.search(r"[.;]\s*\w", head):
+            hit = next((k for k, rx in SECTION_HEADS.items() if re.fullmatch(rf"(?i)\W*({rx})\W*", head)), None)
+            if hit:
+                cur = hit
+                continue
+            if re.fullmatch(rf"(?i)\W*({OTHER_HEADS})\W*", head):
+                cur = None
+                continue
+        if cur and len(out[cur]) < 14:
+            item = re.sub(r"^[\s•·\-–—*▪●◦✓✔>]+", "", line).strip()
+            if 3 <= len(item):
+                out[cur].append(item[:220])
+    return out
+
+
 def analyze(ctx, f, text, title="", url=""):
     """Dane oferty i ocena dopasowania. Bez modelu zwraca to, co da się ustalić regułami."""
     out = {"firma": "", "stanowisko": "", "miasto": "", "email": "", "ocena": None, "uzasadnienie": "", "rodo": "", "ostrzezenia": [],
@@ -173,9 +207,17 @@ JSON:
   "uzasadnienie": "1–2 krótkie zdania po polsku do Agi, w drugiej osobie (np. „Pasuje do Ciebie, bo… Uważaj na…”)"}}"""
     got = None
     try:
-        got = ctx.ask(prompt, as_json=True, max_tokens=1100, temperature=0.1)
+        got = ctx.ask(prompt, as_json=True, max_tokens=2400, temperature=0.1)
     except Exception as e:
         ctx.log.warning(f"Rekrutacja: analiza oferty bez modelu ({type(e).__name__})")
+    lists_empty = not isinstance(got, dict) or not (got.get("wymagania") or got.get("obowiazki"))
+    if lists_empty and len(text) > 600:                                  # ucięta albo pusta odpowiedź — jeszcze raz przez Gemini
+        with contextlib.suppress(Exception):
+            from . import gemini as GM
+            if GM.available(ctx):
+                g2 = GM.ask_json(ctx, prompt, max_tokens=2400, temperature=0.1)
+                if isinstance(g2, dict) and (g2.get("wymagania") or g2.get("obowiazki")):
+                    got = g2 if not isinstance(got, dict) else dict(got, **{k: g2.get(k) for k in ("wymagania", "obowiazki", "oferujemy")})
     if isinstance(got, dict):
         for k in ("firma", "stanowisko", "miasto", "uzasadnienie", "rodo"):
             out[k] = re.sub(r"\s+", " ", str(got.get(k) or "")).strip()[:{"rodo": 1200, "uzasadnienie": 700}.get(k, 200)]
@@ -206,6 +248,10 @@ JSON:
             out["ostrzezenia"].append("Model ocenia, że znaczną część tej pracy stanowi sprzedaż albo obsługa klienta.")
         if out["rodo"] and (not R.is_consent(out["rodo"]) or R.plain(out["rodo"])[:40] not in R.plain(text)):
             out["rodo"] = ""                                         # tylko prawdziwa klauzula zgody, zacytowana z ogłoszenia
+    cut = sections(text)                                               # zawsze coś pokazać: punkty wprost z ogłoszenia
+    for k in ("wymagania", "obowiazki", "oferujemy"):
+        if not out[k] and cut[k]:
+            out[k] = cut[k]
     if not out["stanowisko"] and title:
         out["stanowisko"] = re.split(r"\s[|\-–—]\s", title)[0][:120]
     return out

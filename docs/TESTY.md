@@ -374,3 +374,21 @@ Data: 2026-11-13. `test_rekrutacja` — 83 testy zaliczone; pozostałe zestawy z
 # Weryfikacja 2.16
 
 `Feedback216`: nauka bez modelu (programy z wymagań, bez Excela), z modelem tylko hasła obecne w ofercie lub słowach Agi, angielski (ogłoszenie po angielsku, „biegły angielski”), automatyczne pominięcie nowej oferty i ostrzeżenie dla dodanej ręcznie, oznaczanie czekających, panel: karta uwagi, „Zapisz i pomiń”, sekcja w Ustawieniach i usuwanie zasady.
+
+# Weryfikacja 2.16.2
+
+`Details2162`: wycinanie sekcji z ogłoszenia, analiza bez modelu i z uciętą odpowiedzią (druga próba Gemini), uzupełnianie starszych ofert w tle z dopasowaniem, linki Edge tylko na Windows i tylko przy włączonym ustawieniu.
+
+# Weryfikacja 2.16.3
+
+`Truth2163`: opis z ogłoszenia (CMS, Agile, 3. osoba) odrzucony po jednej poprawce, zatwierdzone zdania przechodzą; gotowe CV cofnięte w tle; „Kraków”/„AI” nie trafiają i są czyszczone, ostrzeżenia liczone od nowa; ogólna uwaga bez zasady i bez modelu; zapis w panelu od razu z „✓ Zapisane”. `Improvements282.test_tailored_profile_only_from_facts` zaktualizowany do zasad 2.16.3.
+
+# Weryfikacja 2.17
+
+`Look217.test_kolory_panelu`: domyślnie bordo, zmiana na zieleń w ustawieniach, nieznana wartość → bordo.
+
+# Weryfikacja 2.18
+
+`Pool218`: uzupełnienie faktów podmienia punkty i zostawia daty, dodaje brakujące stanowiska, kurs EFG tylko raz, MS Office;
+dłuższe opisy i wzory profilu trafiają do faktów dla listów, ale nie do wyboru punktów CV; wybór 3–5 punktów; „Edytuj CV” pokazuje
+całą listę i zapisuje zaznaczone + własny punkt; ustawienia nie gubią opisów i wzorów; opis profilu w 1. osobie z liczbą z faktów przechodzi.

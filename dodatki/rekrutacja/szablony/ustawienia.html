@@ -31,6 +31,10 @@
       <div><label>Pomijam oferty poniżej (%)</label><input type="number" name="prog_dopasowania" value="{{ st.prog_dopasowania }}" min="0" max="95"></div>
       <div><label>Przypomnienie po (dniach)</label><input type="number" name="przypomnienie_po_dniach" value="{{ st.przypomnienie_po_dniach }}" min="3" max="30"></div></div>
     <label class="check"><input type="checkbox" name="owca" value="1" {{ 'checked' if st.owca }}> 🐑 Owca Sebastian: rano pyta o cel, w ciągu dnia motywuje, wspiera przy rozmowach i ofertach</label>
+    <label class="check">🎨 Kolory panelu
+      <select name="motyw">{% for k, v in [('bordo', 'Bordo i złoto'), ('zielen', 'Butelkowa zieleń i złoto'), ('krem', 'Kremowy z karmelem')] %}
+        <option value="{{ k }}" {{ 'selected' if (st.motyw or 'bordo') == k }}>{{ v }}</option>{% endfor %}</select></label>
+    <label class="check"><input type="checkbox" name="edge" value="1" {{ 'checked' if st.edge }}> 🌐 Na komputerze z Windows otwieraj ogłoszenia w Microsoft Edge</label>
     <label class="check"><input type="checkbox" name="rozmowa" value="1" {{ 'checked' if st.rozmowa }}> 💬 Sebastian odpisuje na Twoje maile i WhatsAppy, pamięta rozmowę i przypomina, kiedy poprosisz</label>
     <div class="row"><div><label>Owca rano o</label><input type="text" name="owca_rano" value="{{ st.owca_rano }}"></div>
       <div><label>Przypomnienia (gdy brakuje do celu)</label><input type="text" name="owca_przypomnienia" value="{{ st.owca_przypomnienia }}"></div></div>

@@ -24,6 +24,10 @@ TAGS = [
 TAG_NAMES = dict(TAGS)
 BASIC_TOOLS = {"excel", "word", "office", "ms office", "pakietu ms office", "powerpoint", "outlook", "google", "internet", "windows",
                "teams", "zoom", "pakiet office", "ms excel", "ms word", "komputer", "komputera"}
+PLACES = {"krakow", "krakowie", "krakowa", "tyniec", "tyncu", "polska", "polsce", "malopolska", "malopolskie", "warszawa", "warszawie",
+          "zdalnie", "zdalna", "hybrydowo", "hybrydowa", "stacjonarnie", "biuro", "biurze", "praca", "pracy", "umowa", "etat", "ai"}
+NEG_TAGS = {"angielski", "programy", "branza", "sprzedaz"}            # tylko z nich mogą powstać hasła „pomijam”
+WARN_TAIL = "prosiłaś, żeby takie"
 EN_WORDS = {"the", "and", "you", "with", "will", "our", "for", "are", "we", "of", "to", "in", "your", "is", "be", "this", "on", "as", "an"}
 PL_WORDS = {"i", "w", "z", "na", "do", "się", "jest", "oraz", "dla", "nie", "że", "od", "po", "jako", "w", "lub", "przez", "będzie", "nas"}
 ENGLISH_REQ = re.compile(r"(angielsk\w*|english).{0,40}?(biegł|\bc1\b|\bc2\b|\bb2\b|fluent|advanced|bardzo dobr|komunikatywn|swobodn|zaawansowan)|"
@@ -128,16 +132,50 @@ def _candidates(lines):
     return res[:6]
 
 
-def learn(ctx, aid, tags, text):
-    """Zapisuje uwagę Agi i uczy się z niej. Zwraca listę tego, czego Sebastian się nauczył (do pokazania Adze)."""
-    from . import dokumenty as D
+def ok_avoid(f, h):
+    """Czy hasło nadaje się na „pomijam”: nie miejsce pracy, nie to, czego Aga szuka, nie skrót z 1–2 liter."""
+    p = R.plain(h).strip()
+    if len(p) < 3 or p in PLACES or p in BASIC_TOOLS:
+        return False
+    city = R.plain((f.get("osoba") or {}).get("miasto") or "")
+    if city and p.startswith(city[:5]):
+        return False
+    wanted = R.plain(" ".join((f.get("kryteria") or {}).get("chce", [])))
+    return not (len(p) >= 5 and p in wanted)
+
+
+def save_feedback(ctx, aid, tags, text):
+    """Zapis od razu (bez czekania na model). Zwraca id uwagi albo None."""
     tags = [t for t in tags if t in TAG_NAMES]
     text = (text or "").strip()[:1500]
     if not tags and not text:
-        return []
+        return None
     with R.db(ctx) as c:
         ensure(c)
+        cur = c.execute("INSERT INTO uwagi_ofert(aplikacja_id,tagi,tekst,nauka,kiedy) VALUES(?,?,?,?,?)",
+                        (aid, json.dumps(tags), text, "", R.stamp(ctx)))
+        R.note(c, ctx, aid, "uwaga Agi: " + ", ".join([TAG_NAMES[t] for t in tags] + ([text[:80]] if text else [])))
+        c.commit()
+        return cur.lastrowid
+
+
+def learn(ctx, aid, tags, text):
+    """Zapis + nauka od razu (polecenia i testy)."""
+    fid = save_feedback(ctx, aid, tags, text)
+    return learn_from(ctx, fid) if fid else []
+
+
+def learn_from(ctx, fid):
+    """Nauka z zapisanej uwagi (w tle). Zwraca listę tego, czego Sebastian się nauczył."""
+    from . import dokumenty as D
+    with R.db(ctx) as c:
+        ensure(c)
+        u = c.execute("SELECT * FROM uwagi_ofert WHERE id=?", (fid,)).fetchone()
+        if not u:
+            return []
+        aid, tags, text = u["aplikacja_id"], json.loads(u["tagi"] or "[]"), u["tekst"] or ""
         a = dict(c.execute("SELECT * FROM aplikacje WHERE id=?", (aid,)).fetchone())
+    f = R.load_facts(ctx)
     try:
         info = json.loads(a.get("analiza") or "{}")
     except ValueError:
@@ -155,35 +193,42 @@ ZAZNACZYŁA: {', '.join(TAG_NAMES[t] for t in tags) or '—'}
 NAPISAŁA: {text or '—'}
 
 Zwróć wyłącznie JSON:
-{{"unikaj": ["0–4 krótkich haseł (1–3 słowa), których obecność w ogłoszeniu oznacza dla niej ofertę do pominięcia — np. nazwy programów,
-  uprawnień, branż; TYLKO takie, które wynikają z jej uwagi i występują w tej ofercie albo w jej słowach; bez ogólników typu „Excel”"],
+{{"unikaj": ["0–4 krótkich haseł (1–3 słowa), których obecność w ogłoszeniu oznacza dla niej ofertę do pominięcia — nazwy programów,
+  uprawnień, branż; TYLKO gdy wynika to z jej uwagi (coś jej NIE pasuje) i hasło występuje w tej ofercie albo w jej słowach;
+  NIGDY miejsca pracy (miasta, dzielnice), formy pracy ani ogólniki typu „Excel”"],
  "lubi": ["0–4 haseł oznaczających oferty, które chce widzieć częściej — tylko gdy oferta jej się podobała"],
  "angielski": true/false (czy chce pomijać oferty po angielsku albo wymagające biegłego angielskiego),
- "zasada": "jedno krótkie zdanie po polsku, w 3. osobie, co brać pod uwagę przy kolejnych ofertach (np. „Nie szuka pracy wymagającej programów geodezyjnych.”)"}}"""
-    with contextlib.suppress(Exception):
-        got = D.write(ctx, prompt, max_tokens=500, temperature=0.1)
+ "zasada": "jedno krótkie zdanie po polsku, w 3. osobie, co brać pod uwagę przy kolejnych ofertach; pusty tekst, gdy uwaga jest zbyt ogólna (np. „spoko”)"}}"""
+    if tags or len(text) >= 25:
+        with contextlib.suppress(Exception):
+            got = D.write(ctx, prompt, max_tokens=500, temperature=0.1)
     learned = {"unikaj": [], "lubi": [], "angielski": "angielski" in tags, "zasada": ""}
     source = offer + "\n" + text
+    negative = bool(set(tags) & NEG_TAGS) or (text and not tags and "lubie" not in tags)
     if isinstance(got, dict):
         for k in ("unikaj", "lubi"):
             for h in (got.get(k) or [])[:4]:
                 h = re.sub(r"\s+", " ", str(h)).strip(" .,;:\"'„”")[:40]
-                if 2 <= len(h) and R.plain(h) not in BASIC_TOOLS and has(source, h):   # tylko z oferty albo z jej słów
-                    learned[k].append(h)
+                if not has(source, h) or R.plain(h) in BASIC_TOOLS:
+                    continue
+                if k == "unikaj" and (not negative or not ok_avoid(f, h)):
+                    continue
+                if k == "lubi" and (len(R.plain(h)) < 3 or R.plain(h) in PLACES):
+                    continue
+                learned[k].append(h)
         learned["angielski"] = learned["angielski"] or got.get("angielski") is True
         z = re.sub(r"\s+", " ", str(got.get("zasada") or "")).strip()[:200]
         if z and not re.search(r"\[(pominięte|e-mail|telefon)\]", z):
             learned["zasada"] = z
     if not got:                                                   # bez modelu: proste reguły
         if "programy" in tags:
-            learned["unikaj"] = [h for h in _candidates(reqs or offer.splitlines()) if has(source, h)][:4]
+            learned["unikaj"] = [h for h in _candidates(reqs or offer.splitlines()) if has(source, h) and ok_avoid(f, h)][:4]
         if "lubie" in tags and a.get("stanowisko"):
             learned["lubi"] = [re.split(r"[/(,–-]", a["stanowisko"])[0].strip()[:40]]
-    if not learned["zasada"]:
-        parts = [TAG_NAMES[t].split(" — ")[0].lower() for t in tags if t not in ("angielski", "lubie")]
-        if text:
+        if len(text) >= 25:
             learned["zasada"] = f"Uwaga do oferty „{(a.get('stanowisko') or 'oferta')[:60]}”: {text[:160]}"
-        elif parts:
+        elif tags and not set(tags) <= {"lubie", "angielski"}:
+            parts = [TAG_NAMES[t].split(" — ")[0].lower() for t in tags if t not in ("angielski", "lubie")]
             learned["zasada"] = f"Oferta „{(a.get('stanowisko') or 'oferta')[:60]}”: {', '.join(parts)}."
     now = R.stamp(ctx)
     out = []
@@ -201,12 +246,25 @@ Zwróć wyłącznie JSON:
         if learned["zasada"] and R.plain(learned["zasada"]) not in {R.plain(z["tekst"]) for z in p["zasady"]}:
             p["zasady"].append({"tekst": learned["zasada"], "skad": aid, "kiedy": now})
             p["zasady"] = p["zasady"][-40:]
+            out.append("zapamiętałem Twoją uwagę")
         save(c, p)
-        c.execute("INSERT INTO uwagi_ofert(aplikacja_id,tagi,tekst,nauka,kiedy) VALUES(?,?,?,?,?)",
-                  (aid, json.dumps(tags), text, "; ".join(out), now))
-        R.note(c, ctx, aid, "uwaga Agi: " + ", ".join([TAG_NAMES[t] for t in tags] + ([text[:80]] if text else [])))
+        c.execute("UPDATE uwagi_ofert SET nauka=? WHERE id=?", ("; ".join(out) or "zapisane — bez nowych zasad", fid))
         c.commit()
     return out
+
+
+def cleanup(ctx):
+    """Usuwa hasła „pomijam”, które nie powinny tam trafić (miejsca pracy, to, czego Aga szuka, 1–2 litery) i odświeża ostrzeżenia."""
+    f = R.load_facts(ctx)
+    with R.db(ctx) as c:
+        p = load(c)
+        good = [u for u in p["unikaj"] if ok_avoid(f, u["haslo"])]
+        removed = [u["haslo"] for u in p["unikaj"] if u not in good]
+        if removed:
+            p["unikaj"] = good
+            save(c, p)
+    flag_waiting(ctx)
+    return removed
 
 
 def flag_waiting(ctx, skip=0):
@@ -221,9 +279,9 @@ def flag_waiting(ctx, skip=0):
                 cur = json.loads(r["ostrzezenia"] or "[]")
             except ValueError:
                 cur = []
-            new = [w for w in warn if w not in cur]
-            if new:
-                c.execute("UPDATE aplikacje SET ostrzezenia=? WHERE id=?", (json.dumps(cur + new, ensure_ascii=False), r["id"]))
-                n += 1
+            keep = [w for w in cur if WARN_TAIL not in w]                # stare ostrzeżenia z zasad liczę od nowa
+            if keep + warn != cur:
+                c.execute("UPDATE aplikacje SET ostrzezenia=? WHERE id=?", (json.dumps(keep + warn, ensure_ascii=False), r["id"]))
+                n += bool(warn)
         c.commit()
     return n
