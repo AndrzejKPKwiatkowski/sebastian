@@ -436,3 +436,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.24
 
 `NoSkills224`: CV bez „Umiejętności”, z „Cechami” (bez puli cech — po staremu), dopasowanie „kultury osobistej”, czekające CV układane na nowo jeden raz.
+
+# Weryfikacja 2.25
+
+`Fixes225`: usunięcie i dodanie cechy, nowe brzmienie osiągnięć (punkt i opis do listów), 12 zaznaczonych cech zostaje, CV poprawione ręcznie dostaje nowe brzmienie awansu.

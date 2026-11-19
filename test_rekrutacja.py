@@ -2613,6 +2613,44 @@ class NoSkills224(RekrutacjaBase):
         self.assertIsNone(self.P.refresh_cv_layout(self.ctx))
 
 
+class Fixes225(RekrutacjaBase):
+    """2.25: więcej zaznaczonych cech, „Odporność na stres”, poprawione osiągnięcia i awans, także w CV edytowanych ręcznie."""
+    def test_patch_and_limits(self):
+        self.mod.apply_patch(self.ctx, {"czesci": [
+            {"id": "a", "cechy": ["Dokładność", "Ostrożność w podejmowaniu decyzji"],
+             "stanowiska_pule": [{"szukaj": ["investment partners"], "stanowisko": "Planer finansowy", "firma": "Investment Partners S.A.",
+                                  "punkty": ["Pozyskiwanie klientów.", "Osiągnięcia: 4 awanse zawodowe i zwycięstwo w 3 konkursach wewnętrznych."],
+                                  "szczegoly": ["Osiągnięcia: cztery awanse i zwycięstwo w trzech konkursach wewnętrznych."]}]},
+            {"id": "2.25", "cechy": ["Odporność na stres"], "cechy_usun": ["Ostrożność w podejmowaniu decyzji"],
+             "punkty_zmien": [{"firma": "Investment Partners", "zawiera": "Osiągnięcia:", "na": "4 awanse zawodowe i zwycięstwo w 5 konkursach wewnętrznych."}],
+             "szczegoly_zmien": [{"firma": "Investment Partners", "zawiera": "Osiągnięcia:", "na": "Osiągnięcia: cztery awanse zawodowe i zwycięstwo w pięciu konkursach wewnętrznych."}]}]})
+        f = self.R.load_facts(self.ctx)
+        self.assertEqual([c["tekst"] for c in f["cechy"]], ["Dokładność", "Odporność na stres"])
+        ip = next(j for j in f["doswiadczenie"] if "Investment" in j["firma"])
+        self.assertEqual(ip["punkty"][1]["tekst"], "4 awanse zawodowe i zwycięstwo w 5 konkursach wewnętrznych.")
+        self.assertIn("pięciu konkursach", ip["szczegoly"][0])
+        self.assertIn(next(c["id"] for c in f["cechy"] if c["tekst"] == "Odporność na stres"), self.D.match_traits(f, "praca pod presją czasu"))
+        self.mod.apply_patch(self.ctx, {"cechy": [f"Cecha {i}" for i in range(12)]})
+        f = self.R.load_facts(self.ctx)
+        many = [c["id"] for c in f["cechy"]][:12]
+        self.assertEqual(self.D.clean_selection(f, {"cechy": many})["cechy"], many)          # 12 zaznaczonych — wszystkie zostają
+
+    def test_hand_edited_cv_gets_new_wording(self):
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        sel = json.loads(self.row(aid)["wybor"])
+        jid = sel["kolejnosc"][0]
+        sel["wlasne_punkty"] = {jid: ["1 awans zawodowy: z DM Setter na Operational Marketing Manager.", "Inny punkt."]}
+        sel["uklad"] = 24
+        with self.R.db(self.ctx) as c:
+            c.execute("UPDATE aplikacje SET wybor=? WHERE id=?", (json.dumps(sel), aid))
+            c.commit()
+        self.assertEqual(self.P.refresh_cv_layout(self.ctx), aid)
+        got = json.loads(self.row(aid)["wybor"])["wlasne_punkty"][jid]
+        self.assertEqual(got, ["Awans zawodowy: z DM Setter na Operational Marketing Manager.", "Inny punkt."])
+
+
 class Conversation213(RekrutacjaBase):
     """2.13: Sebastian odpisuje Adze, pamięta rozmowę, wstrzymuje owcę i przypomina w umówionym terminie."""
     def setUp(self):

@@ -62,8 +62,13 @@ def chronological(f, ids):
 
 POINTS_PER_JOB = 4          # domyślnie (bez modelu); model wybiera 3–5 najlepiej pasujących
 POINTS_MIN, POINTS_MAX = 3, 5
-CV_LAYOUT = 24              # wersja układu CV — starsze czekające CV panel układa na nowo (2.24: cechy zamiast umiejętności)
-OWN_MAX = 12                # tyle punktów Aga może sama zaznaczyć przy jednym stanowisku (2.20.1)
+CV_LAYOUT = 25              # wersja układu CV — starsze czekające CV panel układa na nowo (2.24: cechy zamiast umiejętności)
+OWN_MAX = 12
+TEXT_FIXES = {                                                         # stare brzmienia punktów → nowe (także w CV poprawionych ręcznie)
+    "1 awans zawodowy: z DM Setter na Operational Marketing Manager.": "Awans zawodowy: z DM Setter na Operational Marketing Manager.",
+    "Osiągnięcia: 4 awanse zawodowe i zwycięstwo w 3 konkursach wewnętrznych.": "4 awanse zawodowe i zwycięstwo w 5 konkursach wewnętrznych.",
+    "Osiągnięcia: 4 awanse i zwycięstwo w 3 konkursach wewnętrznych.": "4 awanse zawodowe i zwycięstwo w 5 konkursach wewnętrznych.",
+}                # tyle punktów Aga może sama zaznaczyć przy jednym stanowisku (2.20.1)
 
 
 def courses_newest_first(kursy):
@@ -94,6 +99,7 @@ TRAIT_HINTS = {
     "organizacja pracy": ["organizac", "zorganizowan", "planowan", "priorytet", "zarządzania czasem", "zarządzanie czasem", "wielozadaniow", "multitask"],
     "dociekliw": ["dociekliw", "analityczn", "ciekawość"],
     "ostrozn": ["ostrożn", "rozważn", "ryzyk"],
+    "decyzj": ["decyz"],
     "dyskrec": ["dyskrec", "poufn", "tajemnic", "rodo"],
     "cierpliw": ["cierpliw", "spokój", "spokoj"],
     "empati": ["empat", "wrażliw", "życzliw", "zrozumieni"],
@@ -118,6 +124,7 @@ TRAIT_HINTS = {
     "do konca": ["doprowadz", "orientacja na cel", "nastawienie na cel", "nastawienie na wynik", "realizac"],
     "dojrzalosc": ["dojrzał", "profesjonal"],
     "stabilnosc emocjonalna": ["stres", "presj", "odporność", "odporn"],
+    "odpornosc na stres": ["stres", "presj", "odporn", "trudnych sytuac", "dynamiczn"],
     "dorosle": ["profesjonal", "etyk", "odpowiedzialn"],
 }
 
@@ -166,7 +173,7 @@ def clean_selection(f, sel):
     out = {"kolejnosc": order, "ranking": ranking, "z_modelu": picked, "punkty": points,
            "profil": pick("profil", [p["id"] for p in f["profil"]], 4, 2),
            "umiejetnosci": pick("umiejetnosci", [u["id"] for u in f["umiejetnosci"]], 6, 3),
-           "cechy": pick("cechy", [c["id"] for c in f.get("cechy", [])], 8, 1),
+           "cechy": pick("cechy", [c["id"] for c in f.get("cechy", [])], 40, 1),   # Aga może zaznaczyć dowolnie dużo (2.25)
            "kursy": pick("kursy", [k["id"] for k in f["kursy"]], 30, 1),
            "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 7, 1)}
     out["uklad"] = CV_LAYOUT

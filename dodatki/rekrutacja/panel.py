@@ -697,6 +697,8 @@ def refresh_cv_layout(ctx, limit=5):
     f = R.load_facts(ctx)
     for a in rows:
         raw = json.loads(a["wybor"] or "{}")
+        if isinstance(raw.get("wlasne_punkty"), dict):                   # poprawione brzmienia także w CV edytowanych ręcznie
+            raw["wlasne_punkty"] = {k: [D.TEXT_FIXES.get(t, t) for t in v] for k, v in raw["wlasne_punkty"].items()}
         sel = D.clean_selection(f, raw)
         if not raw.get("cechy") and f.get("cechy"):
             sel["cechy"] = D.match_traits(f, (a.get("tresc") or "") + " " + (a.get("stanowisko") or "")) or sel["cechy"]

@@ -196,6 +196,9 @@ def apply_patch(ctx, patch):
 
     for key in ("profil", "umiejetnosci", "kursy", "jezyki", "cechy"):
         add_list(key, patch.get(key, []))
+    if patch.get("cechy_usun"):                                          # 2.25
+        f["cechy"] = [x for x in flat(f.get("cechy", [])) if not any(n(u) == n(x) for u in patch["cechy_usun"])]
+        added += 1
     kursy = flat(f["kursy"])
     for rule in patch.get("kursy_zmien", []):
         kursy = [rule["na"] if n(rule["zawiera"]) in n(k) else k for k in kursy]
@@ -225,6 +228,11 @@ def apply_patch(ctx, patch):
             if hit and n(rule["na"]) not in {n(x) for x in j["punkty"]}:
                 j["punkty"][hit[0]] = rule["na"]
                 added += 1
+    for rule in patch.get("szczegoly_zmien", []):                        # 2.25: dłuższe opisy do listów
+        j = next((j for j in jobs if n(rule["firma"]) in n(j.get("firma", ""))), None)
+        if j is not None and j.get("szczegoly"):
+            j["szczegoly"] = [rule["na"] if n(rule["zawiera"]) in n(x) else x for x in j["szczegoly"]]
+            added += 1
     pools = []
     for s in patch.get("stanowiska_pule", []):                          # 2.18: pełna lista punktów do CV + dłuższe opisy do listów
         keys = [n(k) for k in s.get("szukaj", [])]
