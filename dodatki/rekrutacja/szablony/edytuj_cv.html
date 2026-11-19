@@ -19,6 +19,17 @@
     <textarea name="profil" rows="6" {{ 'readonly' if locked }}>{{ profil }}</textarea>
   </div>
 
+  {% if kursy %}
+  <div class="card">
+    <h2>Kursy i kwalifikacje</h2>
+    <p class="small soft">Sebastian zaznaczył te, które pasują do tej oferty. Odznacz albo dodaj inne — w CV ułożą się od najnowszego.</p>
+    <input type="hidden" name="kursy_formularz" value="1">
+    <div class="traits courses">{% for k in kursy %}
+      <label class="check small"><input type="checkbox" name="kursy" value="{{ k.id }}" {{ 'checked' if k.on }} {{ 'disabled' if locked }}> {{ k.t }}</label>
+    {% endfor %}</div>
+  </div>
+  {% endif %}
+
   {% if cechy %}
   <div class="card">
     <h2>Cechy</h2>
@@ -72,5 +83,5 @@ document.querySelectorAll('.cvjob').forEach(function (c) {
   });
 });
 </script>
-<style>.traits{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 14px}.traits label{display:flex;gap:8px;align-items:center;margin:4px 0}.traits input{width:auto}</style>
+<style>.traits{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 14px}.traits label{display:flex;gap:8px;align-items:center;margin:4px 0}.traits input{width:auto}.traits.courses{grid-template-columns:1fr}</style>
 {% endblock %}

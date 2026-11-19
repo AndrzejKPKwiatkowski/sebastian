@@ -428,3 +428,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.22
 
 `Traits222`: części uzupełnień wgrywają się raz (poprawki Agi zostają), ustawienia nie nadpisują zmian Agi, dopasowanie cech z ogłoszenia (także bez modelu), sekcja „Cechy” w CV, wybór cech w „Edytuj CV”, kolejność i oznaczenie dobrze płatnych w „Do zrobienia”.
+
+# Weryfikacja 2.23
+
+`Courses223`: domyślnie wszystkie kursy, wybór ogranicza CV do zaznaczonych, „Edytuj CV” pokazuje listę i zapisuje wybór Agi.

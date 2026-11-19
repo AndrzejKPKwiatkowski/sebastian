@@ -2540,6 +2540,42 @@ class Traits222(RekrutacjaBase):
         self.assertIn("ze złotym paskiem: 2 oferty", page)
 
 
+class Courses223(RekrutacjaBase):
+    """2.23: kursy i kwalifikacje wybierane pod ofertę (Sebastian) i w „Edytuj CV” (Aga)."""
+    def test_courses_selected_rendered_and_editable(self):
+        self.mod.apply_patch(self.ctx, {"kursy": ["EFG® – European Financial Guide (2025)", "Kurs pierwszej pomocy (2024)"]})
+        f = self.R.load_facts(self.ctx)
+        ids = {k["tekst"]: k["id"] for k in f["kursy"]}
+        self.assertEqual(self.D.clean_selection(f, {})["kursy"], [k["id"] for k in f["kursy"]])      # domyślnie wszystkie, jak dotąd
+        sel = self.D.clean_selection(f, {"kursy": [ids["Kurs pierwszej pomocy (2024)"], "k99"]})
+        self.assertEqual(sel["kursy"], [ids["Kurs pierwszej pomocy (2024)"]])
+        import fitz
+        out = self.ctx.folder() / "cv_kursy.pdf"
+        self.D.render_cv(f, sel, out)
+        text = fitz.open(out)[0].get_text()
+        self.assertIn("pierwszej pomocy", text)
+        self.assertNotIn("European Financial Guide", text)
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        page = cl.get(f"/aplikacja/{aid}/cv").data.decode()
+        self.assertIn('name="kursy"', page)
+        self.assertIn("European Financial Guide", page)
+        shown = json.loads(self.row(aid)["wybor"])["kolejnosc"]
+        efg = ids["EFG® – European Financial Guide (2025)"]
+        cl.post(f"/aplikacja/{aid}/cv", data={"csrf": "t", "co": "zapisz", "profil": "", "pokaz": shown, "kursy_formularz": "1", "kursy": [efg]})
+        self.assertEqual(json.loads(self.row(aid)["wybor"])["kursy"], [efg])
+
+
 class Conversation213(RekrutacjaBase):
     """2.13: Sebastian odpisuje Adze, pamięta rozmowę, wstrzymuje owcę i przypomina w umówionym terminie."""
     def setUp(self):

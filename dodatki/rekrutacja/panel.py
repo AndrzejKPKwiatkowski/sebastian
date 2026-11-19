@@ -1629,6 +1629,11 @@ def make_app(ctx, hosts=None):
                     jobs = [j["id"] for j in f["doswiadczenie"]]
                     pts = {j: request.form.getlist("p_" + j) for j in jobs}
                     sel = D.apply_cv_edit(f, sel, request.form.get("profil", ""), pts, request.form.getlist("pokaz"))
+                    if "kursy_formularz" in request.form:                  # 2.23: kursy zaznaczone przez Agę
+                        pool = {k["id"] for k in f["kursy"]}
+                        chosen = [x for x in request.form.getlist("kursy") if x in pool]
+                        if chosen:
+                            sel["kursy"] = chosen
                     if "cechy_formularz" in request.form:                  # 2.22: cechy zaznaczone przez Agę
                         pool = {c["id"] for c in f.get("cechy", [])}
                         chosen = [x for x in request.form.getlist("cechy") if x in pool]
@@ -1655,7 +1660,8 @@ def make_app(ctx, hosts=None):
                          "lista": [{"t": t, "on": True} for t in now if t in pool] + [{"t": t, "on": False} for t in pool if t not in now],
                          "inne": [t for t in now if t not in pool], "wlasne": j["id"] in sel.get("wlasne_punkty", {})})
         traits = [{"id": c["id"], "t": c["tekst"], "on": c["id"] in sel.get("cechy", [])} for c in f.get("cechy", [])]
-        return render_template("edytuj_cv.html", a=a, tab="", profil=profile, rows=rows, locked=locked, n=D.POINTS_PER_JOB, cechy=traits,
+        courses = [{"id": k["id"], "t": k["tekst"], "on": k["id"] in sel.get("kursy", [])} for k in D.courses_newest_first(f["kursy"])]
+        return render_template("edytuj_cv.html", a=a, tab="", profil=profile, rows=rows, locked=locked, n=D.POINTS_PER_JOB, cechy=traits, kursy=courses,
                                zrodlo=sel.get("profil_zrodlo", ""), edited=bool(sel.get("wlasne_punkty") or sel.get("ukryte") or sel.get("pokazane")
                                                                                 or sel.get("profil_zrodlo") == "aga"))
 

@@ -77,6 +77,7 @@ def default_selection(f):
             "profil": [p["id"] for p in f["profil"]][:4],
             "umiejetnosci": [u["id"] for u in f["umiejetnosci"]][:6],
             "cechy": [c["id"] for c in f.get("cechy", [])][:5],
+            "kursy": [k["id"] for k in f["kursy"]],
             "narzedzia": [t["id"] for t in f["narzedzia"]][:7]}
 
 
@@ -164,6 +165,7 @@ def clean_selection(f, sel):
            "profil": pick("profil", [p["id"] for p in f["profil"]], 4, 2),
            "umiejetnosci": pick("umiejetnosci", [u["id"] for u in f["umiejetnosci"]], 6, 3),
            "cechy": pick("cechy", [c["id"] for c in f.get("cechy", [])], 8, 1),
+           "kursy": pick("kursy", [k["id"] for k in f["kursy"]], 30, 1),
            "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 7, 1)}
     if hidden:
         out["ukryte"] = hidden
@@ -259,6 +261,8 @@ Zwróć JSON:
   "cechy": [4–6 numerów c… — cechy z listy CECHY, których ogłoszenie wymaga wprost albo pośrednio; wybierz TAKIE SAME albo NAJBLIŻSZE
      (np. „odporność na stres” → opanowanie, stabilność emocjonalna; „praca w zespole” → nastawienie na współpracę;
      „proaktywność” → inicjatywa; „dbałość o szczegóły” → dokładność, skrupulatność; „zaangażowanie” → sumienność); najważniejsze pierwsze],
+  "kursy": [numery k… kursów i kwalifikacji, które pasują do tej oferty albo ogólnie dobrze świadczą o kandydatce (np. przy biurze kurs
+     finansowy też może zostać); pomiń tylko te, które nic nie wnoszą do tej pracy; zwykle 2–5],
   "narzedzia": [do 7 numerów n…]}}"""
     text = (app.get("tresc") or "") + " " + (app.get("stanowisko") or "")
     try:
@@ -504,7 +508,9 @@ def _draw_cv(c, f, sel, photo, rodo, kl, kr=None):
         yy = _heading(c, title, lx, yy, lw * 0.92, head)
         return _flow(c, paragraphs, lx - 2, yy - 2, lw + 2) - 21 * k
 
-    y = section("Kursy i kwalifikacje", [(_para(escape(x["tekst"]), FL, body, bullet=True), 1.5) for x in courses_newest_first(f["kursy"])], y)
+    chosen = sel.get("kursy") or [k["id"] for k in f["kursy"]]                # 2.23: kursy wybrane pod ofertę
+    y = section("Kursy i kwalifikacje", [(_para(escape(x["tekst"]), FL, body, bullet=True), 1.5)
+                                         for x in courses_newest_first([k for k in f["kursy"] if k["id"] in chosen])], y)
     skills = [u for u in f["umiejetnosci"] if u["id"] in sel["umiejetnosci"]]
     y = section("Umiejętności", [(_para(escape(x["tekst"]), FL, body, bullet=True), 0.5) for x in skills], y)
     traits = [next(c for c in f.get("cechy", []) if c["id"] == x) for x in sel.get("cechy", []) if any(c["id"] == x for c in f.get("cechy", []))]
