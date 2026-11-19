@@ -621,6 +621,16 @@ def refresh_details(ctx):
     return None
 
 
+def pay_marks(ctx, a):
+    """2.22: pensja na rękę i znacznik „dobrze płatna” (umowa o pracę albo niepodana, od progu z Ustawień) dla list."""
+    info = analysis(a)
+    p = O.pay_info(info.get("wynagrodzenie") or "", a.get("tresc") or "") if info.get("wynagrodzenie") else None
+    a["netto"] = p["netto_do"] if p else None
+    floor = int(float(ctx.settings().get("priorytet_netto", 5000)))
+    a["top"] = bool(p and p["umowa"] in ("uop", "") and p["netto_do"] >= floor)
+    return a
+
+
 def pay_key(ctx, a):
     """Kolejność przygotowania: najpierw umowa o pracę (albo bez podanej umowy) z co najmniej 5000 zł na rękę,
     od najwyższej kwoty; potem pozostałe z podaną pensją (od najwyższej); na końcu bez pensji — w kolejności dodania."""
@@ -1164,6 +1174,8 @@ def make_app(ctx, hosts=None):
                         "tytul": request.form.get(f"w{i}_tytul", "").strip(), "okres": request.form.get(f"w{i}_okres", "").strip()})
         f["wyksztalcenie"] = edu
         f["kursy"], f["jezyki"], f["profil"] = lines("kursy"), lines("jezyki"), lines("profil")
+        if "cechy" in request.form:
+            f["cechy"] = lines("cechy")
         if "profil_wzory" in request.form:
             f["profil_wzory"] = lines("profil_wzory")
         if not f["osoba"]["imie"] or not f["osoba"]["nazwisko"] or not R.EMAIL_OK.match(f["osoba"]["email"]):
@@ -1320,8 +1332,14 @@ def make_app(ctx, hosts=None):
 
     @app.route("/do-zrobienia")
     def todo():
-        rows = g.db.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(R.TODO))}) ORDER BY zmieniono DESC", R.TODO).fetchall()
-        return render_template("lista.html", rows=rows, tab="todo", title="Do zrobienia", empty="Wszystko załatwione. Nic nie czeka na Twoją decyzję.")
+        rows = [pay_marks(ctx, dict(r)) for r in
+                g.db.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(R.TODO))}) ORDER BY zmieniono DESC", R.TODO)]
+        rows.sort(key=lambda r: (0 if r["top"] else 1, -(r["netto"] or 0) if r["top"] else 0))   # 2.22: najlepiej płatne na górze
+        top = sum(1 for r in rows if r["top"])
+        intro = (f"Na górze, ze złotym paskiem: {top} {'oferta' if top == 1 else 'oferty' if top % 10 in (2, 3, 4) and top % 100 not in (12, 13, 14) else 'ofert'} "
+                 f"z umową o pracę i co najmniej {int(float(ctx.settings().get('priorytet_netto', 5000)))} zł na rękę — od najwyższej pensji.") if top else ""
+        return render_template("lista.html", rows=rows, tab="todo", title="Do zrobienia", intro=intro,
+                               empty="Wszystko załatwione. Nic nie czeka na Twoją decyzję.")
 
     @app.route("/aplikacje")
     def all_apps():
@@ -1611,6 +1629,11 @@ def make_app(ctx, hosts=None):
                     jobs = [j["id"] for j in f["doswiadczenie"]]
                     pts = {j: request.form.getlist("p_" + j) for j in jobs}
                     sel = D.apply_cv_edit(f, sel, request.form.get("profil", ""), pts, request.form.getlist("pokaz"))
+                    if "cechy_formularz" in request.form:                  # 2.22: cechy zaznaczone przez Agę
+                        pool = {c["id"] for c in f.get("cechy", [])}
+                        chosen = [x for x in request.form.getlist("cechy") if x in pool]
+                        if chosen:
+                            sel["cechy"] = chosen
                     what = "CV: poprawki Agi"
                 cv, li = render_files(ctx, f, a, a["list"], sel, a["rodo"])
             except ValueError as e:
@@ -1631,7 +1654,8 @@ def make_app(ctx, hosts=None):
             rows.append({"j": j, "w_cv": j["id"] in sel["kolejnosc"], "punkty": now,
                          "lista": [{"t": t, "on": True} for t in now if t in pool] + [{"t": t, "on": False} for t in pool if t not in now],
                          "inne": [t for t in now if t not in pool], "wlasne": j["id"] in sel.get("wlasne_punkty", {})})
-        return render_template("edytuj_cv.html", a=a, tab="", profil=profile, rows=rows, locked=locked, n=D.POINTS_PER_JOB,
+        traits = [{"id": c["id"], "t": c["tekst"], "on": c["id"] in sel.get("cechy", [])} for c in f.get("cechy", [])]
+        return render_template("edytuj_cv.html", a=a, tab="", profil=profile, rows=rows, locked=locked, n=D.POINTS_PER_JOB, cechy=traits,
                                zrodlo=sel.get("profil_zrodlo", ""), edited=bool(sel.get("wlasne_punkty") or sel.get("ukryte") or sel.get("pokazane")
                                                                                 or sel.get("profil_zrodlo") == "aga"))
 

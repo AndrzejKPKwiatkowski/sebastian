@@ -2461,6 +2461,85 @@ if __name__ == "__main__":
         self.assertEqual(r.status_code, 400)
 
 
+class Traits222(RekrutacjaBase):
+    """2.22: cechy dopasowane do oferty, nowe punkty CV, najlepiej płatne na górze „Do zrobienia”."""
+    def test_patch_parts_once_and_traits(self):
+        self.mod.apply_patch(self.ctx, {"czesci": [{"id": "x1", "cechy": ["Dokładność", "Opanowanie", "Nastawienie na współpracę", "Empatia"],
+                                                    "punkty_zastap": [{"szukaj": ["zzoz"], "punkty": ["Nowy punkt A.", "Nowy punkt B."]}],
+                                                    "punkty_zmien": [{"firma": "ZZOZ", "zawiera": "Nowy punkt A", "na": "Nowy punkt A — poprawiony."}]}]})
+        f = self.R.load_facts(self.ctx)
+        j = next(j for j in f["doswiadczenie"] if "ZZOZ" in j["firma"])
+        self.assertEqual([p["tekst"] for p in j["punkty"]], ["Nowy punkt A — poprawiony.", "Nowy punkt B."])
+        self.assertEqual([c["tekst"] for c in f["cechy"]][:2], ["Dokładność", "Opanowanie"])
+        j["punkty"] = [{"tekst": "Aga zmieniła sama."}]
+        self.R.save_facts(self.ctx, f)
+        self.mod.apply_patch(self.ctx, {"czesci": [{"id": "x1", "punkty_zastap": [{"szukaj": ["zzoz"], "punkty": ["Nowy punkt A."]}]}]})
+        f = self.R.load_facts(self.ctx)
+        self.assertEqual(next(j for j in f["doswiadczenie"] if "ZZOZ" in j["firma"])["punkty"][0]["tekst"], "Aga zmieniła sama.")   # raz wgrane — nie wraca
+        self.mod.apply_patch(self.ctx, {"czesci": [{"id": "x2", "ustawienia_jesli_domyslne": {"dojazd_skad": "Domowa 1, Kraków", "dojazd_max_samochod": 40}}]})
+        self.assertEqual(self.ctx.settings().get("dojazd_skad"), "Domowa 1, Kraków")
+        self.ctx.set_setting("dojazd_max_samochod", 30)
+        self.mod.apply_patch(self.ctx, {"czesci": [{"id": "x3", "ustawienia_jesli_domyslne": {"dojazd_max_samochod": 40}}]})
+        self.assertEqual(self.ctx.settings().get("dojazd_max_samochod"), 30)   # zmiana Agi zostaje
+
+    def test_traits_matched_and_in_cv(self):
+        self.mod.apply_patch(self.ctx, {"cechy": ["Dokładność", "Sumienność", "Opanowanie", "Stabilność emocjonalna", "Nastawienie na współpracę",
+                                                  "Empatia", "Kreatywność", "Dyskrecja"]})
+        f = self.R.load_facts(self.ctx)
+        ids = {c["tekst"]: c["id"] for c in f["cechy"]}
+        got = self.D.match_traits(f, "Wymagania: odporność na stres, umiejętność pracy w zespole, dokładność i dbałość o szczegóły, poufność danych.")
+        for t in ("Dokładność", "Opanowanie", "Nastawienie na współpracę", "Dyskrecja"):
+            self.assertIn(ids[t], got)
+        self.assertNotIn(ids["Kreatywność"], got)
+        sel = self.D.clean_selection(f, {"cechy": [ids["Empatia"], ids["Dyskrecja"], "c99"]})
+        self.assertEqual(sel["cechy"], [ids["Empatia"], ids["Dyskrecja"]])
+        import fitz
+        out = self.ctx.folder() / "cv_cechy.pdf"
+        self.D.render_cv(f, sel, out)
+        text = fitz.open(out)[0].get_text()
+        self.assertIn("C E C H Y", text)
+        self.assertIn("Empatia", text)
+        self.assertNotIn("Kreatywność", text)
+
+    def test_model_without_traits_falls_back_to_offer_words(self):
+        self.mod.apply_patch(self.ctx, {"cechy": ["Dokładność", "Opanowanie", "Kreatywność"]})
+        f = self.R.load_facts(self.ctx)
+        app = {"stanowisko": "Asystentka", "firma": "X", "miasto": "Kraków", "tresc": "Szukamy osoby kreatywnej, odpornej na stres."}
+        with patch.object(self.ctx, "ask", lambda *a, **k: {"kolejnosc": [], "punkty": {}}):
+            sel = self.D.select_for_offer(self.ctx, f, app)
+        names = {c["id"]: c["tekst"] for c in f["cechy"]}
+        self.assertEqual({names[x] for x in sel["cechy"]}, {"Kreatywność", "Opanowanie"})
+
+    def test_edit_cv_traits_and_todo_order(self):
+        self.mod.apply_patch(self.ctx, {"cechy": ["Dokładność", "Opanowanie", "Empatia"]})
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        self.assertIn('name="cechy"', cl.get(f"/aplikacja/{aid}/cv").data.decode())
+        f = self.R.load_facts(self.ctx)
+        emp = next(c["id"] for c in f["cechy"] if c["tekst"] == "Empatia")
+        shown = json.loads(self.row(aid)["wybor"])["kolejnosc"]
+        cl.post(f"/aplikacja/{aid}/cv", data={"csrf": "t", "co": "zapisz", "profil": "", "pokaz": shown, "cechy_formularz": "1", "cechy": [emp]})
+        self.assertEqual(json.loads(self.row(aid)["wybor"])["cechy"], [emp])
+        low = self.add(status="do_zatwierdzenia", firma="Mała Pensja", analiza=json.dumps({"wynagrodzenie": "5000 zł brutto"}))
+        high = self.add(status="do_zatwierdzenia", firma="Duża Pensja", analiza=json.dumps({"wynagrodzenie": "9000 zł brutto"}), tresc="Umowa o pracę.")
+        mid = self.add(status="do_zatwierdzenia", firma="Średnia Pensja", analiza=json.dumps({"wynagrodzenie": "7500 zł brutto"}))
+        page = cl.get("/do-zrobienia").data.decode()
+        self.assertLess(page.index("Duża Pensja"), page.index("Średnia Pensja"))
+        self.assertLess(page.index("Średnia Pensja"), page.index("Mała Pensja"))
+        self.assertIn("zł na rękę", page)
+        self.assertIn("ze złotym paskiem: 2 oferty", page)
+
+
 class Conversation213(RekrutacjaBase):
     """2.13: Sebastian odpisuje Adze, pamięta rozmowę, wstrzymuje owcę i przypomina w umówionym terminie."""
     def setUp(self):

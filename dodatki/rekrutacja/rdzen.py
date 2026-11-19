@@ -277,7 +277,7 @@ def facts_path(ctx):
 
 def empty_facts():
     return {"osoba": {"imie": "", "nazwisko": "", "email": "", "telefon": "", "adres": "", "miasto": "", "linkedin": "", "zdjecie": "zdjecie.jpg"},
-            "profil": [], "doswiadczenie": [], "wyksztalcenie": [], "kursy": [], "jezyki": [], "umiejetnosci": [],
+            "profil": [], "doswiadczenie": [], "wyksztalcenie": [], "kursy": [], "jezyki": [], "umiejetnosci": [], "cechy": [],
             "narzedzia": [], "prawo_jazdy": False,
             "warunki": {"umowa": "umowa o pracę", "etat": "pełny etat", "min_netto": "", "dostepnosc": "", "dojazd_km": 50,
                         "zdalna": True, "poza_krakowem": True, "uwagi": ""},
@@ -315,7 +315,7 @@ def with_ids(f):
         jobs.append(j)
     f["doswiadczenie"] = jobs
     f["wyksztalcenie"] = [dict(e, id=f"w{i}") for i, e in enumerate(f.get("wyksztalcenie", []), 1) if (e.get("uczelnia") or "").strip()]
-    for key, pre in (("kursy", "k"), ("jezyki", "j"), ("umiejetnosci", "u")):
+    for key, pre in (("kursy", "k"), ("jezyki", "j"), ("umiejetnosci", "u"), ("cechy", "c")):
         f[key] = [{"id": f"{pre}{i}", "tekst": _t(x)} for i, x in enumerate(f.get(key, []), 1) if _t(x)]
     f["narzedzia"] = [{"id": f"n{i}", "nazwa": t["nazwa"].strip(), "poziom": (t.get("poziom") or "").strip()}
                       for i, t in enumerate(f.get("narzedzia", []), 1) if (t.get("nazwa") or "").strip()]
@@ -369,6 +369,8 @@ def facts_brief(f, ids=True):
     out.append("KURSY: " + "; ".join(f"{tag(k)}{k['tekst']}" for k in f["kursy"]))
     out.append("JĘZYKI: " + "; ".join(k["tekst"] for k in f["jezyki"]))
     out.append("UMIEJĘTNOŚCI: " + "; ".join(f"{tag(k)}{k['tekst']}" for k in f["umiejetnosci"]))
+    if f.get("cechy"):
+        out.append("CECHY (wybrane przez kandydatkę): " + "; ".join(f"{tag(k)}{k['tekst']}" for k in f["cechy"]))
     out.append("NARZĘDZIA: " + "; ".join(f"{tag(t)}{t['nazwa']}" + (f" ({t['poziom']})" if t["poziom"] else "") for t in f["narzedzia"]))
     if f.get("prawo_jazdy"):
         out.append("Prawo jazdy kat. B: tak.")

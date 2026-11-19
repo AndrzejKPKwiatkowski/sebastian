@@ -167,6 +167,19 @@ def cmd_uzupelnij(ctx, args):
 
 
 def apply_patch(ctx, patch):
+    if isinstance(patch.get("czesci"), list):                          # 2.22: części z numerem — każda wgrywa się tylko raz
+        done, out = R.load_facts(ctx).get("wgrane_uzupelnienia", []), []
+        for part in patch["czesci"]:
+            pid = str(part.get("id") or "")
+            if pid and pid in done:
+                continue
+            out.append(apply_patch(ctx, {k: v for k, v in part.items() if k != "id"}))
+            if pid:
+                f = R.load_facts(ctx)
+                f["wgrane_uzupelnienia"] = list(dict.fromkeys(f.get("wgrane_uzupelnienia", []) + [pid]))
+                R.save_facts(ctx, f)
+                done = f["wgrane_uzupelnienia"]
+        return "\n".join(out) or "Baza faktów: dodane 0 (wszystko było już wgrane)."
     f = R.load_facts(ctx)
     n = R.norm
     added = 0
@@ -181,7 +194,7 @@ def apply_patch(ctx, patch):
                 added += 1
         f[key] = cur
 
-    for key in ("profil", "umiejetnosci", "kursy", "jezyki"):
+    for key in ("profil", "umiejetnosci", "kursy", "jezyki", "cechy"):
         add_list(key, patch.get(key, []))
     kursy = flat(f["kursy"])
     for rule in patch.get("kursy_zmien", []):
@@ -198,6 +211,12 @@ def apply_patch(ctx, patch):
                   (p.get("stanowisko") and n(p["stanowisko"]) == n(j["stanowisko"]))), None)
         if j is not None and n(p["tekst"]) not in {n(x) for x in j["punkty"]}:
             j["punkty"].append(p["tekst"])
+            added += 1
+    for s in patch.get("punkty_zastap", []):                            # 2.22: nowa lista punktów do CV dla stanowiska (opisy do listów zostają)
+        keys = [n(k) for k in s.get("szukaj", [])]
+        j = next((j for j in jobs if any(k and k in n(j["stanowisko"] + " " + j.get("firma", "")) for k in keys)), None)
+        if j is not None:
+            j["punkty"] = list(dict.fromkeys(s["punkty"]))
             added += 1
     for rule in patch.get("punkty_zmien", []):                           # doprecyzowanie istniejącego punktu (np. z liczbą)
         j = next((j for j in jobs if n(rule["firma"]) in n(j.get("firma", ""))), None)
@@ -255,6 +274,11 @@ def apply_patch(ctx, patch):
         f["warunki"][k] = v
     for k, v in (patch.get("ustawienia") or {}).items():
         ctx.set_setting(k, v)
+    defaults = {"dojazd_skad": "Kraków", "dojazd_max_komunikacja": 60, "dojazd_max_samochod": 50}
+    for k, v in (patch.get("ustawienia_jesli_domyslne") or {}).items():  # nie nadpisuję tego, co Aga zmieniła sama
+        cur = ctx.settings().get(k)
+        if cur in (None, "", defaults.get(k)):
+            ctx.set_setting(k, v)
     if pools:                                                           # kopia faktów przed dużą zmianą
         import shutil, time as _t
         with contextlib.suppress(Exception):

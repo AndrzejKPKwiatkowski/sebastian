@@ -76,7 +76,60 @@ def default_selection(f):
             "punkty": {j["id"]: [p["id"] for p in j["punkty"]][:POINTS_PER_JOB] for j in f["doswiadczenie"]},
             "profil": [p["id"] for p in f["profil"]][:4],
             "umiejetnosci": [u["id"] for u in f["umiejetnosci"]][:6],
+            "cechy": [c["id"] for c in f.get("cechy", [])][:5],
             "narzedzia": [t["id"] for t in f["narzedzia"]][:7]}
+
+
+# 2.22: cechy wymagane w ogłoszeniach → najbliższe cechy Agi (gdy model nie odpowie albo nic nie wybierze)
+TRAIT_HINTS = {
+    "dokladn": ["dokładn", "precyz", "staranno", "dbałość o szczegół", "dbałości o szczegół", "skrupulat"],
+    "sumienn": ["sumienn", "rzetel", "zaangażow"],
+    "terminow": ["terminow", "deadline", "dotrzymywan", "w terminie"],
+    "systematycz": ["systematycz", "regularn"],
+    "skrupulat": ["skrupulat", "drobiazgow", "dbałość o szczegół", "dbałości o szczegół"],
+    "odpowiedzialn": ["odpowiedzialn", "zaangażow"],
+    "samodzieln": ["samodzieln", "niezależn"],
+    "organizacja pracy": ["organizac", "zorganizowan", "planowan", "priorytet", "zarządzania czasem", "zarządzanie czasem", "wielozadaniow", "multitask"],
+    "dociekliw": ["dociekliw", "analityczn", "ciekawość"],
+    "ostrozn": ["ostrożn", "rozważn", "ryzyk"],
+    "dyskrec": ["dyskrec", "poufn", "tajemnic", "rodo"],
+    "cierpliw": ["cierpliw", "spokój", "spokoj"],
+    "empati": ["empat", "wrażliw", "życzliw", "zrozumieni"],
+    "takt": ["takt", "kultur", "uprzejm"],
+    "uwaznosc na rozmowce": ["słuchan", "potrzeb klienta", "potrzeb pacjent", "uważn"],
+    "komunikatywn": ["komunikatywn", "komunikacyj", "komunikacj"],
+    "opanowan": ["stres", "presj", "opanowan", "spokój", "trudnych sytuac"],
+    "asertywn": ["asertywn", "negocjac"],
+    "inicjatyw": ["inicjatyw", "proaktywn", "przedsiębiorcz"],
+    "elastycz": ["elastycz", "dynamiczn", "zmian", "adaptac"],
+    "zaradn": ["zaradn", "rozwiązywan", "problem"],
+    "informacje zwrotn": ["informacj zwrotn", "feedback", "konstruktywn"],
+    "uczenia sie": ["uczenia", "uczeni się", "rozwoj", "rozwijan", "nauki", "szybko się uczy", "chęć do nauki"],
+    "kreatywn": ["kreatywn", "twórcz", "pomysł", "innowac"],
+    "wspolprac": ["zespo", "współprac", "teamwork"],
+    "konsekwencj": ["konsekwen", "determin"],
+    "wytrwal": ["wytrwał", "cierpliw", "determin"],
+    "spostrzegawcz": ["spostrzegawcz", "uważn", "szczegół"],
+    "sprawiedliw": ["sprawiedliw", "bezstronn", "obiektywn"],
+    "perspektyw": ["otwartość", "różnorodn", "otwart"],
+    "do konca": ["doprowadz", "orientacja na cel", "nastawienie na cel", "nastawienie na wynik", "realizac"],
+    "dojrzalosc": ["dojrzał", "profesjonal"],
+    "stabilnosc emocjonalna": ["stres", "presj", "odporność", "odporn"],
+    "dorosle": ["profesjonal", "etyk", "odpowiedzialn"],
+}
+
+
+def match_traits(f, text, limit=6):
+    """Cechy z puli Agi, których ogłoszenie wymaga wprost albo pośrednio — od najczęściej wspominanych."""
+    t = (text or "").lower()
+    scored = []
+    for i, c in enumerate(f.get("cechy", [])):
+        key = R.plain(c["tekst"])
+        hints = next((h for k, h in TRAIT_HINTS.items() if k in key), None) or [c["tekst"].lower()[:7]]
+        score = sum(t.count(h.lower()) for h in hints)
+        if score:
+            scored.append((-score, i, c["id"]))
+    return [x[2] for x in sorted(scored)][:limit]
 
 
 def clean_selection(f, sel):
@@ -110,6 +163,7 @@ def clean_selection(f, sel):
     out = {"kolejnosc": order, "ranking": ranking, "z_modelu": picked, "punkty": points,
            "profil": pick("profil", [p["id"] for p in f["profil"]], 4, 2),
            "umiejetnosci": pick("umiejetnosci", [u["id"] for u in f["umiejetnosci"]], 6, 3),
+           "cechy": pick("cechy", [c["id"] for c in f.get("cechy", [])], 8, 1),
            "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 7, 1)}
     if hidden:
         out["ukryte"] = hidden
@@ -202,12 +256,20 @@ Zwróć JSON:
      (np. ponad 100 planów, 80 historii chorób, 10 transmisji, 4 awanse) mają pierwszeństwo, gdy pasują do oferty]}},
   "profil": [3 albo 4 numery zdań p…, w kolejności czytania],
   "umiejetnosci": [do 6 numerów u…],
+  "cechy": [4–6 numerów c… — cechy z listy CECHY, których ogłoszenie wymaga wprost albo pośrednio; wybierz TAKIE SAME albo NAJBLIŻSZE
+     (np. „odporność na stres” → opanowanie, stabilność emocjonalna; „praca w zespole” → nastawienie na współpracę;
+     „proaktywność” → inicjatywa; „dbałość o szczegóły” → dokładność, skrupulatność; „zaangażowanie” → sumienność); najważniejsze pierwsze],
   "narzedzia": [do 7 numerów n…]}}"""
+    text = (app.get("tresc") or "") + " " + (app.get("stanowisko") or "")
     try:
-        return clean_selection(f, ctx.ask(prompt, as_json=True, max_tokens=700, temperature=0.1))
+        raw = ctx.ask(prompt, as_json=True, max_tokens=800, temperature=0.1)
     except Exception as e:
         ctx.log.warning(f"Rekrutacja: wybór faktów bez modelu ({type(e).__name__})")
-        return default_selection(f)
+        raw = {}
+    sel = clean_selection(f, raw) if raw else default_selection(f)
+    if not (isinstance(raw, dict) and [x for x in raw.get("cechy") or [] if x in {c["id"] for c in f.get("cechy", [])}]):
+        sel["cechy"] = match_traits(f, text) or sel.get("cechy", [])       # cechy z ogłoszenia, nawet bez modelu
+    return sel
 
 
 def tailored_profile(ctx, f, app):
@@ -445,6 +507,9 @@ def _draw_cv(c, f, sel, photo, rodo, kl, kr=None):
     y = section("Kursy i kwalifikacje", [(_para(escape(x["tekst"]), FL, body, bullet=True), 1.5) for x in courses_newest_first(f["kursy"])], y)
     skills = [u for u in f["umiejetnosci"] if u["id"] in sel["umiejetnosci"]]
     y = section("Umiejętności", [(_para(escape(x["tekst"]), FL, body, bullet=True), 0.5) for x in skills], y)
+    traits = [next(c for c in f.get("cechy", []) if c["id"] == x) for x in sel.get("cechy", []) if any(c["id"] == x for c in f.get("cechy", []))]
+    if traits:
+        y = section("Cechy", [(_para(escape(x["tekst"]), FL, body, bullet=True), 0.5) for x in traits], y)
     tools = [t for t in f["narzedzia"] if t["id"] in sel["narzedzia"]]
     if tools:
         y = section("Narzędzia", [(_para(escape(t["nazwa"] + (f" – {t['poziom']}" if t["poziom"] else "")), FL, body, bullet=True), 0.5) for t in tools], y)

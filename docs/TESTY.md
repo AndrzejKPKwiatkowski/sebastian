@@ -424,3 +424,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.21
 
 `Centrum221`: rozpoznawanie pliku aktualizacji i wersji (z podpowiedzią, co napisać w czacie), złe hasło, cała aktualizacja z postępem i historią, nieudana aktualizacja zostawia poprzednią wersję, skrót na pulpit, CSRF.
+
+# Weryfikacja 2.22
+
+`Traits222`: części uzupełnień wgrywają się raz (poprawki Agi zostają), ustawienia nie nadpisują zmian Agi, dopasowanie cech z ogłoszenia (także bez modelu), sekcja „Cechy” w CV, wybór cech w „Edytuj CV”, kolejność i oznaczenie dobrze płatnych w „Do zrobienia”.

@@ -54,6 +54,10 @@
 <h3 style="margin-top:28px">Kursy i kwalifikacje</h3>
 <textarea name="kursy" rows="4">{% for k in f.kursy %}{{ k.tekst }}
 {% endfor %}</textarea>
+<h3 style="margin-top:20px">Cechy (pula)</h3>
+<p class="small soft">Po jednej w linii. Do każdej oferty Sebastian wybiera 4–6 takich samych albo najbliższych temu, czego szuka pracodawca.</p>
+<textarea name="cechy" rows="6">{% for k in f.cechy or [] %}{{ k.tekst }}
+{% endfor %}</textarea>
 <h3 style="margin-top:20px">Języki</h3>
 <textarea name="jezyki" rows="3">{% for k in f.jezyki %}{{ k.tekst }}
 {% endfor %}</textarea>
