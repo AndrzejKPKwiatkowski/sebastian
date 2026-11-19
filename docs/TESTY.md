@@ -444,3 +444,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.26
 
 `Rodo226`: klauzula widoczna w „Edytuj CV”, wersja Agi zapisuje się i trafia do PDF, puste pole przywraca klauzulę Sebastiana.
+
+# Weryfikacja 2.27
+
+`Crash227`: strona oferty z niepełnym dojazdem (bez roweru/pieszo), z dojazdem i dopasowaniem w złym formacie oraz z czasem jako liczbą zmiennoprzecinkową otwiera się; błąd 500 pokazuje czytelną stronę i trafia do `bledy.log`. Dodatkowo ręczny test z ok. 2700 kombinacjami nietypowych danych — bez błędów.

@@ -2682,6 +2682,53 @@ class Rodo226(RekrutacjaBase):
         self.assertNotIn("rodo_aga", json.loads(self.row(aid)["wybor"]))      # puste pole — z powrotem klauzula Sebastiana
 
 
+class Crash227(RekrutacjaBase):
+    """2.27: strona oferty nie pada, gdy brakuje części danych (np. czasu rowerem), a błąd pokazuje czytelną stronę."""
+    def test_offer_page_with_partial_data(self):
+        self.ready()
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        home = self.ctx.settings().get("dojazd_skad") or ""
+        bad = [{"dojazd": {"v": 1, "skad": home, "cel": "Kraków", "dokladny": True, "km": 4, "samochod": 19, "komunikacja": 28}},   # rower i pieszo nie odpowiedziały
+               {"dojazd": "tekst", "dopasowanie": "tekst", "ocena_skladniki": "x"},
+               {"dojazd": {"v": 1, "blad": "x", "proba": "abc"}, "dopasowanie": [{"wymaganie": "a"}, None]},
+               {"dojazd": {"v": 1, "samochod": 75.0, "komunikacja": None, "dokladny": False, "cel": "Kraków", "skad": "x", "km": 3.0}}]
+        ids = []
+        for info in bad:
+            info.update(ocena_v=1, wynagrodzenie="7k-9k zł")
+            aid = self.add(status="do_zatwierdzenia", analiza=json.dumps(info), tresc="Konsultant\nTwoje zadania:\n- a\n")
+            ids.append(aid)
+            page = cl.get(f"/aplikacja/{aid}")
+            self.assertEqual(page.status_code, 200, info)
+        self.assertIn("19 min", cl.get(f"/aplikacja/{ids[0]}").data.decode())
+        self.assertEqual(self.DJ_label(75.0), "1 h 15 min")
+
+    def DJ_label(self, m):
+        return importlib.import_module(self.mod.__name__ + ".dojazd").label(m)
+
+    def test_error_page(self):
+        self.ready()
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        @app.route("/test-blad")
+        def boom():
+            raise RuntimeError("próbny błąd")
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        r = cl.get("/test-blad")
+        self.assertEqual(r.status_code, 500)
+        self.assertIn("Skopiuj poniższy fragment", r.data.decode())
+        self.assertIn("RuntimeError: próbny błąd", r.data.decode())
+        self.assertIn("próbny błąd", (self.ctx.folder() / "bledy.log").read_text(encoding="utf-8"))
+
+
 class Conversation213(RekrutacjaBase):
     """2.13: Sebastian odpisuje Adze, pamięta rozmowę, wstrzymuje owcę i przypomina w umówionym terminie."""
     def setUp(self):

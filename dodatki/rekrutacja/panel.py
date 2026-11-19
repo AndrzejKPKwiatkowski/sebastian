@@ -3,7 +3,7 @@
 Panel Sebastiana (127.0.0.1:8765) zostaje nietknięty. Ten panel ma własne hasło, własną sesję i widzi wyłącznie
 dane dodatku Rekrutacja.
 """
-import contextlib, datetime as dt, hmac, json, os, random, re, secrets, subprocess, threading, time
+import contextlib, datetime as dt, hmac, html as H, json, os, random, re, secrets, subprocess, threading, time
 from pathlib import Path
 
 from . import preferencje as PF
@@ -741,11 +741,16 @@ def refresh_scores(ctx):
 
 
 def commute_due(ctx, a):
-    d = analysis(a).get("dojazd") or {}
+    d = analysis(a).get("dojazd")
+    d = d if isinstance(d, dict) else {}
     home = (ctx.settings().get("dojazd_skad") or "").strip()
     if d.get("v") == DJ.WERSJA and d.get("skad") == home and not d.get("blad"):
         return False
-    return not (d.get("blad") and d.get("proba") and time.time() - float(d["proba"]) < 900)
+    try:
+        recent = time.time() - float(d.get("proba") or 0) < 900
+    except (TypeError, ValueError):
+        recent = False
+    return not (d.get("blad") and recent)
 
 
 def update_commute(ctx, aid):
@@ -964,7 +969,35 @@ def make_app(ctx, hosts=None):
             return Markup(f'href="microsoft-edge:{escape(u)}"')
         return Markup(f'href="{escape(u)}" target="_blank" rel="noopener noreferrer"')
     app.jinja_env.globals["ext"] = ext
-    app.jinja_env.globals["na_reke"] = O.netto_text
+    def na_reke(pay, text=""):
+        try:
+            return O.netto_text(str(pay or ""), str(text or ""))
+        except Exception:
+            ctx.log.exception("Rekrutacja: przeliczenie pensji na rękę")
+            return ""
+    app.jinja_env.globals["na_reke"] = na_reke
+
+    @app.errorhandler(500)
+    def server_error(e):
+        """2.27: zamiast gołego „Internal Server Error” — czytelna strona z kodem do wklejenia w czacie."""
+        import traceback
+        orig = getattr(e, "original_exception", None) or e
+        tb = "".join(traceback.format_exception(type(orig), orig, orig.__traceback__))
+        code = secrets.token_hex(3)
+        ctx.log.error(f"Rekrutacja: błąd {code} na {request.path}\n{tb}")
+        with contextlib.suppress(Exception):
+            log = ctx.folder() / "bledy.log"
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write(f"=== {dt.datetime.now():%Y-%m-%d %H:%M:%S} {code} {request.path}\n{tb}\n")
+        last = [l for l in tb.strip().splitlines() if l.strip()][-6:]
+        body = ("<!doctype html><meta charset=utf-8><title>Coś poszło nie tak</title>"
+                "<body style='font-family:system-ui,sans-serif;max-width:760px;margin:60px auto;padding:0 20px;color:#222'>"
+                "<h1 style='font-size:24px'>Ups — ta strona się nie otworzyła</h1>"
+                "<p>Sebastian zapisał szczegóły błędu. Skopiuj poniższy fragment do czatu z Claude'em, a dostaniesz poprawkę.</p>"
+                f"<pre style='white-space:pre-wrap;background:#f6f1e7;border:1px solid #e3d6bd;border-radius:10px;padding:14px;font-size:13px'>"
+                f"Błąd {code} · {request.path}\n" + "\n".join(H.escape(l) for l in last) + "</pre>"
+                "<p><a href='/'>Wróć do panelu</a></p></body>")
+        return body, 500
 
     @app.route("/edge.reg")
     def edge_reg():
@@ -1531,11 +1564,17 @@ def make_app(ctx, hosts=None):
         from urllib.parse import quote
         maps = ("https://www.google.com/maps/dir/?api=1&travelmode=transit&origin=" + quote(ctx.settings().get("dojazd_skad") or "Kraków")
                 + "&destination=" + quote(where)) if where and km != -1 else ""
-        fit = info.get("dopasowanie") or []
-        dj = info.get("dojazd") or {}
+        fit = [dict(x, ocena=x.get("ocena") or "brak") for x in (info.get("dopasowanie") or []) if isinstance(x, dict)]
+        dj = info.get("dojazd") if isinstance(info.get("dojazd"), dict) else {}
         if dj.get("cel") and dj.get("skad") and km != -1:
             maps = ("https://www.google.com/maps/dir/?api=1&travelmode=transit&origin=" + quote(dj["skad"]) + "&destination=" + quote(dj["cel"]))
-        return render_template("aplikacja.html", dj=dj, commute_wait=commute_wait, DJL=DJ.label, parts=info.get("ocena_skladniki") or {}, blocks=O.pretty(a["tresc"] or "", a["stanowisko"] or ""), a=a, hist=hist, msgs=msgs, tab="", TAGS=PF.TAGS, TAGN=PF.TAG_NAMES, feedback=PF.feedback_for(g.db, aid),
+        try:
+            blocks = O.pretty(a["tresc"] or "", a["stanowisko"] or "")
+        except Exception:
+            ctx.log.exception(f"Rekrutacja: układ treści ogłoszenia {aid}")
+            blocks = []
+        parts = info.get("ocena_skladniki") if isinstance(info.get("ocena_skladniki"), dict) else {}
+        return render_template("aplikacja.html", dj=dj, commute_wait=commute_wait, DJL=DJ.label, parts=parts, blocks=blocks, a=a, hist=hist, msgs=msgs, tab="", TAGS=PF.TAGS, TAGN=PF.TAG_NAMES, feedback=PF.feedback_for(g.db, aid),
                                saved=request.args.get("zapisano") == "1", kit=F.kit(R.load_facts(ctx), a) if a["status"] == "formularz" else [],
                                info=info, where=where, km=km, maps=maps, fit=fit,
                                fit_count={k: sum(1 for x in fit if x["ocena"] == k) for k in ("mam", "czesciowo", "brak")},

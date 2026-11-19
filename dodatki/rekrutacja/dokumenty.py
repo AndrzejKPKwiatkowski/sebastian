@@ -658,17 +658,18 @@ def clean_reason(text, requirement=""):
 def score_parts(model_score, fit, shown=None):
     """2.19: procent dopasowania liczony jawnie — 60% wymagania z ogłoszenia (✓ = 1, ◐ = ½, ✗ = 0),
     40% zgodność z tym, czego Aga szuka (ocena modelu, z premią za oferty, które lubi). None, gdy brak listy wymagań."""
+    fit = [x for x in (fit or []) if isinstance(x, dict)] if isinstance(fit, list) else []
     if not fit:
         return None
     n = len(fit)
-    have = sum(1 for x in fit if x["ocena"] == "mam") + 0.5 * sum(1 for x in fit if x["ocena"] == "czesciowo")
+    have = sum(1 for x in fit if x.get("ocena") == "mam") + 0.5 * sum(1 for x in fit if x.get("ocena") == "czesciowo")
     req = round(100 * have / n)
     wish = model_score if isinstance(model_score, (int, float)) else (shown if isinstance(shown, (int, float)) else req)
     if isinstance(shown, (int, float)) and isinstance(model_score, (int, float)) and shown > model_score:
         wish = shown                                                # premia „lubisz takie oferty”
     wish = max(0, min(100, int(wish)))
     return {"razem": round(0.6 * req + 0.4 * wish), "wymagania": req, "oczekiwania": wish,
-            "mam": sum(1 for x in fit if x["ocena"] == "mam"), "czesciowo": sum(1 for x in fit if x["ocena"] == "czesciowo"), "n": n}
+            "mam": sum(1 for x in fit if x.get("ocena") == "mam"), "czesciowo": sum(1 for x in fit if x.get("ocena") == "czesciowo"), "n": n}
 
 
 def match_report(ctx, f, app, wymagania):

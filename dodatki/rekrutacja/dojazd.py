@@ -171,6 +171,8 @@ def too_far(ctx, d, pay_netto):
 
 
 def label(m):
-    if m is None:
+    try:                                                              # brak czasu (np. usługa roweru nie odpowiedziała) → „—”
+        m = int(round(float(m)))
+    except Exception:
         return "—"
     return f"{m} min" if m < 60 else f"{m // 60} h {m % 60:02d} min"
