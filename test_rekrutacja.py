@@ -2074,6 +2074,19 @@ class Pool218(RekrutacjaBase):
         sel = json.loads(self.row(aid)["wybor"])
         self.assertEqual(sel["wlasne_punkty"][jid], ["Punkt medyczny 8.", "Punkt medyczny 2.", "Mój punkt"])
 
+    def test_aga_can_choose_more_than_five(self):
+        self.mod.apply_patch(self.ctx, self.PATCH)
+        f = self.R.load_facts(self.ctx)
+        j = next(j for j in f["doswiadczenie"] if j["stanowisko"] == "Sekretarka medyczna")
+        sel = self.D.default_selection(f)
+        texts = [p["tekst"] for p in j["punkty"]][:8]
+        new = self.D.apply_cv_edit(f, sel, "", {j["id"]: texts}, sel["kolejnosc"] + [j["id"]])
+        self.assertEqual(self.D.cv_content(f, new)[1][j["id"]], texts)          # wszystkie 8 zaznaczonych, nie tylko pierwsze
+        import fitz
+        out = self.ctx.folder() / "cv_8.pdf"
+        self.D.render_cv(f, new, out)
+        self.assertEqual(len(fitz.open(out)), 1)
+
     def test_settings_keep_details_and_examples(self):
         self.mod.apply_patch(self.ctx, self.PATCH)
         self.ready()
@@ -2201,6 +2214,33 @@ class Commute219(RekrutacjaBase):
         win_edge = cl.get(f"/aplikacja/{aid}", headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0) Chrome/130 Safari/537.36 Edg/130"}).data.decode()
         self.assertNotIn('href="microsoft-edge:', win_edge)                 # już w Edge — zwykły link
 
+    def test_commute_counted_on_open_and_while_queue_is_busy(self):
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        with self.R.db(self.ctx) as c:                                      # oferta sprzed 2.19, bez dojazdu i z dawnym procentem
+            info = json.loads(self.row(aid)["analiza"])
+            for k in ("dojazd", "ocena_v"):
+                info.pop(k, None)
+            info["adres"] = "ul. Długa 1, Kraków"
+            info["dopasowanie"] = [{"wymaganie": "a", "ocena": "mam", "dlaczego": ""}] * 3
+            c.execute("UPDATE aplikacje SET analiza=?, ocena=53 WHERE id=?", (json.dumps(info), aid))
+            c.commit()
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        page = cl.get(f"/aplikacja/{aid}").data.decode()
+        self.assertIn("28 min", page)                                        # policzone od razu przy otwarciu
+        self.assertNotIn("dopasowanie 53%", page)                            # 3 z 3 ✓ — procent przeliczony
+        other = self.add(status="do_zatwierdzenia", analiza=json.dumps({"adres": "ul. Krótka 2, Kraków"}))
+        self.add(url="https://kolejka.example/1")                            # w kolejce czeka nowa oferta
+        self.P.refresh_commute(self.ctx)
+        self.assertEqual(json.loads(self.row(other)["analiza"])["dojazd"]["komunikacja"], 28)
+
     def test_pretty_offer(self):
         text = ("Menu\nZaloguj się\nAsystentka biura\nFirma X, Kraków\nTwój zakres obowiązków\nobsługa korespondencji\nprowadzenie kalendarza\n"
                 "Nasze wymagania\n• znajomość MS Office\n• komunikatywność\nOferujemy\numowa o pracę\nPodobne oferty\nInna oferta")
@@ -2288,6 +2328,137 @@ class Pay2192(RekrutacjaBase):
         cl = app.test_client()
         cl.post("/login", data={"haslo": "poprawne123"})
         self.assertIn("na rękę ok. 5 102 zł", cl.get(f"/aplikacja/{aid}").data.decode())
+
+
+class Star220(RekrutacjaBase):
+    """2.20: gwiazdka przy ofercie i zakładka ★ Ważne."""
+    def test_star_toggle_and_tab(self):
+        self.ready()
+        aid = self.add(firma="Ważna Firma", stanowisko="Asystentka", status="do_zatwierdzenia")
+        other = self.add(firma="Zwykła Firma", status="do_zatwierdzenia")
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        self.assertIn("☆ Oznacz jako ważną", cl.get(f"/aplikacja/{aid}").data.decode())
+        self.assertIn("Nie masz jeszcze ważnych ofert", cl.get("/wazne").data.decode())
+        self.assertEqual(cl.post(f"/aplikacja/{aid}/gwiazdka", data={"csrf": "t"}).status_code, 302)
+        page = cl.get("/wazne").data.decode()
+        self.assertIn("Ważna Firma", page)
+        self.assertNotIn("Zwykła Firma", page)
+        self.assertIn('★ Ważne<span class="badge">1</span>', page)
+        self.assertIn("★ Ważna", cl.get(f"/aplikacja/{aid}").data.decode())
+        self.assertEqual(cl.post(f"/aplikacja/{aid}/gwiazdka", data={"csrf": "x"}).status_code, 400)   # bez tokenu nic się nie zmienia
+        cl.post(f"/aplikacja/{aid}/gwiazdka", data={"csrf": "t", "wroc": "https://zly.example"})
+        self.assertEqual(self.row(aid)["gwiazdka"], "")
+
+
+class Centrum221(RekrutacjaBase):
+    """2.21: Centrum dowodzenia Agi — aktualizacja Sebastiana jednym plikiem (bez terminala)."""
+    FAKE = """#!/usr/bin/env python3
+\"\"\"Sebastian __TO__ — Próbna aktualizacja do testów.\"\"\"
+import base64, json, sys
+from pathlib import Path
+VERSION_FROM, VERSION_TO = "__FROM__", "__TO__"
+P = json.loads(base64.b64decode('e30='))
+def main():
+    print("Sebastian __FROM__ → __TO__: próba", flush=True)
+    for k in ("1/5 Kopia zapasowa…", "2/5 Pliki…", "3/5 Testy (ok. 1 minuty)…", "4/5 Dane Agi…", "5/5 Restart panelu…"):
+        print(k, flush=True)
+    if "__FAIL__" == "tak":
+        print("Testy nie przeszły, więc przywróciłem poprzednią wersję.", flush=True)
+        sys.exit(1)
+    h = Path("dodatki_host.py")
+    h.write_text(h.read_text().replace('"__FROM__"', '"__TO__"'))
+    print("Gotowe: Sebastian __TO__. Kopia poprzedniej wersji: backups/x", flush=True)
+    print('  git add dodatki docs && git status --short && git commit -m "Sebastian __TO__: próba" && git push', flush=True)
+if __name__ == "__main__":
+    main()
+"""
+
+    def setUp(self):
+        super().setUp()
+        import shutil, tempfile
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        shutil.copy(Path(__file__).parent / "aktualizator.py", self.root / "aktualizator.py")
+        (self.root / "dodatki_host.py").write_text('HOST_VERSION = "2.20.2"\n')
+        spec = importlib.util.spec_from_file_location("akt_test", self.root / "aktualizator.py")
+        self.A = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.A)
+
+    def fake(self, frm="2.20.2", to="2.21", fail="nie"):
+        return self.FAKE.replace("__FROM__", frm).replace("__TO__", to).replace("__FAIL__", fail).encode()
+
+    def client(self):
+        self.ready()
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True, SEBASTIAN_ROOT=str(self.root))
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        return cl
+
+    def upload(self, cl, data, haslo="poprawne123", name="Sebastian_aktualizacja_2_21.py"):
+        import io
+        return cl.post("/centrum/aktualizuj", data={"csrf": "t", "haslo": haslo, "plik": (io.BytesIO(data), name)},
+                       content_type="multipart/form-data")
+
+    def test_inspect(self):
+        ok, info = self.A.inspect(self.fake(), "2.20.2")
+        self.assertTrue(ok)
+        self.assertEqual((info["do"], info["tytul"]), ("2.21", "Próbna aktualizacja do testów"))
+        ok, msg = self.A.inspect(self.fake(frm="2.19"), "2.20.2")
+        self.assertFalse(ok)
+        self.assertIn("Sebastian ma wersję 2.20.2", msg)                     # wiadomo, co napisać w czacie
+        self.assertIn("jest zainstalowana", self.A.inspect(self.fake(to="2.20.2"), "2.20.2")[1])
+        self.assertIn("nie wygląda", self.A.inspect(b"print('hej')", "2.20.2")[1])
+        self.assertEqual(self.A.git_command('x\n  git add a b && git status --short && git commit -m "m" && git push\n', "2.21", ""),
+                         'git add a b && git commit -m "m" && git push')
+
+    def test_upload_runs_update_and_shows_result(self):
+        cl = self.client()
+        page = cl.get("/centrum").data.decode()
+        for part in ("Centrum dowodzenia Agi", "Aktualizuj Sebastiana", "2.20.2", "Skrót na pulpit"):
+            self.assertIn(part, page)
+        self.assertIn("Hasło się nie zgadza", cl.get(self.upload(cl, self.fake(), haslo="zle").location).data.decode())
+        self.assertIn("dla wersji 2.19", cl.get(self.upload(cl, self.fake(frm="2.19")).location).data.decode())
+        r = self.upload(cl, self.fake())
+        self.assertEqual(r.status_code, 302)
+        st = cl.get("/centrum/stan").get_json()
+        self.assertEqual((st["stan"], st["do"], st["wersja"], st["koniec"]), ("ok", "2.21", "2.21", True))
+        self.assertIn("5/5", st["krok"] + " ".join(st["linie"]))
+        self.assertIn('HOST_VERSION = "2.21"', (self.root / "dodatki_host.py").read_text())
+        page = cl.get("/centrum").data.decode()
+        self.assertIn("Ostatnie aktualizacje", page)
+        self.assertIn("Brawo, Aga!", page)
+
+    def test_failed_update_reports_and_keeps_version(self):
+        cl = self.client()
+        self.upload(cl, self.fake(fail="tak"))
+        st = cl.get("/centrum/stan").get_json()
+        self.assertEqual(st["stan"], "blad")
+        self.assertIn("poprzedniej wersji", st["komunikat"])
+        self.assertIn('"2.20.2"', (self.root / "dodatki_host.py").read_text())
+
+    def test_desktop_shortcut_and_csrf(self):
+        cl = self.client()
+        body = cl.get("/centrum/skrot.url").data.decode()
+        self.assertIn("[InternetShortcut]", body)
+        self.assertIn("URL=http://localhost/centrum", body)
+        import io
+        r = cl.post("/centrum/aktualizuj", data={"csrf": "zly", "haslo": "poprawne123", "plik": (io.BytesIO(self.fake()), "a.py")},
+                    content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 400)
 
 
 class Conversation213(RekrutacjaBase):

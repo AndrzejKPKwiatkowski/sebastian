@@ -62,6 +62,7 @@ def chronological(f, ids):
 
 POINTS_PER_JOB = 4          # domyślnie (bez modelu); model wybiera 3–5 najlepiej pasujących
 POINTS_MIN, POINTS_MAX = 3, 5
+OWN_MAX = 12                # tyle punktów Aga może sama zaznaczyć przy jednym stanowisku (2.20.1)
 
 
 def courses_newest_first(kursy):
@@ -122,7 +123,7 @@ def clean_selection(f, sel):
     if model_prof:
         out["profil_model"] = model_prof[:900]                             # wersja Sebastiana — do przywrócenia po edycji
     own = sel.get("wlasne_punkty") if isinstance(sel.get("wlasne_punkty"), dict) else {}
-    own = {k: [re.sub(r"\s+", " ", str(t)).strip()[:300] for t in v if str(t).strip()][:5]
+    own = {k: [re.sub(r"\s+", " ", str(t)).strip()[:300] for t in v if str(t).strip()][:OWN_MAX]
            for k, v in own.items() if k in jobs and isinstance(v, list)}
     own = {k: v for k, v in own.items() if v}
     if own:

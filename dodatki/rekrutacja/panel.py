@@ -435,8 +435,11 @@ def work_once(ctx):
         manual = time.time() - float(R.meta_get(c, "gemini_reczne", "0") or 0) < 300   # trwa polecenie „przepisz” — nie dzielę limitu
     if not busy and not manual:
         with contextlib.suppress(Exception):                          # czekające listy sprzed Gemini piszę na nowo (po jednym na obrót)
-            recheck_profile(ctx) or refresh_letter(ctx) or (None if row else (refresh_match(ctx) or refresh_details(ctx)
-                                                                               or refresh_score_commute(ctx)))
+            recheck_profile(ctx) or refresh_letter(ctx) or (None if row else (refresh_match(ctx) or refresh_details(ctx)))
+    with contextlib.suppress(Exception):                              # 2.20.2: procenty i dojazd zawsze, nie tylko gdy nic innego nie czeka
+        refresh_scores(ctx)
+    with contextlib.suppress(Exception):
+        refresh_commute(ctx)
     send_one(ctx)
     with contextlib.suppress(Exception):
         CB.run(ctx)                                                   # CBOP: raz na dobę wieczorem, gdy jest nazwa partnera
@@ -669,9 +672,11 @@ def next_to_prepare(ctx, manual_only=False):
     return {"id": best["id"]}
 
 
-def refresh_score_commute(ctx):
-    """2.19: czekające oferty — procent dopasowania liczony jawnie (wszystkie naraz) i czas dojazdu (jedna na obrót).
-    Oferty znalezione automatycznie, do których dojazd jest za długi, odkładam (chyba że pensja powyżej progu)."""
+COMMUTE_NOW = set()                                                  # oferty, dla których dojazd liczy się właśnie w tle
+
+
+def refresh_scores(ctx):
+    """2.19: procent dopasowania liczony jawnie — dla wszystkich czekających ofert naraz (bez modelu, szybko)."""
     changed = None
     with R.db(ctx) as c:
         rows = [dict(r) for r in c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(R.OPEN))}) AND analiza<>'' "
@@ -685,35 +690,67 @@ def refresh_score_commute(ctx):
                       (json.dumps(info, ensure_ascii=False), parts["razem"] if parts else a.get("ocena"), a["id"]))
             changed = a["id"]
         c.commit()
-        home = (ctx.settings().get("dojazd_skad") or "").strip()
-        wait = ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz", "zatwierdzona")
-        todo = [dict(r) for r in c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(wait))}) AND length(tresc)>200 "
-                                           "ORDER BY id DESC LIMIT 200", wait)]
-    for a in todo:
-        info = analysis(a)
-        d = info.get("dojazd") or {}
-        if d.get("v") == DJ.WERSJA and d.get("skad") == home and not d.get("blad"):
-            continue
-        if d.get("blad") and d.get("proba") and time.time() - float(d["proba"]) < 3600:
-            continue
-        d = DJ.compute(ctx, info, a)
-        if d.get("blad"):
-            d["proba"] = time.time()
-        info["dojazd"] = d
-        far = DJ.too_far(ctx, d, O.netto_max(info.get("wynagrodzenie")))
-        with R.db(ctx) as c:
-            c.execute("UPDATE aplikacje SET analiza=? WHERE id=?", (json.dumps(info, ensure_ascii=False), a["id"]))
-            if far and a["zrodlo"] == "auto" and a["status"] in ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz"):
-                R.set_status(c, ctx, a["id"], "odrzucona", notatka="Pominięta automatycznie: " + far)
-                R.note(c, ctx, a["id"], "odłożona: " + far)
-            elif far:
-                warn = json.loads(a.get("ostrzezenia") or "[]")
-                text = far[:1].upper() + far[1:] + " — dłużej, niż chcesz."
-                if not any(w.startswith(text[:15]) for w in warn):
-                    c.execute("UPDATE aplikacje SET ostrzezenia=? WHERE id=?", (json.dumps(warn + [text], ensure_ascii=False), a["id"]))
-            c.commit()
-        return a["id"]
     return changed
+
+
+def commute_due(ctx, a):
+    d = analysis(a).get("dojazd") or {}
+    home = (ctx.settings().get("dojazd_skad") or "").strip()
+    if d.get("v") == DJ.WERSJA and d.get("skad") == home and not d.get("blad"):
+        return False
+    return not (d.get("blad") and d.get("proba") and time.time() - float(d["proba"]) < 900)
+
+
+def update_commute(ctx, aid):
+    """Czas dojazdu dla jednej oferty; za długi dojazd przy ofercie znalezionej automatycznie — odkładam."""
+    with R.db(ctx) as c:
+        row = c.execute("SELECT * FROM aplikacje WHERE id=?", (aid,)).fetchone()
+    if not row:
+        return None
+    a = dict(row)
+    info = analysis(a)
+    d = DJ.compute(ctx, info, a)
+    if d.get("blad"):
+        d["proba"] = time.time()
+        ctx.log.warning(f"Rekrutacja: dojazd dla oferty {aid} — {d['blad']}")
+    far = DJ.too_far(ctx, d, O.netto_max(info.get("wynagrodzenie"), a.get("tresc") or ""))
+    with R.db(ctx) as c:
+        fresh = c.execute("SELECT analiza, status, ostrzezenia FROM aplikacje WHERE id=?", (aid,)).fetchone()
+        info = json.loads(fresh["analiza"] or "{}") if fresh and (fresh["analiza"] or "").startswith("{") else info
+        info["dojazd"] = d
+        c.execute("UPDATE aplikacje SET analiza=? WHERE id=?", (json.dumps(info, ensure_ascii=False), aid))
+        if far and a["zrodlo"] == "auto" and fresh["status"] in ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz"):
+            R.set_status(c, ctx, aid, "odrzucona", notatka="Pominięta automatycznie: " + far)
+            R.note(c, ctx, aid, "odłożona: " + far)
+        elif far:
+            warn = json.loads(fresh["ostrzezenia"] or "[]")
+            text = far[:1].upper() + far[1:] + " — dłużej, niż chcesz."
+            if not any(w.startswith(text[:15]) for w in warn):
+                c.execute("UPDATE aplikacje SET ostrzezenia=? WHERE id=?", (json.dumps(warn + [text], ensure_ascii=False), aid))
+        c.commit()
+    return d
+
+
+def refresh_commute(ctx, budget=25.0):
+    """Czasy dojazdu dla czekających ofert — kilka na obrót (2.20.2: niezależnie od innych prac w tle)."""
+    start, done = time.time(), None
+    wait = ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz", "zatwierdzona")
+    with R.db(ctx) as c:
+        todo = [dict(r) for r in c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(wait))}) AND length(tresc)>200 "
+                                           "ORDER BY (gwiazdka<>'') DESC, id DESC LIMIT 300", wait)]
+    for a in todo:
+        if time.time() - start > budget:
+            break
+        if commute_due(ctx, a):
+            update_commute(ctx, a["id"])
+            done = a["id"]
+    return done
+
+
+def refresh_score_commute(ctx):
+    """Zgodność wstecz: procenty i czasy dojazdu."""
+    a, b = refresh_scores(ctx), refresh_commute(ctx)
+    return a or b
 
 
 def refresh_match(ctx):
@@ -1232,7 +1269,8 @@ def make_app(ctx, hosts=None):
         qs = c.execute("SELECT COUNT(*) FROM pytania WHERE status='otwarte'").fetchone()[0]
         return {"dzis": sent_today(c, ctx), "lacznie": q(R.SENT), "do_zrobienia": q(R.TODO), "kolejka": q(("zatwierdzona",)),
                 "w_przygotowaniu": q(("nowa", "przygotowywanie")), "zaproszenia": q(("zaproszenie", "rozmowa", "oferta")),
-                "odpowiedzi": msgs + qs, "pytania": qs}
+                "odpowiedzi": msgs + qs, "pytania": qs,
+                "gwiazdki": c.execute("SELECT COUNT(*) FROM aplikacje WHERE gwiazdka<>''").fetchone()[0]}
 
     @app.context_processor
     def common():
@@ -1299,6 +1337,104 @@ def make_app(ctx, hosts=None):
         return render_template("lista.html", rows=rows, tab="all", title="Wszystkie aplikacje", q=q, status=status, search=True,
                                empty="Nie ma jeszcze żadnej aplikacji. Dodaj pierwszą ofertę na stronie „Dziś”.")
 
+    # ---- 2.21: Centrum dowodzenia Agi i aktualizacja jednym plikiem
+    def updater():
+        root = Path(app.config.get("SEBASTIAN_ROOT") or HERE.parents[1])
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("sebastian_aktualizator", root / "aktualizator.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sd = ctx.folder().parents[1] / "aktualizacje"
+        sd.mkdir(parents=True, exist_ok=True)
+        return mod, root, sd
+
+    def tiles(root):
+        try:
+            c = json.loads((root / "data" / "centrum.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            c = {}
+        return [{"id": "rekrutacja", "nazwa": "Rekrutacja", "opis": "Oferty, CV, listy i odpowiedzi od pracodawców", "url": url_for("home"), "znak": "R"},
+                {"id": "sebastian", "nazwa": "Sebastian", "opis": "Panel główny: poczta, sprawy, nauka, WhatsApp", "url": c.get("sebastian", ""), "znak": "S"},
+                {"id": "gwaranci", "nazwa": "Gwaranci Feniks", "opis": "Spotkania gwaranckie zespołu", "url": c.get("gwaranci", ""), "znak": "G"},
+                {"id": "terminal", "nazwa": "Terminal", "opis": "Dla Andrzeja — pełny dostęp do Maca", "url": c.get("terminal", ""), "znak": ">_"}]
+
+    @app.route("/centrum")
+    def centrum():
+        mod, root, sd = updater()
+        try:
+            past = json.loads((sd / "historia.json").read_text(encoding="utf-8"))[:8]
+        except (OSError, ValueError):
+            past = []
+        return render_template("centrum.html", tab="centrum", tiles=tiles(root), wersja=mod.current_version(root),
+                               stan=mod.load_state(sd), trwa=mod.busy(sd), historia=past, blad=request.args.get("blad", ""))
+
+    @app.route("/centrum/aktualizuj", methods=["POST"])
+    def centrum_update():
+        mod, root, sd = updater()
+        stored = R.meta_get(g.db, "haslo", "")
+        if not stored or not check_password_hash(stored, request.form.get("haslo", "")):
+            return redirect(url_for("centrum", blad="Hasło się nie zgadza — wpisz to samo, którym logujesz się do panelu."))
+        if mod.busy(sd):
+            return redirect(url_for("centrum", blad="Aktualizacja już trwa — poczekaj, aż się skończy."))
+        up = request.files.get("plik")
+        data = up.read() if up else b""
+        if not data:
+            return redirect(url_for("centrum", blad="Wybierz plik aktualizacji (Sebastian_aktualizacja_….py)."))
+        ok, info = mod.inspect(data, mod.current_version(root))
+        if not ok:
+            return redirect(url_for("centrum", blad=info))
+        name = re.sub(r"[^A-Za-z0-9_.-]", "_", up.filename or "aktualizacja.py")[-80:]
+        path = sd / f"{dt.datetime.now():%Y%m%d-%H%M%S}_{name if name.endswith('.py') else name + '.py'}"
+        path.write_bytes(data)
+        if app.config.get("TESTING"):
+            mod.run(path, root=root, sd=sd, do_git=False, restart=False)
+        else:
+            mod.start_detached(path, root=root, sd=sd)
+        return redirect(url_for("centrum", postep=1))
+
+    @app.route("/centrum/stan")
+    def centrum_state():
+        mod, root, sd = updater()
+        st = mod.load_state(sd)
+        st["linie"] = [l for l in (st.get("linie") or []) if l.strip()][-40:]
+        st["wersja"] = mod.current_version(root)
+        st["trwa"] = mod.busy(sd)
+        return st
+
+    @app.route("/centrum/github", methods=["POST"])
+    def centrum_github():
+        mod, root, sd = updater()
+        st = mod.load_state(sd)
+        good, msg = mod.push(root, sd, mod.git_command("", st.get("do") or mod.current_version(root), st.get("tytul") or ""))
+        mod.save_state(sd, github="zmiany zapisane na GitHubie" if good else "nadal nie udało się wysłać: " + msg)
+        return redirect(url_for("centrum"))
+
+    @app.route("/centrum/skrot.url")
+    def centrum_shortcut():
+        """Skrót na pulpit Windows — dwuklik otwiera Centrum dowodzenia."""
+        from flask import Response
+        target = f"{request.scheme}://{request.host}{url_for('centrum')}"
+        body = f"[InternetShortcut]\r\nURL={target}\r\nIconIndex=0\r\n"
+        return Response(body.encode("utf-8"), mimetype="application/octet-stream",
+                        headers={"Content-Disposition": "attachment; filename=Centrum_dowodzenia_Agi.url"})
+
+    @app.route("/wazne")
+    def starred():
+        rows = g.db.execute("SELECT * FROM aplikacje WHERE gwiazdka<>'' ORDER BY gwiazdka DESC").fetchall()
+        return render_template("lista.html", rows=rows, tab="wazne", title="★ Ważne oferty", search=False,
+                               intro="Oferty, które oznaczyłaś gwiazdką. Gwiazdkę zdejmiesz na stronie oferty.",
+                               empty="Nie masz jeszcze ważnych ofert. Wejdź w ofertę i kliknij ☆ obok nazwy firmy.")
+
+    @app.route("/aplikacja/<int:aid>/gwiazdka", methods=["POST"])
+    def star(aid):
+        a = get(aid)
+        on = not a["gwiazdka"]
+        g.db.execute("UPDATE aplikacje SET gwiazdka=? WHERE id=?", (R.stamp(ctx) if on else "", aid))
+        R.note(g.db, ctx, aid, "oznaczona gwiazdką jako ważna" if on else "gwiazdka zdjęta")
+        g.db.commit()
+        back = request.form.get("wroc", "")
+        return redirect(back if back.startswith("/") and not back.startswith("//") else url_for("detail", aid=aid))
+
     def get(aid):
         a = g.db.execute("SELECT * FROM aplikacje WHERE id=?", (aid,)).fetchone()
         if not a:
@@ -1311,6 +1447,30 @@ def make_app(ctx, hosts=None):
         hist = g.db.execute("SELECT * FROM historia WHERE aplikacja_id=? ORDER BY id DESC LIMIT 30", (aid,)).fetchall()
         msgs = g.db.execute("SELECT * FROM wiadomosci WHERE aplikacja_id=? ORDER BY id DESC", (aid,)).fetchall()
         info = analysis(dict(a))
+        if info.get("dopasowanie") and not info.get("ocena_v"):          # 2.20.2: procent od razu przy otwarciu
+            with contextlib.suppress(Exception):
+                refresh_scores(ctx)
+                a = get(aid)
+                info = analysis(dict(a))
+        commute_wait = False
+        if a["tresc"] and a["status"] not in ("nowa", "przygotowywanie") and commute_due(ctx, dict(a)):
+            commute_wait = True
+            if aid not in COMMUTE_NOW:
+                COMMUTE_NOW.add(aid)
+                def run(aid=aid):
+                    try:
+                        update_commute(ctx, aid)
+                    except Exception:
+                        ctx.log.exception("Rekrutacja: dojazd przy otwarciu oferty")
+                    finally:
+                        COMMUTE_NOW.discard(aid)
+                if app.config.get("TESTING"):
+                    run()
+                    a = get(aid)
+                    info = analysis(dict(a))
+                    commute_wait = False
+                else:
+                    threading.Thread(target=run, daemon=True).start()
         where = info.get("adres") or a["miasto"] or ""
         km = R.km_from_krakow(" ".join((where, a["miasto"] or "")))
         from urllib.parse import quote
@@ -1320,7 +1480,7 @@ def make_app(ctx, hosts=None):
         dj = info.get("dojazd") or {}
         if dj.get("cel") and dj.get("skad") and km != -1:
             maps = ("https://www.google.com/maps/dir/?api=1&travelmode=transit&origin=" + quote(dj["skad"]) + "&destination=" + quote(dj["cel"]))
-        return render_template("aplikacja.html", dj=dj, DJL=DJ.label, parts=info.get("ocena_skladniki") or {}, blocks=O.pretty(a["tresc"] or "", a["stanowisko"] or ""), a=a, hist=hist, msgs=msgs, tab="", TAGS=PF.TAGS, TAGN=PF.TAG_NAMES, feedback=PF.feedback_for(g.db, aid),
+        return render_template("aplikacja.html", dj=dj, commute_wait=commute_wait, DJL=DJ.label, parts=info.get("ocena_skladniki") or {}, blocks=O.pretty(a["tresc"] or "", a["stanowisko"] or ""), a=a, hist=hist, msgs=msgs, tab="", TAGS=PF.TAGS, TAGN=PF.TAG_NAMES, feedback=PF.feedback_for(g.db, aid),
                                saved=request.args.get("zapisano") == "1", kit=F.kit(R.load_facts(ctx), a) if a["status"] == "formularz" else [],
                                info=info, where=where, km=km, maps=maps, fit=fit,
                                fit_count={k: sum(1 for x in fit if x["ocena"] == k) for k in ("mam", "czesciowo", "brak")},

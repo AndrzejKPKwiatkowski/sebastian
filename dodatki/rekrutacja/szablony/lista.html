@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>{{ title }}</h1>
+{% if intro %}<p class="small soft">{{ intro }}</p>{% endif %}
 {% if search %}
 <form method="get" class="row" style="margin:16px 0 18px;grid-template-columns:2fr 1fr">
   <input type="search" name="q" value="{{ q }}" placeholder="Szukaj firmy, stanowiska, adresu…" autofocus>

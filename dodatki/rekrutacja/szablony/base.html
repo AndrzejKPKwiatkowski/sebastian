@@ -27,10 +27,10 @@ p{margin:0 0 12px}.soft{color:var(--soft)}.small{font-size:14px}.center{text-ali
 /* nagłówek jak w portalu pracy: pasek w kolorze marki */
 nav.top{position:sticky;top:0;z-index:5;background:var(--brand);box-shadow:0 2px 10px rgba(0,0,0,.12)}
 nav.top .in{max-width:1040px;margin:0 auto;padding:0 24px;display:flex;gap:2px;align-items:center;height:60px;overflow-x:auto}
-nav.top .logo{display:flex;align-items:center;gap:10px;color:#fff;font-weight:700;font-size:18px;margin-right:18px;white-space:nowrap;letter-spacing:.01em}
+nav.top .logo{display:flex;align-items:center;gap:10px;color:#fff;font-weight:700;font-size:18px;margin-right:10px;white-space:nowrap;letter-spacing:.01em}
 nav.top .logo i{width:30px;height:30px;border-radius:8px;background:var(--gold);color:var(--brand2);display:grid;place-items:center;font-style:normal;font-size:16px;font-weight:800}
 nav.top .logo small{font-weight:400;opacity:.75;font-size:14px}
-nav.top a{color:rgba(255,255,255,.88);font-size:15px;font-weight:500;padding:19px 12px 17px;border-bottom:3px solid transparent;white-space:nowrap}
+nav.top a{color:rgba(255,255,255,.88);font-size:15px;font-weight:500;padding:19px 9px 17px;border-bottom:3px solid transparent;white-space:nowrap}
 nav.top a:hover{text-decoration:none;color:#fff;background:rgba(255,255,255,.06)}
 nav.top a.on{color:#fff;border-bottom-color:var(--gold)}
 nav.top .sp{flex:1}
@@ -125,14 +125,18 @@ footer.foot i{width:8px;height:8px;border-radius:50%;background:var(--gold);disp
 .offer-text li:before{content:"";position:absolute;left:4px;top:13px;width:7px;height:7px;border-radius:50%;background:var(--brand)}
 .offer-text p{margin:6px 0 10px}
 @media(max-width:560px){.commute .modes{grid-template-columns:repeat(2,1fr)}.scorebox div{grid-template-columns:110px 44px 1fr}}
+.star{font:inherit;font-size:15px;font-weight:600;border:1px solid #d9d0c2;background:#fff;color:var(--soft);border-radius:999px;padding:7px 16px;cursor:pointer;white-space:nowrap;margin-top:4px}
+.star:hover{border-color:var(--gold);color:var(--ink)}.star.on{background:var(--goldsoft);border-color:var(--gold);color:#6b5326}
+.gold{color:var(--gold)}
 </style>
 </head>
 <body class="t-{{ theme|default('bordo') }}">
 {% block nav %}
 <nav class="top"><div class="in">
-  <a href="{{ url_for('home') }}" class="logo"><i>S</i>Sebastian <small>· Rekrutacja</small></a>
+  <a href="{{ url_for('centrum') }}" class="logo" title="Centrum dowodzenia"><i>S</i>Sebastian <small>· Centrum</small></a>
   <a href="{{ url_for('home') }}" class="{{ 'on' if tab=='dzis' }}">Dziś</a>
   <a href="{{ url_for('todo') }}" class="{{ 'on' if tab=='todo' }}">Do zrobienia{% if n and n.do_zrobienia %}<span class="badge">{{ n.do_zrobienia }}</span>{% endif %}</a>
+  <a href="{{ url_for('starred') }}" class="{{ 'on' if tab=='wazne' }}">★ Ważne{% if n and n.gwiazdki %}<span class="badge">{{ n.gwiazdki }}</span>{% endif %}</a>
   <a href="{{ url_for('replies') }}" class="{{ 'on' if tab=='odp' }}">Odpowiedzi{% if n and n.odpowiedzi %}<span class="badge">{{ n.odpowiedzi }}</span>{% endif %}</a>
   <a href="{{ url_for('all_apps') }}" class="{{ 'on' if tab=='all' }}">Aplikacje</a>
   <a href="{{ url_for('talk') }}" class="{{ 'on' if tab=='rozmowa' }}">Rozmowa</a>

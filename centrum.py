@@ -43,6 +43,8 @@ def kafelki():
          "url": c.get("gwaranci", ""), "port": 8791},
         {"id": "terminal", "nazwa": "Terminal", "opis": "Pełny zsh na tym Macu",
          "url": c.get("terminal", ""), "port": 7681},
+        {"id": "aktualizacje", "nazwa": "Aktualizuj Sebastiana", "opis": "Wrzuć plik z czatu — reszta dzieje się sama (2.21)",
+         "url": (c.get("rekrutacja", "").rstrip("/") + "/centrum#aktualizuj") if c.get("rekrutacja") else "", "port": 8790},
     ]
 
 
@@ -89,6 +91,9 @@ STRONA = r"""<!doctype html>
            display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:18px; }
   .nazwa { font-size:18px; font-weight:600; margin:0; }
   .opis { color:var(--sub); font-size:14px; margin:0; }
+  a.card.wyrozniona { background:linear-gradient(135deg,#7b1e2e,#5f1523); color:#fff; border:2px solid #b8934a; }
+  a.card.wyrozniona .opis, a.card.wyrozniona .stan { color:rgba(255,255,255,.85); }
+  a.card.wyrozniona .ikona { background:#b8934a; }
   .stan { margin-top:auto; display:flex; align-items:center; gap:8px; font-size:13px; color:var(--sub); }
   .kropka { width:8px; height:8px; border-radius:50%; background:#8e8e93; }
   .kropka.ok { background:var(--ok); } .kropka.bad { background:var(--bad); }
@@ -112,7 +117,7 @@ STRONA = r"""<!doctype html>
 </main>
 <script>
 const KAFELKI = __KAFELKI__;
-const ZNAKI = { rekrutacja:"R", sebastian:"S", gwaranci:"G", terminal:">_" };
+const ZNAKI = { rekrutacja:"R", sebastian:"S", gwaranci:"G", terminal:">_", aktualizacje:"⟳" };
 
 function render(stan) {
   const grid = document.getElementById("grid");
@@ -121,7 +126,7 @@ function render(stan) {
     const s = (stan.kafelki || []).find(x => x.id === k.id);
     const up = s ? s.up : false;
     const a = document.createElement("a");
-    a.className = "card";
+    a.className = "card" + (k.id === "aktualizacje" ? " wyrozniona" : "");
     a.href = k.url || "#";
     if (k.url) { a.target = "_blank"; a.rel = "noopener"; }
     a.innerHTML =

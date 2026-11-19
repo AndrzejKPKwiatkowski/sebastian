@@ -408,3 +408,19 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.19.2
 
 `Pay2192`: 7000 brutto → 5101,67 netto, 9785 → 7001, 4806 → 3606 (jak kalkulatory płac 2026); B2B bez przeliczania; kolejność: UoP ≥ 5000 netto od najwyższej, potem reszta z pensją, na końcu bez pensji; strona oferty pokazuje kwotę na rękę.
+
+# Weryfikacja 2.20
+
+`Star220`: gwiazdka włącza i zdejmuje się na stronie oferty, oferta pojawia się w zakładce „★ Ważne” z licznikiem, bez tokenu CSRF nic się nie zmienia, przekierowanie tylko w obrębie panelu.
+
+# Weryfikacja 2.20.1
+
+`Pool218.test_aga_can_choose_more_than_five`: 8 zaznaczonych punktów trafia do CV w całości, CV dalej na jednej stronie.
+
+# Weryfikacja 2.20.2
+
+`Commute219.test_commute_counted_on_open_and_while_queue_is_busy`: dojazd i procent liczą się przy otwarciu oferty i w tle, także gdy w kolejce czekają nowe oferty.
+
+# Weryfikacja 2.21
+
+`Centrum221`: rozpoznawanie pliku aktualizacji i wersji (z podpowiedzią, co napisać w czacie), złe hasło, cała aktualizacja z postępem i historią, nieudana aktualizacja zostawia poprzednią wersję, skrót na pulpit, CSRF.

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Centrum dowodzenia{% endblock %}
+{% block content %}
+<div class="cd-head">
+  <div><h1>Centrum dowodzenia Agi</h1>
+    <p class="soft">Wszystkie aplikacje Sebastiana w jednym miejscu. Sebastian ma teraz wersję <b id="wersja">{{ wersja }}</b>.</p></div>
+  <a class="btn ghost small" href="{{ url_for('centrum_shortcut') }}" title="Plik na pulpit — dwuklik otwiera to Centrum">⤓ Skrót na pulpit</a>
+</div>
+
+{% if blad %}<div class="note err">{{ blad }}</div>{% endif %}
+
+<section class="cd-update" id="aktualizuj">
+  <div class="cd-update-in">
+    <div class="cd-badge">⟳</div>
+    <div class="cd-text">
+      <h2>Aktualizuj Sebastiana</h2>
+      <p>Opisz w czacie z Claude'em, co poprawić, pobierz plik <b>Sebastian_aktualizacja_….py</b> i wrzuć go tutaj.
+        Resztę Sebastian zrobi sam: kopia zapasowa, nowe pliki, testy, restart i zapis na GitHubie.</p>
+    </div>
+  </div>
+  <form method="post" action="{{ url_for('centrum_update') }}" enctype="multipart/form-data" id="upform" {{ 'hidden' if trwa }}>
+    <input type="hidden" name="csrf" value="{{ csrf() }}">
+    <label class="cd-drop" id="drop">
+      <input type="file" name="plik" accept=".py" id="plik" required>
+      <span class="cd-drop-big">Upuść tu plik aktualizacji</span>
+      <span class="cd-drop-small" id="plikname">albo kliknij, żeby wybrać z Pobranych</span>
+    </label>
+    <div class="cd-go">
+      <input type="password" name="haslo" placeholder="Twoje hasło do panelu" autocomplete="current-password" required>
+      <button class="btn big gold">Aktualizuj Sebastiana</button>
+    </div>
+    <p class="small cd-note">Hasło to samo, którym logujesz się do panelu. Gdy coś pójdzie nie tak, Sebastian sam wróci do poprzedniej wersji.</p>
+  </form>
+
+  <div class="cd-progress" id="progress" {{ '' if trwa or request.args.get('postep') else 'hidden' }}>
+    <ol class="cd-steps" id="steps">
+      <li data-k="1/5">Kopia zapasowa</li><li data-k="2/5">Nowe pliki</li><li data-k="3/5">Testy (ok. minuty)</li>
+      <li data-k="4/5">Dane</li><li data-k="5/5">Restart Sebastiana</li><li data-k="git">Zapis na GitHubie</li>
+    </ol>
+    <p class="cd-now" id="now">Zaczynam…</p>
+    <details class="small"><summary>Szczegóły dla Andrzeja</summary><pre id="log"></pre></details>
+  </div>
+
+  <div class="cd-done" id="done" hidden>
+    <div class="cd-trophy">🎉</div>
+    <h2>Brawo, Aga!</h2>
+    <p id="donetext">Sebastian jest zaktualizowany.</p>
+    <p class="small" id="githubtext"></p>
+    <form method="post" action="{{ url_for('centrum_github') }}" id="retry" hidden><input type="hidden" name="csrf" value="{{ csrf() }}">
+      <button class="btn ghost small">Spróbuj jeszcze raz wysłać na GitHuba</button></form>
+    <p><a class="btn ghost" href="{{ url_for('centrum') }}">Wróć do Centrum</a></p>
+  </div>
+  <div class="cd-fail" id="fail" hidden>
+    <h2>Tym razem się nie udało</h2>
+    <p id="failtext"></p>
+    <p class="small">Skopiuj ten komunikat do czatu z Claude'em — przygotuje poprawiony plik. Sebastian działa dalej jak wcześniej.</p>
+    <p><a class="btn ghost" href="{{ url_for('centrum') }}">Spróbuj z innym plikiem</a></p>
+  </div>
+</section>
+
+<section class="cd-grid">
+  {% for t in tiles %}
+  <a class="cd-card" {% if t.url %}href="{{ t.url }}"{% if t.id != 'rekrutacja' %} target="_blank" rel="noopener"{% endif %}{% endif %}>
+    <span class="cd-ikona">{{ t.znak }}</span>
+    <b>{{ t.nazwa }}</b><span class="soft small">{{ t.opis }}</span>
+    {% if not t.url %}<span class="small soft">adres ustawia Andrzej w data/centrum.json</span>{% endif %}
+  </a>
+  {% endfor %}
+</section>
+
+{% if historia %}
+<div class="card"><h2>Ostatnie aktualizacje</h2>
+  <ul class="cd-hist">{% for h in historia %}
+    <li><span class="{{ 'ok' if h.stan == 'ok' else 'bad' }}">{{ '✓' if h.stan == 'ok' else '✗' }}</span>
+      <b>{{ h.do or '?' }}</b> {{ h.tytul or '' }} <span class="soft small">· {{ h.czas }}{% if h.stan == 'ok' and h.github and 'nie' in h.github %} · GitHub: później{% endif %}</span></li>
+  {% endfor %}</ul></div>
+{% endif %}
+
+<style>
+.cd-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.cd-update{border-radius:18px;padding:26px 28px;margin:6px 0 26px;color:#fff;
+  background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 70%);border:2px solid var(--gold);box-shadow:0 10px 30px rgba(80,20,30,.18)}
+.cd-update h2{color:#fff;font-size:22px;margin:0 0 6px}.cd-update p{color:rgba(255,255,255,.9)}
+.cd-update-in{display:flex;gap:18px;align-items:flex-start}
+.cd-badge{flex:none;width:52px;height:52px;border-radius:14px;background:var(--gold);color:#fff;font-size:28px;display:flex;align-items:center;justify-content:center}
+.cd-drop{color:#fff;font-weight:400;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;margin:16px 0 12px;padding:26px;border:2px dashed rgba(255,255,255,.55);
+  border-radius:14px;background:rgba(255,255,255,.07);cursor:pointer;text-align:center;transition:background .15s}
+.cd-drop:hover,.cd-drop.over{background:rgba(255,255,255,.16)}
+.cd-drop input{display:none}.cd-drop-big{font-size:18px;font-weight:600}.cd-drop-small{font-size:14px;opacity:.85}
+.cd-go{display:flex;gap:12px;flex-wrap:wrap}.cd-go input{flex:1;min-width:220px;max-width:340px}
+.btn.gold{background:var(--gold);border-color:var(--gold);color:#fff}.btn.gold:hover{filter:brightness(1.07)}
+.cd-note{margin-top:10px;opacity:.85}
+.cd-progress,.cd-done,.cd-fail{background:#fff;color:var(--ink);border-radius:14px;padding:20px 22px;margin-top:16px}
+.cd-progress p,.cd-done p,.cd-fail p{color:var(--ink)}.cd-done h2,.cd-fail h2{color:var(--ink)}
+.cd-steps{list-style:none;padding:0;margin:0 0 12px;display:grid;gap:8px}
+.cd-steps li{padding-left:30px;position:relative;color:var(--soft)}
+.cd-steps li:before{content:"";position:absolute;left:4px;top:5px;width:14px;height:14px;border-radius:50%;border:2px solid var(--line)}
+.cd-steps li.on{color:var(--ink);font-weight:600}.cd-steps li.on:before{border-color:var(--gold);border-top-color:transparent;animation:spin 1s linear infinite}
+.cd-steps li.ok{color:var(--ink)}.cd-steps li.ok:before{content:"✓";border:none;background:var(--green);color:#fff;font-size:11px;line-height:14px;text-align:center;width:18px;height:18px;top:3px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.cd-now{font-weight:600}.cd-progress pre{white-space:pre-wrap;font-size:12px;max-height:260px;overflow:auto;background:#f7f4ee;padding:10px;border-radius:8px}
+.cd-done{text-align:center}.cd-trophy{font-size:54px;line-height:1}.cd-done h2{font-size:26px;margin:8px 0}
+.cd-fail{border-left:5px solid var(--red)}
+.cd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:26px}
+.cd-card{display:flex;flex-direction:column;gap:6px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px;color:var(--ink);min-height:140px;
+  transition:transform .15s,box-shadow .15s}
+.cd-card:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.08);text-decoration:none}
+.cd-ikona{width:40px;height:40px;border-radius:11px;background:var(--brandsoft);color:var(--brand);font-weight:700;display:flex;align-items:center;justify-content:center;margin-bottom:6px}
+.cd-hist{list-style:none;padding:0;margin:0}.cd-hist li{padding:6px 0;border-bottom:1px solid var(--line2)}.cd-hist .ok{color:var(--green)}.cd-hist .bad{color:var(--red)}
+.confetti{position:fixed;top:-12px;width:9px;height:14px;z-index:99;animation:fall linear forwards;border-radius:2px}
+@keyframes fall{to{transform:translateY(105vh) rotate(720deg)}}
+</style>
+<script>
+(function(){
+  var f = document.getElementById('plik'), drop = document.getElementById('drop'), nm = document.getElementById('plikname');
+  if (f) {
+    f.addEventListener('change', function(){ if (f.files[0]) nm.textContent = 'Wybrany plik: ' + f.files[0].name; });
+    ['dragenter','dragover'].forEach(function(e){ drop.addEventListener(e, function(ev){ ev.preventDefault(); drop.classList.add('over'); }); });
+    ['dragleave','drop'].forEach(function(e){ drop.addEventListener(e, function(){ drop.classList.remove('over'); }); });
+    drop.addEventListener('drop', function(ev){ ev.preventDefault(); if (ev.dataTransfer.files.length) { f.files = ev.dataTransfer.files; nm.textContent = 'Wybrany plik: ' + f.files[0].name; } });
+  }
+  var prog = document.getElementById('progress');
+  if (prog.hidden) return;
+  document.getElementById('upform') && (document.getElementById('upform').hidden = true);
+  var order = ['1/5','2/5','3/5','4/5','5/5','git'], fails = 0;
+  function confetti(){
+    var colors = ['#b8934a','#7b1e2e','#2e7d4f','#f4ecdb','#e0b860'];
+    for (var i = 0; i < 120; i++) {
+      var c = document.createElement('i'); c.className = 'confetti';
+      c.style.left = Math.random() * 100 + 'vw'; c.style.background = colors[i % colors.length];
+      c.style.animationDuration = (2.2 + Math.random() * 2.5) + 's'; c.style.animationDelay = (Math.random() * .8) + 's';
+      document.body.appendChild(c); setTimeout(function(x){ return function(){ x.remove(); }; }(c), 6000);
+    }
+  }
+  function show(st){
+    var k = (st.krok || ''), idx = k.indexOf('GitHub') >= 0 ? 5 : order.indexOf(k.slice(0, 3));
+    if (st.stan === 'ok') idx = 6;
+    document.querySelectorAll('#steps li').forEach(function(li, i){ li.className = i < idx ? 'ok' : (i === idx && st.stan === 'trwa' ? 'on' : ''); });
+    document.getElementById('now').textContent = st.stan === 'trwa' ? (idx >= 0 ? 'Teraz: ' + document.querySelectorAll('#steps li')[Math.min(idx,5)].textContent + '…' : 'Zaczynam…') : '';
+    document.getElementById('log').textContent = (st.linie || []).join('\n');
+    if (st.wersja) document.getElementById('wersja').textContent = st.wersja;
+    if (st.stan === 'ok' && st.koniec) {
+      prog.hidden = true; document.getElementById('done').hidden = false;
+      document.getElementById('donetext').textContent = 'Sebastian ma teraz wersję ' + (st.do || st.wersja) + (st.tytul ? ' — ' + st.tytul + '.' : '.');
+      var gh = st.github || ''; document.getElementById('githubtext').textContent = gh ? 'GitHub: ' + gh : '';
+      if (gh.indexOf('nie') === 0 || gh.indexOf('nadal') === 0) document.getElementById('retry').hidden = false;
+      confetti(); return true;
+    }
+    if (st.stan === 'blad' && st.koniec) {
+      prog.hidden = true; document.getElementById('fail').hidden = false;
+      document.getElementById('failtext').textContent = st.komunikat || 'Aktualizacja się nie udała.'; return true;
+    }
+    return false;
+  }
+  function poll(){
+    fetch('{{ url_for("centrum_state") }}', {credentials: 'same-origin', cache: 'no-store'})
+      .then(function(r){ if (!r.ok || (r.headers.get('content-type') || '').indexOf('json') < 0) throw 0; return r.json(); })
+      .then(function(st){ fails = 0; if (!show(st)) setTimeout(poll, 1500); })
+      .catch(function(){ fails++; document.getElementById('now').textContent = 'Sebastian się restartuje — chwileczkę…'; setTimeout(poll, 2500); });
+  }
+  poll();
+})();
+</script>
+{% endblock %}

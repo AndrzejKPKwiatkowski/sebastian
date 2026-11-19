@@ -2,7 +2,11 @@
 {% block content %}
 {% set uwagi = a.uwagi|loads %}{% set ostrz = a.ostrzezenia|loads %}
 <p class="small"><a href="{{ url_for('todo') if a.status in ('do_zatwierdzenia','do_sprawdzenia','do_uzupelnienia','blad') else url_for('all_apps') }}">‹ Wróć</a></p>
-<h1>{{ a.firma or 'Nowa aplikacja' }}</h1>
+<div style="display:flex;gap:14px;align-items:flex-start;justify-content:space-between">
+  <h1>{{ a.firma or 'Nowa aplikacja' }}</h1>
+  <form method="post" action="{{ url_for('star', aid=a.id) }}" style="margin:0"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    <button class="star{{ ' on' if a.gwiazdka }}" title="{{ 'Zdejmij gwiazdkę' if a.gwiazdka else 'Oznacz jako ważną — trafi do zakładki ★ Ważne' }}">{{ '★ Ważna' if a.gwiazdka else '☆ Oznacz jako ważną' }}</button></form>
+</div>
 <p class="soft">{{ a.stanowisko or ('zapytanie o współpracę' if a.zrodlo == 'spontaniczna' else '') }}{% if a.miasto %} · {{ a.miasto }}{% endif %}
   · <span class="pill">{{ STATUS.get(a.status, a.status) }}</span>{% if a.ocena is not none %} · dopasowanie {{ a.ocena }}%{% endif %}</p>
 
@@ -48,7 +52,8 @@
       <p class="small soft" style="margin:8px 0 0">Komunikacja: przyjazd na 8:00 w dzień roboczy. Samochód bez korków.
         {% if maps %}<a href="{{ maps }}" target="_blank" rel="noopener noreferrer">Trasa w Mapach Google ↗</a> · {% endif %}dane: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap</a>, <a href="https://transitous.org/sources/" target="_blank" rel="noopener noreferrer">Transitous</a></p>
       {% elif dj.brak or dj.blad %}<p class="small soft">{{ (dj.brak or dj.blad)|capitalize }}.{% if maps %} <a href="{{ maps }}" target="_blank" rel="noopener noreferrer">Sprawdź w Mapach Google ↗</a>{% endif %}</p>
-      {% else %}<p class="small soft">Liczę czas dojazdu — pojawi się za kilka minut.</p>{% endif %}
+      {% else %}<p class="small soft">Liczę czas dojazdu — za kilka sekund strona odświeży się sama.</p>
+        {% if commute_wait %}<script>setTimeout(function(){location.reload()},9000)</script>{% endif %}{% endif %}
     </div>
     {% if fit %}
     <label>Co się zgadza z ofertą{% if a.ocena is not none %} · dopasowanie {{ a.ocena }}%{% endif %}</label>

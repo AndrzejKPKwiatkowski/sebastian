@@ -169,6 +169,8 @@ def migrate(c):
     for col in ("kanal", "przypomnienie", "odpowiedz_kiedy", "podziekowanie", "analiza"):
         if col not in cols:
             c.execute(f"ALTER TABLE aplikacje ADD COLUMN {col} TEXT DEFAULT ''")
+    if "gwiazdka" not in cols:                                           # 2.20: oferty ważne dla Agi
+        c.execute("ALTER TABLE aplikacje ADD COLUMN gwiazdka TEXT DEFAULT ''")
     wcols = {r[1] for r in c.execute("PRAGMA table_info(wiadomosci)")}
     if "linki" not in wcols:
         c.execute("ALTER TABLE wiadomosci ADD COLUMN linki TEXT DEFAULT '[]'")
