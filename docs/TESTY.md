@@ -432,3 +432,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.23
 
 `Courses223`: domyślnie wszystkie kursy, wybór ogranicza CV do zaznaczonych, „Edytuj CV” pokazuje listę i zapisuje wybór Agi.
+
+# Weryfikacja 2.24
+
+`NoSkills224`: CV bez „Umiejętności”, z „Cechami” (bez puli cech — po staremu), dopasowanie „kultury osobistej”, czekające CV układane na nowo jeden raz.

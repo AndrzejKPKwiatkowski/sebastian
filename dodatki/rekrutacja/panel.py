@@ -440,6 +440,8 @@ def work_once(ctx):
         refresh_scores(ctx)
     with contextlib.suppress(Exception):
         refresh_commute(ctx)
+    with contextlib.suppress(Exception):
+        refresh_cv_layout(ctx)
     send_one(ctx)
     with contextlib.suppress(Exception):
         CB.run(ctx)                                                   # CBOP: raz na dobę wieczorem, gdy jest nazwa partnera
@@ -680,6 +682,38 @@ def next_to_prepare(ctx, manual_only=False):
         return None
     best = min(pool, key=lambda a: pay_key(ctx, a))
     return {"id": best["id"]}
+
+
+
+
+def refresh_cv_layout(ctx, limit=5):
+    """Czekające CV układam na nowo po zmianie układu: cechy dobrane do ogłoszenia, wszystkie poprawki Agi zostają."""
+    wait = ("do_zatwierdzenia", "do_sprawdzenia", "do_uzupelnienia", "formularz")
+    with R.db(ctx) as c:
+        rows = [dict(r) for r in c.execute(f"SELECT * FROM aplikacje WHERE status IN ({','.join('?' * len(wait))}) AND cv_plik<>'' "
+                                           f"AND wybor<>'' AND wybor NOT LIKE '%\"uklad\": {D.CV_LAYOUT}%' ORDER BY id DESC LIMIT ?", wait + (limit,))]
+    if not rows:
+        return None
+    f = R.load_facts(ctx)
+    for a in rows:
+        raw = json.loads(a["wybor"] or "{}")
+        sel = D.clean_selection(f, raw)
+        if not raw.get("cechy") and f.get("cechy"):
+            sel["cechy"] = D.match_traits(f, (a.get("tresc") or "") + " " + (a.get("stanowisko") or "")) or sel["cechy"]
+        try:
+            cv, li = render_files(ctx, f, a, a["list"], sel, a["rodo"])
+        except Exception as e:
+            ctx.log.warning(f"Rekrutacja: nowy układ CV dla {a['id']} — {type(e).__name__}: {e}")
+            sel_mark = dict(raw, uklad=D.CV_LAYOUT)
+            with R.db(ctx) as c:
+                c.execute("UPDATE aplikacje SET wybor=? WHERE id=?", (json.dumps(sel_mark, ensure_ascii=False), a["id"]))
+                c.commit()
+            continue
+        with R.db(ctx) as c:
+            c.execute("UPDATE aplikacje SET wybor=?, cv_plik=?, list_plik=? WHERE id=? AND status=?",
+                      (json.dumps(sel, ensure_ascii=False), cv, li, a["id"], a["status"]))
+            c.commit()
+    return rows[-1]["id"]
 
 
 COMMUTE_NOW = set()                                                  # oferty, dla których dojazd liczy się właśnie w tle

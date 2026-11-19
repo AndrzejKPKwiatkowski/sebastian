@@ -2576,6 +2576,43 @@ class Courses223(RekrutacjaBase):
         self.assertEqual(json.loads(self.row(aid)["wybor"])["kursy"], [efg])
 
 
+class NoSkills224(RekrutacjaBase):
+    """2.24: w CV „Cechy” zamiast „Umiejętności”; nowa cecha „Wysoka kultura osobista”."""
+    def test_cv_has_traits_not_skills(self):
+        import fitz
+        f = self.R.load_facts(self.ctx)
+        out = self.ctx.folder() / "cv_a.pdf"
+        self.D.render_cv(f, self.D.default_selection(f), out)
+        self.assertIn("U M I E J Ę T N O Ś C I", fitz.open(out)[0].get_text())     # bez puli cech — jak dawniej
+        self.mod.apply_patch(self.ctx, {"czesci": [{"id": "2.24", "cechy": ["Wysoka kultura osobista", "Dokładność"]}]})
+        f = self.R.load_facts(self.ctx)
+        sel = self.D.default_selection(f)
+        self.D.render_cv(f, sel, out)
+        text = fitz.open(out)[0].get_text()
+        self.assertNotIn("U M I E J Ę T N O Ś C I", text)
+        self.assertIn("C E C H Y", text)
+        self.assertIn("Wysoka kultura osobista", text)
+        kult = next(c["id"] for c in f["cechy"] if c["tekst"] == "Wysoka kultura osobista")
+        self.assertIn(kult, self.D.match_traits(f, "Oczekujemy wysokiej kultury osobistej i dbałości o wizerunek firmy."))
+
+    def test_waiting_cv_rerendered_once(self):
+        self.ready()
+        aid = self.add(tresc=OFFER + " Oczekujemy wysokiej kultury osobistej.")
+        self.P.prepare(self.ctx, aid)
+        self.assertIsNone(self.P.refresh_cv_layout(self.ctx))                 # nowe CV już w nowym układzie
+        old = json.loads(self.row(aid)["wybor"])
+        old.pop("uklad"); old.pop("cechy", None)
+        with self.R.db(self.ctx) as c:
+            c.execute("UPDATE aplikacje SET wybor=? WHERE id=?", (json.dumps(old), aid))
+            c.commit()
+        self.mod.apply_patch(self.ctx, {"cechy": ["Wysoka kultura osobista", "Kreatywność"]})
+        self.assertEqual(self.P.refresh_cv_layout(self.ctx), aid)
+        sel = json.loads(self.row(aid)["wybor"])
+        f = self.R.load_facts(self.ctx)
+        self.assertEqual([c["tekst"] for c in f["cechy"] if c["id"] in sel["cechy"]], ["Wysoka kultura osobista"])
+        self.assertIsNone(self.P.refresh_cv_layout(self.ctx))
+
+
 class Conversation213(RekrutacjaBase):
     """2.13: Sebastian odpisuje Adze, pamięta rozmowę, wstrzymuje owcę i przypomina w umówionym terminie."""
     def setUp(self):

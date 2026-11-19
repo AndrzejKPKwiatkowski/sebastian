@@ -62,6 +62,7 @@ def chronological(f, ids):
 
 POINTS_PER_JOB = 4          # domyślnie (bez modelu); model wybiera 3–5 najlepiej pasujących
 POINTS_MIN, POINTS_MAX = 3, 5
+CV_LAYOUT = 24              # wersja układu CV — starsze czekające CV panel układa na nowo (2.24: cechy zamiast umiejętności)
 OWN_MAX = 12                # tyle punktów Aga może sama zaznaczyć przy jednym stanowisku (2.20.1)
 
 
@@ -96,6 +97,7 @@ TRAIT_HINTS = {
     "dyskrec": ["dyskrec", "poufn", "tajemnic", "rodo"],
     "cierpliw": ["cierpliw", "spokój", "spokoj"],
     "empati": ["empat", "wrażliw", "życzliw", "zrozumieni"],
+    "kultura osobista": ["kultur", "savoir", "elegan", "reprezentac", "prestiż", "obsługa vip", "wizerun"],
     "takt": ["takt", "kultur", "uprzejm"],
     "uwaznosc na rozmowce": ["słuchan", "potrzeb klienta", "potrzeb pacjent", "uważn"],
     "komunikatywn": ["komunikatywn", "komunikacyj", "komunikacj"],
@@ -167,6 +169,7 @@ def clean_selection(f, sel):
            "cechy": pick("cechy", [c["id"] for c in f.get("cechy", [])], 8, 1),
            "kursy": pick("kursy", [k["id"] for k in f["kursy"]], 30, 1),
            "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 7, 1)}
+    out["uklad"] = CV_LAYOUT
     if hidden:
         out["ukryte"] = hidden
     if extra:
@@ -511,8 +514,10 @@ def _draw_cv(c, f, sel, photo, rodo, kl, kr=None):
     chosen = sel.get("kursy") or [k["id"] for k in f["kursy"]]                # 2.23: kursy wybrane pod ofertę
     y = section("Kursy i kwalifikacje", [(_para(escape(x["tekst"]), FL, body, bullet=True), 1.5)
                                          for x in courses_newest_first([k for k in f["kursy"] if k["id"] in chosen])], y)
-    skills = [u for u in f["umiejetnosci"] if u["id"] in sel["umiejetnosci"]]
-    y = section("Umiejętności", [(_para(escape(x["tekst"]), FL, body, bullet=True), 0.5) for x in skills], y)
+    # 2.24: zamiast „Umiejętności” w CV są „Cechy” (umiejętności zostają w faktach — do listów i opisu profilu)
+    if not f.get("cechy"):                                                # bez puli cech — jak dawniej
+        skills = [u for u in f["umiejetnosci"] if u["id"] in sel["umiejetnosci"]]
+        y = section("Umiejętności", [(_para(escape(x["tekst"]), FL, body, bullet=True), 0.5) for x in skills], y)
     traits = [next(c for c in f.get("cechy", []) if c["id"] == x) for x in sel.get("cechy", []) if any(c["id"] == x for c in f.get("cechy", []))]
     if traits:
         y = section("Cechy", [(_para(escape(x["tekst"]), FL, body, bullet=True), 0.5) for x in traits], y)
