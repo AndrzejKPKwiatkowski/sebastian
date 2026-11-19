@@ -57,7 +57,8 @@ def render_files(ctx, f, a, letter, selection, rodo=""):
     firm = R.slug(a["firma"], "aplikacja")
     cv, li = f"{base}_CV_{firm}.pdf", f"{base}_List_motywacyjny_{firm}.pdf"
     job = "" if a["zrodlo"] == "spontaniczna" else (a.get("stanowisko") or "")
-    rodo = R.consent_clause(a.get("firma", ""), rodo, job)              # zgoda pracodawcy (z uzupełnionym stanowiskiem) albo domyślna
+    own = (selection or {}).get("rodo_aga") if isinstance(selection, dict) else ""
+    rodo = own or R.consent_clause(a.get("firma", ""), rodo, job)       # 2.26: klauzula Agi; inaczej zgoda pracodawcy albo domyślna
     info = analysis(a)
     D.render_cv(f, selection, folder / cv, photo=photo_path(ctx, f), rodo=rodo)
     D.render_letter(f, letter, folder / li, firma=a["firma"], stanowisko=job, today=ctx.now().date(), rodo=rodo,
@@ -1665,6 +1666,13 @@ def make_app(ctx, hosts=None):
                     jobs = [j["id"] for j in f["doswiadczenie"]]
                     pts = {j: request.form.getlist("p_" + j) for j in jobs}
                     sel = D.apply_cv_edit(f, sel, request.form.get("profil", ""), pts, request.form.getlist("pokaz"))
+                    if "rodo_formularz" in request.form:                   # 2.26: klauzula RODO poprawiona przez Agę
+                        text = re.sub(r"\s+", " ", request.form.get("rodo_tekst", "")).strip()[:2500]
+                        default = R.consent_clause(a.get("firma", ""), a.get("rodo") or "", "" if a["zrodlo"] == "spontaniczna" else (a.get("stanowisko") or ""))
+                        if text and re.sub(r"\s+", " ", default).strip() != text:
+                            sel["rodo_aga"] = text
+                        else:
+                            sel.pop("rodo_aga", None)
                     if "kursy_formularz" in request.form:                  # 2.23: kursy zaznaczone przez Agę
                         pool = {k["id"] for k in f["kursy"]}
                         chosen = [x for x in request.form.getlist("kursy") if x in pool]
@@ -1697,8 +1705,11 @@ def make_app(ctx, hosts=None):
                          "inne": [t for t in now if t not in pool], "wlasne": j["id"] in sel.get("wlasne_punkty", {})})
         traits = [{"id": c["id"], "t": c["tekst"], "on": c["id"] in sel.get("cechy", [])} for c in f.get("cechy", [])]
         courses = [{"id": k["id"], "t": k["tekst"], "on": k["id"] in sel.get("kursy", [])} for k in D.courses_newest_first(f["kursy"])]
+        rodo_default = R.consent_clause(a.get("firma", ""), a.get("rodo") or "", "" if a["zrodlo"] == "spontaniczna" else (a.get("stanowisko") or ""))
+        rodo_now = sel.get("rodo_aga") or rodo_default
         return render_template("edytuj_cv.html", a=a, tab="", profil=profile, rows=rows, locked=locked, n=D.POINTS_PER_JOB, cechy=traits, kursy=courses,
-                               zrodlo=sel.get("profil_zrodlo", ""), edited=bool(sel.get("wlasne_punkty") or sel.get("ukryte") or sel.get("pokazane")
+                               rodo_now=rodo_now, rodo_own=bool(sel.get("rodo_aga")), rodo_employer=bool(a.get("rodo") and R.is_consent(a["rodo"])),
+                               zrodlo=sel.get("profil_zrodlo", ""), edited=bool(sel.get("wlasne_punkty") or sel.get("ukryte") or sel.get("pokazane") or sel.get("rodo_aga")
                                                                                 or sel.get("profil_zrodlo") == "aga"))
 
     @app.route("/plik/<int:aid>/<which>")

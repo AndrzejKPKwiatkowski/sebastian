@@ -19,6 +19,14 @@
     <textarea name="profil" rows="6" {{ 'readonly' if locked }}>{{ profil }}</textarea>
   </div>
 
+  <div class="card">
+    <h2>Klauzula RODO</h2>
+    <p class="small soft">{% if rodo_own %}Twoja wersja klauzuli.{% elif rodo_employer %}Klauzula wymagana przez pracodawcę (z ogłoszenia).{% else %}Klauzula domyślna Sebastiana.{% endif %}
+      Trafia na dół CV i listu. Wyczyść pole, żeby wrócić do klauzuli Sebastiana.</p>
+    <input type="hidden" name="rodo_formularz" value="1">
+    <textarea name="rodo_tekst" rows="5" {{ 'readonly' if locked }}>{{ rodo_now }}</textarea>
+  </div>
+
   {% if kursy %}
   <div class="card">
     <h2>Kursy i kwalifikacje</h2>

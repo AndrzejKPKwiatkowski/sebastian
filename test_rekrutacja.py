@@ -2651,6 +2651,37 @@ class Fixes225(RekrutacjaBase):
         self.assertEqual(got, ["Awans zawodowy: z DM Setter na Operational Marketing Manager.", "Inny punkt."])
 
 
+class Rodo226(RekrutacjaBase):
+    """2.26: klauzula RODO do poprawienia w „Edytuj CV”."""
+    def test_edit_rodo(self):
+        import fitz
+        self.ready()
+        aid = self.add(firma="Firma Testowa")
+        self.P.prepare(self.ctx, aid)
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        page = cl.get(f"/aplikacja/{aid}/cv").data.decode()
+        self.assertIn("Klauzula RODO", page)
+        self.assertIn("przez Firma Testowa", page)
+        shown = json.loads(self.row(aid)["wybor"])["kolejnosc"]
+        mine = "Wyrażam zgodę na przetwarzanie moich danych osobowych przez Firma Testowa wyłącznie w tej rekrutacji."
+        cl.post(f"/aplikacja/{aid}/cv", data={"csrf": "t", "co": "zapisz", "profil": "", "pokaz": shown, "rodo_formularz": "1", "rodo_tekst": mine})
+        row = self.row(aid)
+        self.assertEqual(json.loads(row["wybor"])["rodo_aga"], mine)
+        text = " ".join(fitz.open(self.ctx.folder() / "aplikacje" / str(aid) / row["cv_plik"])[0].get_text().split())
+        self.assertIn("wyłącznie w tej rekrutacji", text)
+        self.assertIn("Twoja wersja klauzuli", cl.get(f"/aplikacja/{aid}/cv").data.decode())
+        cl.post(f"/aplikacja/{aid}/cv", data={"csrf": "t", "co": "zapisz", "profil": "", "pokaz": shown, "rodo_formularz": "1", "rodo_tekst": ""})
+        self.assertNotIn("rodo_aga", json.loads(self.row(aid)["wybor"]))      # puste pole — z powrotem klauzula Sebastiana
+
+
 class Conversation213(RekrutacjaBase):
     """2.13: Sebastian odpisuje Adze, pamięta rozmowę, wstrzymuje owcę i przypomina w umówionym terminie."""
     def setUp(self):

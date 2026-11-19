@@ -440,3 +440,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.25
 
 `Fixes225`: usunięcie i dodanie cechy, nowe brzmienie osiągnięć (punkt i opis do listów), 12 zaznaczonych cech zostaje, CV poprawione ręcznie dostaje nowe brzmienie awansu.
+
+# Weryfikacja 2.26
+
+`Rodo226`: klauzula widoczna w „Edytuj CV”, wersja Agi zapisuje się i trafia do PDF, puste pole przywraca klauzulę Sebastiana.

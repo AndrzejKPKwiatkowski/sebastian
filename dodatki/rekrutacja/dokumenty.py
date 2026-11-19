@@ -177,6 +177,9 @@ def clean_selection(f, sel):
            "kursy": pick("kursy", [k["id"] for k in f["kursy"]], 30, 1),
            "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 7, 1)}
     out["uklad"] = CV_LAYOUT
+    rodo_own = re.sub(r"\s+", " ", str(sel.get("rodo_aga") or "")).strip()
+    if rodo_own:
+        out["rodo_aga"] = rodo_own[:2500]                                  # 2.26: klauzula RODO poprawiona przez Agę
     if hidden:
         out["ukryte"] = hidden
     if extra:
@@ -244,7 +247,7 @@ def apply_cv_edit(f, sel, form_profile, form_points, shown):
 
 def reset_cv_edit(f, sel):
     sel = clean_selection(f, sel)
-    new = {k: v for k, v in sel.items() if k not in ("wlasne_punkty", "ukryte", "pokazane", "profil_tekst", "profil_zrodlo")}
+    new = {k: v for k, v in sel.items() if k not in ("wlasne_punkty", "ukryte", "pokazane", "profil_tekst", "profil_zrodlo", "rodo_aga")}
     if sel.get("profil_model"):
         new.update(profil_tekst=sel["profil_model"], profil_zrodlo="model")
     return clean_selection(f, new)
