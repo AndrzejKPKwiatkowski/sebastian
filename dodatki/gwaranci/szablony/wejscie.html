@@ -3,17 +3,35 @@
   <div class="card" style="padding:30px">
     <div class="logo" style="width:44px;height:44px;font-size:20px">F</div>
     <h1 style="margin-top:14px">Gwaranci Feniks</h1>
-    <p class="muted">Spotkanie gwaranckie w minutę. Wejdź przez swój <b style="color:var(--ink)">osobisty link</b> — dostajesz go od Andrzeja albo od swojego menedżera.</p>
+    <p class="muted">Spotkanie gwaranckie w minutę. Pierwszy raz? Wpisz swój mail służbowy — Sebastian rozpozna Cię w strukturze i wyśle Ci link do ustawienia konta.</p>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  </div>
+  {% if nieznany %}
+  <div class="card" style="border-color:rgba(227,179,65,.45)">
+    <h2>Nie widzę Cię jeszcze w strukturze</h2>
+    <p class="muted small">Adres <b>{{ nieznany }}</b> nie pasuje do nikogo z listy. Podaj imię i nazwisko oraz przełożonego — Andrzej przypisze Cię jednym kliknięciem, a link „Ustaw konto” przyjdzie na ten mail.</p>
+    <form method="post" action="/dostep"><input type="hidden" name="csrf" value="{{ csrf() }}">
+      <input type="hidden" name="email" value="{{ nieznany }}">
+      <label>Imię i nazwisko</label><input name="imie_nazwisko" required autocomplete="name">
+      <label>Twój przełożony</label><input name="przelozony">
+      <label>Telefon (opcjonalnie)</label><input name="telefon" autocomplete="tel">
+      <p style="margin-top:16px"><button class="btn">Poproś o dostęp</button></p>
+    </form>
+  </div>
+  {% endif %}
+  <div class="card">
+    <h2>Pierwszy raz albo nie pamiętasz hasła</h2>
+    <form method="post" action="/witaj/mail"><input type="hidden" name="csrf" value="{{ csrf() }}">
+      <label>Mail służbowy</label><input name="email" type="email" required autocomplete="email" placeholder="imie.nazwisko@{{ domena }}" value="{{ mail }}">
+      <p style="margin-top:16px"><button class="btn">Wyślij mi link</button></p>
+    </form>
   </div>
   <div class="card">
-    <h2>Nie masz jeszcze linku?</h2>
-    <p class="muted small">Zostaw dane — Sebastian przekaże prośbę i dostaniesz link.</p>
-    <form method="post" action="/dostep">
-      <label>Imię i nazwisko</label><input name="imie_nazwisko" required autocomplete="name">
-      <label>E-mail</label><input name="email" type="email" required autocomplete="email">
-      <label>Telefon (opcjonalnie)</label><input name="telefon" autocomplete="tel">
-      <label>Od kogo jesteś? (Twój przełożony)</label><input name="przelozony">
-      <p style="margin-top:16px"><button class="btn">Poproś o dostęp</button></p>
+    <h2>Mam już konto</h2>
+    <form method="post" action="/zaloguj"><input type="hidden" name="csrf" value="{{ csrf() }}">
+      <label>Mail służbowy</label><input name="email" type="email" required autocomplete="username" placeholder="imie.nazwisko@{{ domena }}" value="{{ mail }}">
+      <label>Hasło</label><input name="haslo" type="password" required autocomplete="current-password">
+      <p style="margin-top:16px"><button class="btn sec">Zaloguj się</button></p>
     </form>
   </div>
 </div>{% endblock %}

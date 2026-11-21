@@ -1,6 +1,7 @@
 """Gwaranci — panel (osobny serwer Flask) i praca w tle.
 
-Każda osoba wchodzi przez swój osobisty link (/l/<token>) — bez haseł. Gwarant za pierwszym razem przechodzi krótki onboarding:
+Wejście (2.28): jeden wspólny link /witaj — mail służbowy (imie.nazwisko@inpartners.pl) → Sebastian rozpoznaje osobę
+w strukturze → link „Ustaw konto” na ten mail → hasło. Potem logowanie mailem i hasłem. Osobiste linki (/l/<token>) działają dalej. Gwarant za pierwszym razem przechodzi krótki onboarding:
 mail → link do kalendarza (tylko zajętość) → kiedy może i ile spotkań w tygodniu. Adept wybiera typ i godzinę, a gwaranta
 dobiera system. Panel wystawiam do internetu przez Tailscale Funnel (polecenie: dodatek gwaranci internet wlacz).
 """
@@ -10,7 +11,7 @@ from pathlib import Path
 from . import przebieg as PB, rdzen as R
 
 HERE = Path(__file__).resolve().parent
-OPEN = {"wejscie", "link", "dostep", "decyzja", "healthz", "static_css"}
+OPEN = {"wejscie", "wejscie_mail", "zaloguj", "konto", "link", "dostep", "decyzja", "healthz", "static_css"}
 
 
 def _tailscale(*args):
@@ -107,11 +108,74 @@ def make_app(ctx):
             return redirect(url_for("onboarding"))
         return redirect(url_for("rezerwuj"))
 
+    def domain():
+        return (ctx.settings().get("domena_firmowa") or R.FIRM_DOMAIN).strip().lower().lstrip("@")
+
     @app.route("/witaj")
     def wejscie():
         if g.me:
             return redirect(url_for("home"))
-        return page("wejscie.html")
+        return page("wejscie.html", domena=domain(), error="", mail="", nieznany="")
+
+    @app.route("/witaj/mail", methods=["POST"])
+    def wejscie_mail():
+        mail = R.norm_mail(request.form.get("email", ""))[:120]
+        if not R.EMAIL_OK.match(mail):
+            return page("wejscie.html", domena=domain(), error="To nie wygląda na adres e-mail.", mail=mail, nieznany=""), 400
+        p = R.find_by_email(g.db, mail, domain())
+        if not p:
+            if not mail.endswith("@" + domain()):
+                return page("wejscie.html", domena=domain(), mail=mail, nieznany="",
+                            error=f"Podaj proszę swój mail służbowy: imie.nazwisko@{domain()}."), 400
+            return page("wejscie.html", domena=domain(), error="", mail=mail, nieznany=mail)
+        if not R.link_send_allowed(g.db, mail, now()):
+            return msg("Link już wysłany", f"Sprawdź skrzynkę {mail} (także folder Oferty/Spam). Kolejny link możesz wysłać za kilka minut.",
+                       ("Wróć", url_for("wejscie")))
+        if not R.EMAIL_OK.match(p.get("email") or ""):          # pierwszy raz: mail służbowy staje się adresem do zaproszeń
+            g.db.execute("UPDATE osoby SET email=? WHERE id=?", (mail, p["id"]))
+            g.db.commit()
+        err = PB.send_account_link(ctx, g.db, p, mail, now())
+        if err:
+            return msg("Nie udało się wysłać maila", "Sebastian dał już znać Andrzejowi. Spróbuj proszę za kilka minut.",
+                       ("Wróć", url_for("wejscie")), 503)
+        return msg("Sprawdź skrzynkę 📬", f"Cześć {p['imie_nazwisko'].split()[0]}! Na adres {mail} wysłaliśmy link "
+                   f"„{'Ustaw konto' if not p.get('haslo') else 'Ustaw nowe hasło'}”. Działa {R.LINK_HOURS} h. "
+                   "Jeśli go nie widzisz, zajrzyj do folderu Oferty albo Spam.")
+
+    @app.route("/zaloguj", methods=["POST"])
+    def zaloguj():
+        mail = R.norm_mail(request.form.get("email", ""))[:120]
+        if R.login_locked(g.db, mail, now()):
+            return page("wejscie.html", domena=domain(), mail=mail, nieznany="",
+                        error=f"Za dużo prób. Odczekaj {R.LOGIN_LOCK_MIN} minut albo ustaw nowe hasło niżej."), 429
+        p = R.check_login(g.db, mail, request.form.get("haslo", ""), now())
+        if not p:
+            return page("wejscie.html", domena=domain(), mail=mail, nieznany="",
+                        error="Zły mail albo hasło. Nie pamiętasz hasła? Wpisz mail niżej — dostaniesz link do ustawienia nowego."), 401
+        session.clear()
+        session.permanent = True
+        session["pid"] = p["id"]
+        return redirect(url_for("home"))
+
+    @app.route("/konto/<tok>", methods=["GET", "POST"])
+    def konto(tok):
+        p = R.account_link_person(g.db, tok, now())
+        if not p:
+            return msg("Ten link już nie działa", f"Link jest ważny {R.LINK_HOURS} h i tylko raz. Wpisz swój mail jeszcze raz — dostaniesz nowy.",
+                       ("Wyślij nowy link", url_for("wejscie")), 404)
+        error = ""
+        if request.method == "POST":
+            pwd = request.form.get("haslo", "")
+            error = R.password_problem(pwd, request.form.get("haslo2", ""))
+            if not error:
+                R.set_password(g.db, p["id"], pwd, tok, now())
+                session.clear()
+                session.permanent = True
+                session["pid"] = p["id"]
+                PB.notify_owner(ctx, f"🔑 Gwaranci: {p['imie_nazwisko']} ustawił(a) konto ({'gwarant' if R.can_guarantee(p) else 'adept'}).", "konto")
+                return redirect(url_for("home"))
+        return page("konto.html", osoba=p, error=error, rola="gwarant" if R.can_guarantee(p) else "adept",
+                    nowe=not p.get("haslo"), minimum=R.PASSWORD_MIN)
 
     @app.route("/l/<tok>")
     def link(tok):
@@ -140,9 +204,9 @@ def make_app(ctx):
         g.db.commit()
         known = R.find_person(g.db, name)
         PB.notify_owner(ctx, f"🙋 Gwaranci: prośba o dostęp — {name} ({mail})" + (f", przełożony: {boss}" if boss else "")
-                        + (f". Jest w strukturze — wyślij link: „gwaranci link {name}”." if known else
+                        + (f". Jest w strukturze — przypisz mail jednym kliknięciem w panelu (Admin → Prośby o dostęp)." if known else
                            f". Nie ma go w strukturze — dodaj: „gwaranci dodaj {name} od {boss or 'Imię Nazwisko przełożonego'}”."), "dostep")
-        return msg("Dziękujemy!", "Prośba trafiła do Sebastiana. Osobisty link dostaniesz od Andrzeja albo swojego menedżera.")
+        return msg("Dziękujemy!", "Prośba trafiła do Andrzeja. Gdy przypisze Cię w strukturze, dostaniesz maila z linkiem „Ustaw konto”.")
 
     @app.route("/dane", methods=["GET", "POST"])
     def dane():
@@ -352,6 +416,19 @@ def make_app(ctx):
                     g.db.execute("UPDATE prosby SET status='dodana' WHERE imie_nazwisko=?", (p["imie_nazwisko"],))
                     g.db.commit()
                     note = f"Dodano: {p['imie_nazwisko']}."
+                    if R.EMAIL_OK.match(p.get("email") or ""):
+                        err = PB.send_account_link(ctx, g.db, p, p["email"], now())
+                        note += f" Mail nie wyszedł: {err}" if err else " Link „Ustaw konto” wysłany."
+                elif act == "przypisz":                             # 2.28: prośba → osoba ze struktury, mail i link „Ustaw konto”
+                    a = g.db.execute("SELECT * FROM prosby WHERE id=?", (request.form["id"],)).fetchone()
+                    p = R.person(g.db, request.form.get("osoba", ""))
+                    if not a or not p:
+                        raise ValueError("Nie znalazłem prośby albo osoby.")
+                    g.db.execute("UPDATE osoby SET email=? WHERE id=?", (R.norm_mail(a["email"]), p["id"]))
+                    g.db.execute("UPDATE prosby SET status='przypisana' WHERE id=?", (a["id"],))
+                    g.db.commit()
+                    err = PB.send_account_link(ctx, g.db, R.person(g.db, p["id"]), R.norm_mail(a["email"]), now())
+                    note = f"Przypisano: {a['email']} → {p['imie_nazwisko']}. " + (f"Mail nie wyszedł: {err}" if err else "Link „Ustaw konto” wysłany.")
                 elif act == "prosba_ok":
                     g.db.execute("UPDATE prosby SET status='zalatwiona' WHERE id=?", (request.form["id"],))
                     g.db.commit()
@@ -364,7 +441,9 @@ def make_app(ctx):
         base = PB.base_url(ctx, g.db) or request.host_url.rstrip("/")
         t = now()
         load = {pid: R.week_load(g.db, pid, t) for pid in gws}
-        return page("admin.html", gws=gws, rows=rows, asks=asks, base=base, note=note, load=load,
+        for a in asks:
+            a["znana"] = R.find_person(g.db, a["imie_nazwisko"])
+        return page("admin.html", gws=gws, rows=rows, asks=asks, base=base, note=note, load=load, wspolny=f"{base}/witaj",
                     order=sorted(ppl.values(), key=lambda p: (R.structure_of(ppl, p["id"]) or "", p["imie_nazwisko"])))
 
     @app.errorhandler(404)

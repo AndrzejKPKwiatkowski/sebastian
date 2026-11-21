@@ -1,11 +1,17 @@
 {% extends "base.html" %}{% block body %}
 <h1>Administrator</h1><p class="sub">Gwaranci, osobiste linki, prośby o dostęp i rezerwacje.</p>
 {% if note %}<div class="ok">{{ note }}</div>{% endif %}
+<div class="card" style="border-color:rgba(74,222,128,.4)"><h2>Wspólny link dla wszystkich</h2>
+<p class="small muted">Jeden link dla całego zespołu: każdy wpisuje swój mail służbowy, Sebastian rozpoznaje go w strukturze i wysyła na ten mail link „Ustaw konto”.</p>
+<p><code style="user-select:all">{{ wspolny }}</code></p></div>
 {% if asks %}<div class="card" style="border-color:rgba(227,179,65,.45)"><h2>Prośby o dostęp</h2>
 {% for a in asks %}<div class="item"><div><b>{{ a.imie_nazwisko }}</b> · {{ a.email }} {% if a.przelozony %}<span class="muted">· od: {{ a.przelozony }}</span>{% endif %}</div>
-<form method="post" style="display:flex;gap:6px;flex-wrap:wrap"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="akcja" value="dodaj">
+{% if a.znana %}<form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="akcja" value="przypisz">
+<input type="hidden" name="id" value="{{ a.id }}"><input type="hidden" name="osoba" value="{{ a.znana.id }}">
+<button class="btn sm">Przypisz do: {{ a.znana.imie_nazwisko }} ({{ a.znana.stanowisko }}) i wyślij link</button></form>
+{% else %}<form method="post" style="display:flex;gap:6px;flex-wrap:wrap"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="akcja" value="dodaj">
 <input type="hidden" name="imie_nazwisko" value="{{ a.imie_nazwisko }}"><input type="hidden" name="email" value="{{ a.email }}">
-<input name="przelozony" value="{{ a.przelozony }}" placeholder="przełożony" style="width:180px"><input name="stanowisko" value="Trainee" style="width:130px"><button class="btn sm">Dodaj</button></form>
+<input name="przelozony" value="{{ a.przelozony }}" placeholder="przełożony" style="width:180px"><input name="stanowisko" value="Trainee" style="width:130px"><button class="btn sm">Dodaj i wyślij link</button></form>{% endif %}
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}"><input type="hidden" name="akcja" value="prosba_ok"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn sec sm">Załatwione</button></form></div>{% endfor %}</div>{% endif %}
 <div class="card"><h2>Ludzie i osobiste linki</h2>
 <p class="small muted">Link wysyłasz każdemu raz (np. na WhatsAppie). Gwarant po wejściu przechodzi onboarding, adept od razu rezerwuje.</p>

@@ -6,6 +6,7 @@ i wysyła zaproszenie z Gmaila. Ty dostajesz krótkie powiadomienia na WhatsAppi
 
     python sebastian.py dodatek gwaranci usluga instaluj     # panel i praca w tle (start po zalogowaniu do Maca)
     python sebastian.py dodatek gwaranci internet wlacz      # publiczny adres https (Tailscale Funnel)
+    python sebastian.py dodatek gwaranci wspolny             # 2.28: jeden link dla wszystkich (mail służbowy → konto z hasłem)
     python sebastian.py dodatek gwaranci linki               # osobiste linki do rozesłania
     python sebastian.py dodatek gwaranci calcom              # kto ma podpięty cal.com; podpięcie: calcom "Imię Nazwisko" https://cal.com/…
 """
@@ -248,11 +249,62 @@ def cmd_linki(ctx, args):
                 return 1
             print(f"{p['imie_nazwisko']}: {base}/l/{p['token']}")
             return 0
+        print(f"Wspólny link dla wszystkich (mail służbowy → konto): {base}/witaj\n")
         ppl = R.people(c)
         for p in sorted(ppl.values(), key=lambda p: (R.structure_of(ppl, p["id"]) or "", p["imie_nazwisko"])):
             role = "gwarant" if R.can_guarantee(p) else "adept"
             print(f"{p['imie_nazwisko']:<26} {role:<8} {base}/l/{p['token']}")
     return 0
+
+
+def shared_text(ctx, c):
+    base = _base(ctx, c)
+    dom = (ctx.settings().get("domena_firmowa") or R.FIRM_DOMAIN).lstrip("@")
+    link = f"{base}/witaj"
+    return link, ("Cześć! Ruszamy z systemem spotkań gwaranckich Feniksów 🙌\n\n"
+                  f"Wejdź tutaj: {link}\n\n"
+                  f"1. Wpisz swój mail służbowy (imie.nazwisko@{dom}).\n"
+                  "2. Sebastian rozpozna Cię w strukturze i wyśle na ten mail link „Ustaw konto”.\n"
+                  "3. Ustawiasz hasło. Gwaranci od razu podłączają kalendarz (widać tylko zajętość) i zaznaczają, kiedy mogą; "
+                  "adepci rezerwują spotkania — gwaranta dobiera Sebastian.\n\n"
+                  "Później logujesz się tym samym mailem i hasłem. Link w mailu działa 48 h — gdy wygaśnie, po prostu wpisz mail jeszcze raz.")
+
+
+def cmd_wspolny(ctx, args):
+    with contextlib.closing(R.db(ctx)) as c:
+        link, text = shared_text(ctx, c)
+        if not R.meta_get(c, "adres_publiczny"):
+            print("⚠️ Panel nie ma jeszcze publicznego adresu — najpierw: python sebastian.py dodatek gwaranci internet wlacz\n")
+        print(f"WSPÓLNY LINK: {link}\n")
+        print("Wiadomość do rozesłania (np. na grupę):\n" + "━" * 70 + "\n" + text + "\n" + "━" * 70)
+        ppl = R.people(c)
+        dom = (ctx.settings().get("domena_firmowa") or R.FIRM_DOMAIN).lstrip("@")
+        clash = {}
+        for p in ppl.values():
+            clash.setdefault(R.firm_mail(p, dom), []).append(p["imie_nazwisko"])
+        same = [v for k, v in clash.items() if k and len(v) > 1]
+        if same:
+            print("\n⚠️ Te osoby mają taki sam mail według wzoru — wpisz im maile ręcznie (polecenie maile):")
+            for v in same:
+                print("   " + ", ".join(v))
+    return 0
+
+
+def cmd_maile(ctx, args):
+    """Maile służbowe spoza wzoru: maile "Imię Nazwisko" adres  albo  maile plik.txt (linie „Imię Nazwisko; mail”)."""
+    if not args:
+        print('Użycie: python sebastian.py dodatek gwaranci maile "Imię Nazwisko" adres@inpartners.pl   albo   maile lista.txt')
+        return 1
+    path = Path(os.path.expanduser(args[0]))
+    text = path.read_text(encoding="utf-8") if len(args) == 1 and path.is_file() else " ".join(args)
+    with contextlib.closing(R.db(ctx)) as c:
+        done, unknown, bad = R.import_emails(c, text)
+    print(f"Zapisane maile: {done}.")
+    if unknown:
+        print("Nie znam w strukturze: " + ", ".join(unknown))
+    if bad:
+        print("Nie rozumiem linii: " + " | ".join(bad[:10]))
+    return 0 if done else 1
 
 
 def cmd_awans(ctx, args):
@@ -361,6 +413,8 @@ def on_message(ctx, msg):
     with contextlib.closing(R.db(ctx)) as c:
         if not rest or re.match(r"(?i)^(stan|status)$", rest):
             return status_text(ctx, c)
+        if re.match(r"(?i)^(wsp[oó]lny|wsp[oó]lny link|link wsp[oó]lny|jeden link)$", rest):
+            return shared_text(ctx, c)[1]
         mm = re.match(r"(?i)^link\s+(.+)$", rest)
         if mm:
             p = R.find_person(c, mm.group(1))
@@ -383,5 +437,5 @@ def on_message(ctx, msg):
 
 
 COMMANDS = {"start": cmd_start, "usluga": cmd_usluga, "internet": cmd_internet, "adres": cmd_adres, "poczta": cmd_poczta,
-            "linki": cmd_linki, "calcom": cmd_calcom, "struktura": cmd_struktura, "awans": cmd_awans, "dodaj": cmd_dodaj, "status": cmd_status, "odswiez": cmd_odswiez,
+            "linki": cmd_linki, "wspolny": cmd_wspolny, "maile": cmd_maile, "calcom": cmd_calcom, "struktura": cmd_struktura, "awans": cmd_awans, "dodaj": cmd_dodaj, "status": cmd_status, "odswiez": cmd_odswiez,
             "ustawienia": cmd_ustawienia, "ustaw": cmd_ustaw}

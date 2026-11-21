@@ -553,5 +553,108 @@ class Naprawy2143(CalCom):
         self.assertEqual(R.mailbox(self.ctx, self.c)[0], "sebastian.k.kwiatkowski@gmail.com")
 
 
+class Konto228(Panel):
+    """2.28: jeden wspólny link /witaj → mail służbowy imie.nazwisko@inpartners.pl → link „Ustaw konto” → hasło → logowanie."""
+
+    def link_from_mail(self):
+        m = re.search(r"/konto/([\w-]+)", self.mails[-1]["text"])
+        return m.group(1)
+
+    def test_rozpoznanie_po_wzorze(self):
+        self.assertEqual(R.find_by_email(self.c, "Malgorzata.Zolc@InPartners.pl")["imie_nazwisko"], "Małgorzata Żółć")
+        self.assertEqual(R.find_by_email(self.c, "lukasz.cis@inpartners.pl")["id"], "lukasz-cis")
+        self.assertIsNone(R.find_by_email(self.c, "lukasz.cis@gmail.com"))          # tylko domena firmowa
+        self.assertIsNone(R.find_by_email(self.c, "nikt.taki@inpartners.pl"))
+        self.assertEqual(R.firm_mail(R.find_person(self.c, "Bartek Świeży")), "bartek.swiezy@inpartners.pl")
+
+    def test_pelna_droga_adepta(self):
+        tok = self.csrf("/witaj")
+        r = self.app.post("/witaj/mail", data={"csrf": tok, "email": "tomasz.dekiel@inpartners.pl"})
+        self.assertIn("Sprawdź skrzynkę", r.get_data(as_text=True))
+        self.assertEqual(self.mails[-1]["to"], "tomasz.dekiel@inpartners.pl")
+        self.assertEqual(R.find_person(self.c, "Tomasz Dekiel")["email"], "tomasz.dekiel@inpartners.pl")
+        k = self.link_from_mail()
+        html = self.app.get(f"/konto/{k}").get_data(as_text=True)
+        self.assertIn("Tomasz Dekiel", html)
+        self.assertIn("adept", html)
+        csrf = re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+        r = self.app.post(f"/konto/{k}", data={"csrf": csrf, "haslo": "krotkie", "haslo2": "krotkie"})
+        self.assertIn("co najmniej", r.get_data(as_text=True))
+        r = self.app.post(f"/konto/{k}", data={"csrf": csrf, "haslo": "Feniks2026!", "haslo2": "Feniks2026!"})
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r.headers["Location"].endswith("/"))
+        self.assertEqual(self.app.get(f"/konto/{k}").status_code, 404)                 # link jednorazowy
+        self.assertTrue(any("ustawił(a) konto" in x for x in self.ctx.sent))
+        self.app.get("/wyloguj")
+        tok = self.csrf("/witaj")
+        r = self.app.post("/zaloguj", data={"csrf": tok, "email": "Tomasz.Dekiel@inpartners.pl", "haslo": "zle-haslo"})
+        self.assertEqual(r.status_code, 401)
+        r = self.app.post("/zaloguj", data={"csrf": tok, "email": "Tomasz.Dekiel@inpartners.pl", "haslo": "Feniks2026!"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(self.app.get("/").headers["Location"].split("?")[0][-9:], "/rezerwuj")
+
+    def test_gwarant_idzie_do_onboardingu(self):
+        tok = self.csrf("/witaj")
+        self.app.post("/witaj/mail", data={"csrf": tok, "email": "wiktor.buk@inpartners.pl"})
+        k = self.link_from_mail()
+        self.assertIn("gwarant", self.mails[-1]["text"] + self.app.get(f"/konto/{k}").get_data(as_text=True))
+        csrf = self.csrf(f"/konto/{k}")
+        self.app.post(f"/konto/{k}", data={"csrf": csrf, "haslo": "Gwarant123", "haslo2": "Gwarant123"})
+        self.assertIn("/gwarant/start", self.app.get("/").headers["Location"])
+
+    def test_nieznany_mail_i_przypisanie_przez_admina(self):
+        tok = self.csrf("/witaj")
+        r = self.app.post("/witaj/mail", data={"csrf": tok, "email": "kuba.d@inpartners.pl"})
+        self.assertIn("Nie widzę Cię jeszcze", r.get_data(as_text=True))
+        self.assertEqual(self.mails, [])
+        r = self.app.post("/witaj/mail", data={"csrf": tok, "email": "kuba@gmail.com"})
+        self.assertEqual(r.status_code, 400)                                           # tylko mail służbowy
+        self.app.post("/dostep", data={"csrf": tok, "email": "kuba.d@inpartners.pl", "imie_nazwisko": "Kuba Dąb", "przelozony": "Adam Wierzba"})
+        self.c.execute("UPDATE osoby SET email='marek.dyrektor@inpartners.pl' WHERE id='marek-dyrektor'")
+        self.c.commit()
+        self.login("Marek Dyrektor")
+        html = self.app.get("/admin").get_data(as_text=True)
+        self.assertIn("Przypisz do: Kuba Dąb", html)
+        self.assertIn("/witaj", html)
+        aid = self.c.execute("SELECT id FROM prosby").fetchone()["id"]
+        csrf = self.csrf("/admin")
+        r = self.app.post("/admin", data={"csrf": csrf, "akcja": "przypisz", "id": aid, "osoba": "kuba-dab"})
+        self.assertIn("Link „Ustaw konto” wysłany", r.get_data(as_text=True))
+        self.assertEqual(self.mails[-1]["to"], "kuba.d@inpartners.pl")
+        self.assertEqual(R.find_by_email(self.c, "kuba.d@inpartners.pl")["id"], "kuba-dab")
+
+    def test_limity_wysylki_i_logowania(self):
+        tok = self.csrf("/witaj")
+        self.app.post("/witaj/mail", data={"csrf": tok, "email": "olga.ruda@inpartners.pl"})
+        r = self.app.post("/witaj/mail", data={"csrf": tok, "email": "olga.ruda@inpartners.pl"})
+        self.assertIn("Link już wysłany", r.get_data(as_text=True))
+        self.assertEqual(len(self.mails), 1)
+        R.set_password(self.c, "olga-ruda", "Dobrehaslo1")
+        for _ in range(R.LOGIN_FAILS):
+            self.assertIsNone(R.check_login(self.c, "olga.ruda@inpartners.pl", "zle", NOW))
+        self.assertIsNone(R.check_login(self.c, "olga.ruda@inpartners.pl", "Dobrehaslo1", NOW))      # blokada 15 min
+        self.assertIsNotNone(R.check_login(self.c, "olga.ruda@inpartners.pl", "Dobrehaslo1", NOW + dt.timedelta(minutes=16)))
+        self.assertEqual(self.app.post("/zaloguj", data={"csrf": "zly", "email": "x", "haslo": "y"}).status_code, 400)   # CSRF
+
+    def test_nowy_link_uniewaznia_stary_i_wygasa(self):
+        a = R.account_link(self.c, "olga-ruda", NOW)
+        b = R.account_link(self.c, "olga-ruda", NOW)
+        self.assertIsNone(R.account_link_person(self.c, a, NOW))
+        self.assertIsNotNone(R.account_link_person(self.c, b, NOW))
+        self.assertIsNone(R.account_link_person(self.c, b, NOW + dt.timedelta(hours=R.LINK_HOURS + 1)))
+
+    def test_polecenia_i_whatsapp(self):
+        import io, contextlib as cl
+        out = io.StringIO()
+        with cl.redirect_stdout(out):
+            GW.cmd_wspolny(self.ctx, [])
+        self.assertIn("/witaj", out.getvalue())
+        self.assertIn("imie.nazwisko@inpartners.pl", out.getvalue())
+        self.assertIn("/witaj", GW.on_message(self.ctx, {"text": "gwaranci wspólny link"}))
+        done, unknown, bad = R.import_emails(self.c, "Olga Ruda; o.ruda@inpartners.pl\nNikt Taki, n@x.pl\nzła linia")
+        self.assertEqual((done, unknown, bad), (1, ["Nikt Taki"], ["zła linia"]))
+        self.assertEqual(R.find_by_email(self.c, "o.ruda@inpartners.pl")["id"], "olga-ruda")
+
+
 if __name__ == "__main__":
     unittest.main()

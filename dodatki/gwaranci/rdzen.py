@@ -131,6 +131,8 @@ CREATE TABLE IF NOT EXISTS poczta_kolejka (
     id INTEGER PRIMARY KEY AUTOINCREMENT, do_kogo TEXT NOT NULL, temat TEXT NOT NULL, tresc TEXT NOT NULL, html TEXT NOT NULL DEFAULT '',
     ics TEXT NOT NULL DEFAULT '', metoda TEXT NOT NULL DEFAULT 'REQUEST', proby INTEGER NOT NULL DEFAULT 0, blad TEXT NOT NULL DEFAULT '',
     utworzono TEXT NOT NULL, nastepna TEXT NOT NULL DEFAULT '', wyslano TEXT NOT NULL DEFAULT '', rezerwacja INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS konto_linki (
+    token TEXT PRIMARY KEY, osoba TEXT NOT NULL, utworzono TEXT NOT NULL, wazny_do TEXT NOT NULL, uzyty TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS prosby (
     id INTEGER PRIMARY KEY AUTOINCREMENT, imie_nazwisko TEXT NOT NULL, email TEXT NOT NULL, telefon TEXT NOT NULL DEFAULT '',
     przelozony TEXT NOT NULL DEFAULT '', utworzono TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'nowa');
@@ -144,6 +146,7 @@ def db(ctx):
     con.executescript(SCHEMA)
     _add_column(con, "gwaranci", "calcom", "TEXT NOT NULL DEFAULT ''")      # 2.14.1: gwarant z cal.com zamiast linku iCal
     _add_column(con, "rezerwacje", "calcom_uid", "TEXT NOT NULL DEFAULT ''")
+    _add_column(con, "osoby", "haslo", "TEXT NOT NULL DEFAULT ''")           # 2.28: konto z hasłem (wspólny link /witaj)
     if not con.execute("SELECT 1 FROM osoby LIMIT 1").fetchone():
         seed(con, ctx.folder() / STRUCTURE_FILE)
     calcom_defaults(con, ctx.folder() / STRUCTURE_FILE)
@@ -199,8 +202,9 @@ def import_people(c, rows, update=False):
             continue
         boss = slug(r.get("przelozony", "")) if r.get("przelozony") else ""
         if update and person(c, slug(name)):
-            c.execute("UPDATE osoby SET stanowisko=?, przelozony=?, pelny_etat=?, admin=?, aktywna=1 WHERE id=?",
-                      (r.get("stanowisko", "Trainee"), boss, int(bool(r.get("pelny_etat"))), int(bool(r.get("admin"))), slug(name)))
+            c.execute("UPDATE osoby SET stanowisko=?, przelozony=?, pelny_etat=?, admin=?, aktywna=1, email=COALESCE(NULLIF(?,''), email) WHERE id=?",
+                      (r.get("stanowisko", "Trainee"), boss, int(bool(r.get("pelny_etat"))), int(bool(r.get("admin"))),
+                       norm_mail(r.get("email", "")) if EMAIL_OK.match(norm_mail(r.get("email", ""))) else "", slug(name)))
             n += 1
             continue
         cur = c.execute("INSERT OR IGNORE INTO osoby(id,imie_nazwisko,stanowisko,przelozony,pelny_etat,admin,email,token,dodano) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -232,6 +236,158 @@ def find_person(c, text):
             return p
     hits = [p for p in all_ if all(w in plain(p["imie_nazwisko"]).split() for w in words)]
     return hits[0] if len(hits) == 1 else None
+
+
+# ================================================================ konta (2.28): jeden wspólny link, mail służbowy, hasło
+
+LINK_HOURS = 48
+PASSWORD_MIN = 8
+
+
+def norm_mail(m):
+    return (m or "").strip().lower()
+
+
+FIRM_DOMAIN = "inpartners.pl"                                   # maile służbowe: imie.nazwisko@inpartners.pl
+
+
+def _letters(s):
+    return re.sub(r"[^a-z0-9]", "", plain(s))
+
+
+def firm_mail(p, domain=FIRM_DOMAIN):
+    """Służbowy adres osoby wg wzoru imie.nazwisko@inpartners.pl (bez polskich znaków)."""
+    w = plain(p["imie_nazwisko"]).split()
+    return f"{w[0]}.{'-'.join(w[1:])}@{domain}" if len(w) >= 2 else ""
+
+
+def find_by_email(c, mail, domain=FIRM_DOMAIN):
+    """Osoba po mailu: najpierw mail zapisany w bazie, potem wzór imie.nazwisko@inpartners.pl
+    (wielkość liter, polskie znaki, kropki i myślniki bez znaczenia). Gdy pasuje więcej niż jedna osoba — nie zgaduję."""
+    m = norm_mail(mail)
+    if not EMAIL_OK.match(m):
+        return None
+    r = c.execute("SELECT * FROM osoby WHERE lower(trim(email))=? AND aktywna=1", (m,)).fetchall()
+    if r:
+        return dict(r[0]) if len(r) == 1 else None
+    local, _, dom = m.partition("@")
+    if not domain or dom != domain.lower():
+        return None
+    key = _letters(local)
+    hits = []
+    for p in people(c).values():
+        w = plain(p["imie_nazwisko"]).split()
+        if len(w) >= 2 and key in (_letters("".join(w)), _letters(w[-1] + w[0])):
+            hits.append(p)
+    return hits[0] if len(hits) == 1 else None
+
+
+def account_link(c, pid, when=None, hours=LINK_HOURS):
+    """Jednorazowy link „Ustaw konto” (ważny 48 h). Poprzednie, niewykorzystane linki tej osoby przestają działać."""
+    when = when or dt.datetime.now(TZ)
+    c.execute("UPDATE konto_linki SET uzyty=? WHERE osoba=? AND uzyty=''", ("zastapiony", pid))
+    tok = secrets.token_urlsafe(24)
+    c.execute("INSERT INTO konto_linki(token,osoba,utworzono,wazny_do) VALUES(?,?,?,?)",
+              (tok, pid, when.isoformat(timespec="seconds"), (when + dt.timedelta(hours=hours)).isoformat(timespec="seconds")))
+    c.commit()
+    return tok
+
+
+def account_link_person(c, tok, when=None):
+    """Osoba z ważnego, niewykorzystanego linku albo None."""
+    when = when or dt.datetime.now(TZ)
+    r = c.execute("SELECT * FROM konto_linki WHERE token=?", (tok or "",)).fetchone()
+    if not r or r["uzyty"] or parse(r["wazny_do"]) < when:
+        return None
+    p = person(c, r["osoba"])
+    return p if p and p.get("aktywna") else None
+
+
+def password_problem(pwd, again=None):
+    if len(pwd or "") < PASSWORD_MIN:
+        return f"Hasło musi mieć co najmniej {PASSWORD_MIN} znaków."
+    if again is not None and pwd != again:
+        return "Hasła się różnią — wpisz to samo dwa razy."
+    return ""
+
+
+def set_password(c, pid, pwd, tok="", when=None):
+    from werkzeug.security import generate_password_hash
+    problem = password_problem(pwd)
+    if problem:
+        raise ValueError(problem)
+    c.execute("UPDATE osoby SET haslo=? WHERE id=?", (generate_password_hash(pwd), pid))
+    if tok:
+        c.execute("UPDATE konto_linki SET uzyty=? WHERE token=?", ((when or dt.datetime.now(TZ)).isoformat(timespec="seconds"), tok))
+    c.commit()
+
+
+LOGIN_FAILS, LOGIN_LOCK_MIN = 8, 15
+
+
+def login_locked(c, mail, when=None):
+    when = when or dt.datetime.now(TZ)
+    with contextlib.suppress(Exception):
+        n, t = json.loads(meta_get(c, f"logowanie:{norm_mail(mail)}") or "[0, \"\"]")
+        return n >= LOGIN_FAILS and t and parse(t) + dt.timedelta(minutes=LOGIN_LOCK_MIN) > when
+    return False
+
+
+def check_login(c, mail, pwd, when=None):
+    """Osoba po mailu i haśle albo None. Po 8 błędnych próbach — 15 minut przerwy dla tego maila."""
+    from werkzeug.security import check_password_hash
+    when = when or dt.datetime.now(TZ)
+    key = f"logowanie:{norm_mail(mail)}"
+    if login_locked(c, mail, when):
+        return None
+    p = find_by_email(c, mail)
+    if p and p.get("haslo") and check_password_hash(p["haslo"], pwd or ""):
+        c.execute("DELETE FROM meta WHERE k=?", (key,))
+        c.commit()
+        return p
+    n = 0
+    with contextlib.suppress(Exception):
+        n0, t = json.loads(meta_get(c, key) or "[0, \"\"]")
+        n = int(n0) if t and parse(t) + dt.timedelta(minutes=LOGIN_LOCK_MIN) > when else 0
+    meta_set(c, key, json.dumps([n + 1, when.isoformat(timespec="seconds")]))
+    return None
+
+
+def link_send_allowed(c, mail, when=None):
+    """Link na ten sam mail najwyżej raz na 2 minuty i 6 razy na dobę (ochrona skrzynki przed zalewem)."""
+    when = when or dt.datetime.now(TZ)
+    key = f"wysylka:{norm_mail(mail)}"
+    times = []
+    with contextlib.suppress(Exception):
+        times = [parse(x) for x in json.loads(meta_get(c, key) or "[]")]
+    times = [t for t in times if t > when - dt.timedelta(days=1)]
+    if (times and times[-1] > when - dt.timedelta(minutes=2)) or len(times) >= 6:
+        return False
+    meta_set(c, key, json.dumps([t.isoformat(timespec="seconds") for t in times + [when]]))
+    return True
+
+
+def import_emails(c, text):
+    """Lista „Imię Nazwisko; mail” (średnik, przecinek, tabulator albo spacja przed mailem) — wpisuje maile służbowe.
+    Zwraca (zapisane, [nieznane osoby], [złe linie])."""
+    done, unknown, bad = 0, [], []
+    for line in (text or "").splitlines():
+        line = line.strip().strip("\ufeff")
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"^(.*?)[\s;,\t]+<?([^\s<>;,]+@[^\s<>;,]+)>?\s*$", line)
+        if not m or not EMAIL_OK.match(m.group(2)):
+            bad.append(line)
+            continue
+        name = " ".join(m.group(1).strip(" ;,\t\"'").split())
+        p = find_person(c, name)
+        if not p:
+            unknown.append(name)
+            continue
+        c.execute("UPDATE osoby SET email=? WHERE id=?", (norm_mail(m.group(2)), p["id"]))
+        done += 1
+    c.commit()
+    return done, unknown, bad
 
 
 def by_token(c, token):

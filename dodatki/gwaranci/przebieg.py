@@ -292,3 +292,30 @@ def periodic(ctx, c, when=None, refresh=True, mail=True):
                                              [("Akceptuję", f"{url}/decyzja/{b['token']}/tak"), ("Nie mogę", f"{url}/decyzja/{b['token']}/nie")]))
             notify_owner(ctx, f"⏰ Gwaranci: {g.get('imie_nazwisko', '?')} od {st.get('przypomnienie_h', 20)} h nie odpowiada na prośbę "
                          f"{ppl.get(b['adept'], {}).get('imie_nazwisko', '?')} ({_when(b)}). Wysłałem przypomnienie.", "przypomnienie")
+
+
+# ================================================================ konta (2.28): wspólny link → mail służbowy → hasło
+
+def send_account_link(ctx, c, p, mail, when=None):
+    """Mail z jednorazowym linkiem „Ustaw konto” (albo „Ustaw nowe hasło”) na podany adres służbowy. Zwraca '' albo opis problemu."""
+    tok = R.account_link(c, p["id"], when)
+    url = f"{base_url(ctx, c)}/konto/{tok}"
+    first = p["imie_nazwisko"].split()[0]
+    new = not p.get("haslo")
+    role = "gwarant" if R.can_guarantee(p) else "adept"
+    what = ("podłączysz kalendarz (widać tylko zajętość), zaznaczysz, kiedy możesz, i ile spotkań w tygodniu"
+            if role == "gwarant" else "zarezerwujesz spotkanie gwaranckie — gwaranta dobiera Sebastian")
+    title = "Ustaw swoje konto" if new else "Ustaw nowe hasło"
+    intro = (f"Cześć {first}! Rozpoznaliśmy Cię w strukturze: <b>{p['imie_nazwisko']}</b> · {p['stanowisko']}. "
+             + (f"Kliknij przycisk i ustaw hasło — potem od razu {what}." if new else "Kliknij przycisk i ustaw nowe hasło."))
+    text = (f"Cześć {first}!\n\n{title} w systemie spotkań gwaranckich Feniksów: {url}\n\n"
+            f"Link działa {R.LINK_HOURS} h i tylko raz. Jeśli to nie Ty prosił(a)ś o link — po prostu zignoruj tę wiadomość.\n")
+    try:
+        R.send_mail(ctx, c, mail, f"{title} — spotkania gwaranckie Feniksów", text,
+                    html=R.html_mail(title, intro, [("Osoba", p["imie_nazwisko"]), ("Stanowisko", p["stanowisko"]), ("Rola", role)],
+                                     [(title, url)],
+                                     f"Link działa {R.LINK_HOURS} h i tylko raz. Jeśli to nie Ty prosił(a)ś o link — zignoruj tę wiadomość."))
+        return ""
+    except Exception as e:
+        notify_owner(ctx, f"⚠️ Gwaranci: nie wysłałem linku „{title}” do {p['imie_nazwisko']} ({mail}): {str(e)[:200]}", "konto")
+        return str(e)[:300]

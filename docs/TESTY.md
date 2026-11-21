@@ -448,3 +448,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.27
 
 `Crash227`: strona oferty z niepełnym dojazdem (bez roweru/pieszo), z dojazdem i dopasowaniem w złym formacie oraz z czasem jako liczbą zmiennoprzecinkową otwiera się; błąd 500 pokazuje czytelną stronę i trafia do `bledy.log`. Dodatkowo ręczny test z ok. 2700 kombinacjami nietypowych danych — bez błędów.
+
+# Weryfikacja 2.28
+
+`Konto228`: rozpoznanie po wzorze imie.nazwisko@inpartners.pl (wielkość liter, polskie znaki, tylko domena firmowa); pełna droga adepta (mail → link → hasło → wylogowanie → logowanie) i gwaranta (po haśle onboarding); link jednorazowy, unieważniany nowym i wygasający po 48 h; nieznany mail → prośba → przypisanie przez administratora z wysyłką linku; limit wysyłki linków, blokada po 8 złych hasłach na 15 minut, CSRF; polecenia `wspolny`, `maile` i WhatsApp „gwaranci wspólny link”.

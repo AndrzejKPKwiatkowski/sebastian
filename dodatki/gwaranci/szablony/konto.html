@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block body %}
+<div class="narrow card" style="padding:28px">
+  <h1>{% if nowe %}Cześć {{ osoba.imie_nazwisko.split()[0] }}! 👋{% else %}Nowe hasło{% endif %}</h1>
+  <p class="muted">Rozpoznaliśmy Cię w strukturze: <b style="color:var(--ink)">{{ osoba.imie_nazwisko }}</b> · {{ osoba.stanowisko }} · {{ rola }}.
+  {% if nowe %}Ustaw hasło — {% if rola == "gwarant" %}potem podłączysz kalendarz i zaznaczysz, kiedy możesz.{% else %}potem od razu zarezerwujesz spotkanie gwaranckie.{% endif %}{% endif %}</p>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf() }}">
+    <input type="email" name="email" value="{{ osoba.email }}" autocomplete="username" hidden>
+    <label>Hasło (co najmniej {{ minimum }} znaków)</label><input name="haslo" type="password" required minlength="{{ minimum }}" autocomplete="new-password">
+    <label>Powtórz hasło</label><input name="haslo2" type="password" required minlength="{{ minimum }}" autocomplete="new-password">
+    <p style="margin-top:16px"><button class="btn">{% if nowe %}Ustaw konto{% else %}Zapisz nowe hasło{% endif %}</button></p>
+  </form>
+  <p class="small muted">Następnym razem logujesz się mailem służbowym i tym hasłem.</p>
+</div>{% endblock %}
