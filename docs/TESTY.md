@@ -460,3 +460,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.30
 
 `test_pamiec.py`: osoby z listy WhatsAppa; eksport ChatGPT (tylko wiadomości osoby, ukryty numer karty), Claude, Gemini; dzielenie długich tekstów; fakty z łączeniem powtórek i profil w kategoriach; codzienne pytania o 19:00 (raz dziennie, właściciel i rodzina osobno) i odpowiedzi „1 tak, 2 nie — …” z poprawką i księgą poprawek; poprawki ważniejsze przy składaniu profilu; nauka z rozmów (bez komend); „co o mnie wiesz”, „pytaj mnie”, „wszystko się zgadza”; pamięć w odpowiedziach tylko o pytającym; `ctx.memory` i `ctx.send_to` z uprawnieniami; folder wrzuc-tutaj i start z Profilu wiedzy; `wgraj` z Terminala zostawia oryginał; gramatyka odpowiedzi; zakładka w panelu (pytania, wgrywanie, wklejanie, poprawki) i w panelu Agi tylko jej pamięć. Ręcznie: zakładka w prawdziwym panelu głównym i w panelu Rekrutacji (z kafelkiem w Centrum).
+
+# Weryfikacja 2.31
+
+`test_wysylka_pliku.py`: wyszukanie osoby po imieniu, numerze i „ja”; wiadomość i PDF w kolejce w dobrej kolejności, do właściwego numeru, oryginał zostaje; nieznana osoba i brak pliku; budowa dokumentu WhatsAppa (nazwa bez znacznika czasu, typ application/pdf).

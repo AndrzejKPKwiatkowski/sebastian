@@ -1430,6 +1430,12 @@ class FileTransport:
         log.info(f"[plik] wysłano głosówkę → {target.name}")
         return target.name
 
+    def send_document(self, path, caption="", to=None):
+        target = self.dir / ((f"{to}-" if to else "") + Path(path).name)
+        shutil.copy2(path, target)
+        log.info(f"[plik] wysłano plik → {target.name}")
+        return target.name
+
 
 def make_transport(on_message):
     if C.WA_TRANSPORT == "plik":
@@ -1483,6 +1489,10 @@ def flush(con, transport):
                 if not Path(r["audio"]).exists():
                     raise FileNotFoundError(r["audio"])
                 wa_id = transport.send_voice(r["audio"], to)
+            elif r["kind"] == "doc":                     # 2.31: plik (PDF, dokument) — ścieżka w kolumnie audio, podpis w body
+                if not Path(r["audio"]).exists():
+                    raise FileNotFoundError(r["audio"])
+                wa_id = transport.send_document(r["audio"], r["body"] or "", to)
             else:
                 wa_id = transport.send_text(r["body"], to)
             con.execute("UPDATE outbox SET status='sent', sent=?, wa_id=?, error=NULL WHERE id=?",
@@ -1858,6 +1868,54 @@ def cmd_send(text):
     with contextlib.closing(db()) as con:
         enqueue(con, "text", text, purpose="manual")
     print("✓ W kolejce do wysłania." + ("" if agent_loaded() else " (Usługa nie działa: python sebastian.py wa-start)"))
+
+
+def find_user(who):
+    """2.31: osoba z listy po imieniu, numerze albo „ja” (właściciel). None, gdy nie ma jej na liście."""
+    w = norm(who or "")
+    digits = re.sub(r"\D", "", who or "")
+    if w in ("", "ja", "mnie", "wlasciciel"):
+        return owner_user()
+    for u in all_users():
+        if digits and len(digits) >= 9 and u["phone"].endswith(digits[-9:]):
+            return u
+        names = [norm(x) for x in f"{u['name']} {u.get('call') or ''}".split()]
+        if w and (w == norm(u["name"]) or w in names or any(n.startswith(w) for n in names)):
+            return u
+    return None
+
+
+def send_file(con, user, path, text=""):
+    """2.31: wiadomość (opcjonalnie) + plik do osoby z listy. Plik kopiowany do data/whatsapp/do_wyslania."""
+    src = Path(path).expanduser()
+    if not src.is_file():
+        raise FileNotFoundError(f"Nie ma pliku: {src}")
+    if src.stat().st_size > 90 * 1024 * 1024:
+        raise RuntimeError("Plik jest większy niż 90 MB — WhatsApp go nie przyjmie.")
+    folder = home() / "do_wyslania"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{now():%Y%m%d-%H%M%S}-{src.name}"
+    shutil.copy2(src, target)
+    to = "" if user["role"] == "wlasciciel" else user["phone"]
+    if text.strip():
+        enqueue(con, "text", text.strip(), purpose="manual", to=to)
+    return enqueue(con, "doc", src.name, audio=target, purpose="manual:plik", to=to)
+
+
+def cmd_send_file(who, path, text=""):
+    u = find_user(who)
+    if not u:
+        print(f"✗ „{who}” nie ma na liście osób Sebastiana. Lista: python sebastian.py wa-user lista · "
+              "dodanie: python sebastian.py wa-user dodaj")
+        return 1
+    if u["role"] != "wlasciciel" and self_mode():
+        print("✗ Sebastian jest połączony z Twoim numerem — do innych osób może pisać tylko z osobnego numeru Sebastiana.")
+        return 1
+    with contextlib.closing(db()) as con:
+        send_file(con, u, path, text)
+    print(f"✓ W kolejce do wysłania: {'wiadomość + ' if text.strip() else ''}plik {Path(path).name} → {u['name'] or '+' + u['phone']}."
+          + ("" if agent_loaded() else " (Usługa nie działa: python sebastian.py wa-start)"))
+    return 0
 
 
 def cmd_chat():

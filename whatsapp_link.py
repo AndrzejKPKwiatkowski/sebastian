@@ -8,7 +8,7 @@ Filtr bezpieczeństwa: do Sebastiana trafiają WYŁĄCZNIE wiadomości właścic
   • ten sam numer (czat „Ty”): tylko wiadomości, które właściciel wysłał sam do siebie (rodzina — wyłączona).
 Grupy, inni ludzie i statusy są ignorowane (nie są nawet zapisywane).
 """
-import contextlib, threading, time
+import contextlib, re, threading, time
 from pathlib import Path
 
 
@@ -217,6 +217,20 @@ class LinkedTransport:
     def send_voice(self, ogg, to=None):
         msg = self.client.build_audio_message(Path(ogg).read_bytes(), ptt=True)
         msg.audioMessage.mimetype = "audio/ogg; codecs=opus"      # tak WhatsApp rozpoznaje głosówkę (PTT)
+        jid = self.target(to)
+        return self._sent(self.client.send_message(jid, msg), jid)
+
+    def send_document(self, path, caption="", to=None):
+        """2.31: plik (PDF, Word…) jako dokument WhatsAppa."""
+        import mimetypes
+        path = Path(path)
+        name = re.sub(r"^\d{8}-\d{6}-", "", path.name)
+        mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        data = path.read_bytes()
+        try:
+            msg = self.client.build_document_message(data, caption=caption or None, title=name, filename=name, mimetype=mime)
+        except TypeError:
+            msg = self.client.build_document_message(data, caption or None, name, name, mime)
         jid = self.target(to)
         return self._sent(self.client.send_message(jid, msg), jid)
 
