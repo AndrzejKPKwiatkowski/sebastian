@@ -1,0 +1,53 @@
+{
+  "id": "glosowki",
+  "nazwa": "Głosówki — podsumowania długich nagrań",
+  "wersja": "1.0.0",
+  "rdzen": "2.29",
+  "opis": "Gdy ktoś nagra do Ciebie naraz głosówki o łącznej długości ponad 2 minut, Sebastian je przepisuje (lokalnie), robi podsumowanie: o czym, o co pyta i co jest do zrobienia — i wysyła Ci je na WhatsAppie. Potem pyta, czy chcesz przeczytać całą treść. Jedyne działanie wstecz: dzisiejsze (22.11.2026) głosówki od Witolda Michno.",
+  "domyslnie_wlaczony": true,
+  "tik_co_sekund": 30,
+  "uprawnienia": [
+    "whatsapp.wysylanie",
+    "whatsapp.obserwacja",
+    "model"
+  ],
+  "pomoc": [
+    "długie głosówki od innych (razem ponad 2 min) — dostajesz podsumowanie: o czym, o co pyta i co do zrobienia",
+    "po podsumowaniu: *tak* — cała treść · *nie* — nie trzeba · *treść 3* — cała treść nagrań nr 3 · *głosówki* — ostatnie podsumowania"
+  ],
+  "polecenia": [
+    {
+      "nazwa": "lista",
+      "opis": "Ostatnie podsumowane paczki głosówek."
+    },
+    {
+      "nazwa": "tresc",
+      "opis": "Cała treść paczki, np. tresc 3."
+    },
+    {
+      "nazwa": "sprawdz",
+      "opis": "Próba bez wysyłania: które dzisiejsze głosówki przekroczyłyby próg."
+    },
+    {
+      "nazwa": "wstecz",
+      "opis": "Ręcznie: podsumuj głosówki danej osoby z danego dnia, np. wstecz \"Witek\" 2026-11-22"
+    },
+    {
+      "nazwa": "ustawienia",
+      "opis": "Pokazuje ustawienia dodatku."
+    },
+    {
+      "nazwa": "ustaw",
+      "opis": "Zmienia ustawienie, np. ustaw prog_sekund 180"
+    }
+  ],
+  "ustawienia": {
+    "prog_sekund": 120,
+    "przerwa_minut": 5,
+    "slow_na_sekunde": 2.2,
+    "wstecz_dzien": "2026-11-22",
+    "wstecz_osoba": "Witold Michno; Witek Michno; Michno Witold; Michno Witek",
+    "grupy": false,
+    "w_ciszy": false
+  }
+}

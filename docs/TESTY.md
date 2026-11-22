@@ -452,3 +452,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.28
 
 `Konto228`: rozpoznanie po wzorze imie.nazwisko@inpartners.pl (wielkość liter, polskie znaki, tylko domena firmowa); pełna droga adepta (mail → link → hasło → wylogowanie → logowanie) i gwaranta (po haśle onboarding); link jednorazowy, unieważniany nowym i wygasający po 48 h; nieznany mail → prośba → przypisanie przez administratora z wysyłką linku; limit wysyłki linków, blokada po 8 złych hasłach na 15 minut, CSRF; polecenia `wspolny`, `maile` i WhatsApp „gwaranci wspólny link”.
+
+# Weryfikacja 2.29
+
+`test_glosowki.py`: paczka 3 głosówek (2:15) → podsumowanie z „Pyta o” i „Do zrobienia” + pytanie → „tak” → cała treść; krótkie i rozdzielone w czasie głosówki pominięte; dwie osoby osobno („tak” pyta od kogo); „nie”, „treść N”, „głosówki”; „tak” łapane tylko jako odpowiedź na nasze pytanie; cisza nocna; model niedostępny → po 3 próbach wiadomość bez podsumowania; działanie wstecz tylko dla Witolda Michno z 22.11 (wszystkie jego głosówki w jednej paczce), potem tylko nowe; brak jego głosówek → informacja; polecenie `wstecz`; długi tekst dzielony na części ≤ 3500 znaków i zapisany w całości; grupy i własne głosówki pomijane.

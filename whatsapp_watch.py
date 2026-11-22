@@ -23,6 +23,7 @@ import whatsapp as W
 ACTIONS = ("oddzwoń", "odpisz", "porozmawiaj", "nic")
 DOC_EXT = (".pdf", ".docx", ".doc", ".rtf", ".odt", ".xlsx", ".pptx", ".txt", ".csv", ".md", ".html", ".htm")
 MAX_ATTACH_CHARS = 200_000
+VOICE_MAX_CHARS = 40_000          # 2.29: przepisana głosówka (ok. 90 minut mowy)
 
 
 # ================================================================ baza obserwacji (osobna — łatwo ją wyczyścić)
@@ -52,7 +53,7 @@ def db():
         updated TEXT);
     """)
     cols = {r[1] for r in con.execute("PRAGMA table_info(wmsg)")}
-    for col, definition in (("attach", "TEXT DEFAULT ''"), ("filename", "TEXT DEFAULT ''")):
+    for col, definition in (("attach", "TEXT DEFAULT ''"), ("filename", "TEXT DEFAULT ''"), ("sekundy", "INTEGER DEFAULT 0")):
         if col not in cols:
             con.execute(f"ALTER TABLE wmsg ADD COLUMN {col} {definition}")
     con.commit()
@@ -71,11 +72,12 @@ def store(con, m):
     if m.get("file_bytes"):
         with contextlib.suppress(Exception):
             sha1 = read_attachment(con, m.get("file_name") or "plik", m.get("file_mime") or "", m["file_bytes"])
-    con.execute("INSERT OR IGNORE INTO wmsg(id, chat, chat_name, sender, sender_name, from_me, is_group, ts, kind, text, attach, filename) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+    limit = VOICE_MAX_CHARS if m["kind"] == "voice" else 4000      # 2.29: długie głosówki zapisane w całości
+    con.execute("INSERT OR IGNORE INTO wmsg(id, chat, chat_name, sender, sender_name, from_me, is_group, ts, kind, text, attach, filename, sekundy) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (m["id"], m["chat"], m.get("chat_name") or "", m.get("sender") or "", m.get("sender_name") or "",
                  int(bool(m.get("from_me"))), int(bool(m.get("is_group"))), int(m.get("ts") or time.time()), m["kind"],
-                 text[:4000], sha1, (m.get("file_name") or "")[:200]))
+                 text[:limit], sha1, (m.get("file_name") or "")[:200], int(m.get("audio_seconds") or 0)))
     if m.get("chat_name"):        # ostatnia znana nazwa rozmowy dla całego czatu
         con.execute("UPDATE wmsg SET chat_name=? WHERE chat=? AND (chat_name='' OR chat_name LIKE '+%')", (m["chat_name"], m["chat"]))
     con.commit()
@@ -233,9 +235,10 @@ class Watcher:
         kind, text, file = "text", m.conversation or (m.extendedTextMessage.text if m.HasField("extendedTextMessage") else ""), None
         if m.HasField("audioMessage"):
             kind, text = "voice", ("" if live else "[głosówka]")
+            file = {"audio_seconds": int(getattr(m.audioMessage, "seconds", 0) or 0)}      # 2.29: długość głosówki
             if live and not from_me:
                 with contextlib.suppress(Exception):
-                    file = {"audio_bytes": self.client.download_any(m)}
+                    file["audio_bytes"] = self.client.download_any(m)
         elif m.HasField("imageMessage"):
             kind, text = "image", m.imageMessage.caption or "[zdjęcie]"
             if live and W.C.WA_WATCH_ATTACHMENTS and W.C.WA_WATCH_OCR_IMAGES and m.imageMessage.fileLength <= W.C.WA_WATCH_ATTACH_MAX_MB * 2**20:
