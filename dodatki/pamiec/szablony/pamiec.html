@@ -1,0 +1,81 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sebastian uczy się o Tobie</title>
+<style>
+:root{--bg:#f6f4ef;--card:#fff;--ink:#23201b;--mut:#7a7368;--line:#e6e0d6;--acc:#6b2e3a;--gold:#b8924a;--ok:#2f7a4f;--bad:#a23b3b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.in{max-width:1000px;margin:0 auto;padding:22px 18px 60px}a{color:var(--acc)}
+h1{font-size:26px;margin:6px 0 2px}h2{font-size:18px;margin:0 0 12px}.mut{color:var(--mut)}.small{font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:16px 0}
+.hl{border-color:var(--gold);box-shadow:0 0 0 3px rgba(184,146,74,.12)}
+.tabs a{display:inline-block;padding:6px 12px;border:1px solid var(--line);border-radius:999px;margin:0 6px 6px 0;text-decoration:none;color:var(--ink);background:#fff}
+.tabs a.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.stats{display:flex;gap:10px;flex-wrap:wrap}.stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 14px}
+.stat b{display:block;font-size:20px}.q{border-top:1px solid var(--line);padding:12px 0}.q:first-of-type{border-top:0}
+.q p{margin:0 0 8px}form.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input[type=text],textarea{border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;background:#fffdf9}
+input[type=text]{flex:1;min-width:200px}textarea{width:100%;min-height:110px}
+button{border:0;border-radius:10px;padding:8px 14px;font:inherit;cursor:pointer;background:#ece7de;color:var(--ink)}
+button.ok{background:var(--ok);color:#fff}button.bad{background:var(--bad);color:#fff}button.main{background:var(--acc);color:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.sec{white-space:pre-wrap}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-top:1px solid var(--line);padding:7px 6px;text-align:left;vertical-align:top}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;background:#efe9df;color:var(--mut)}
+.tag.potwierdzony{background:#e3f1e8;color:var(--ok)}.tag.odrzucony,.tag.poprawiony{background:#f6e3e3;color:var(--bad)}
+.info{background:#fff7e6;border:1px solid #f0dcae;border-radius:10px;padding:8px 12px}
+details summary{cursor:pointer;color:var(--acc)}.facts form{display:inline}
+</style></head><body><div class="in" id="gora">
+<a href="{{ back[0] }}" class="small">{{ back[1] }}</a>
+<h1>🐑 Sebastian uczy się o Tobie</h1>
+<p class="mut">Im więcej mu dasz — rozmów, eksportów z ChatGPT, Claude, Gemini, plików, notatek — tym lepiej Cię rozumie. Wszystko zostaje na Macu.</p>
+{% if ps|length > 1 %}<div class="tabs">{% for x in ps %}<a href="{{ prefix }}?osoba={{ x.id }}" class="{{ 'on' if x.id == p.id }}">{{ x.imie }}</a>{% endfor %}</div>{% endif %}
+{% if info %}<p class="info">{{ info }}</p>{% endif %}
+<div class="stats">
+<div class="stat"><b>{{ st.fakty }}</b><span class="small mut">faktów</span></div>
+<div class="stat"><b>{{ st.potwierdzone }}</b><span class="small mut">potwierdzonych</span></div>
+<div class="stat"><b>{{ st.pytania }}</b><span class="small mut">pytań do Ciebie</span></div>
+<div class="stat"><b>{{ st.w_kolejce }}</b><span class="small mut">kawałków w kolejce</span></div>
+</div>
+
+<div class="card hl"><h2>Mam do Ciebie parę pytań, {{ first }}</h2>
+{% if not qs %}<p class="mut">Na razie wszystko jasne. Gdy nauczę się czegoś niepewnego, zapytam tutaj i na WhatsAppie.</p>{% endif %}
+{% for q in qs %}<div class="q"><p>{{ q.pytanie }} <span class="tag">{{ dict(cats)[q.kategoria] }}</span></p>
+<form class="row" method="post" action="{{ prefix }}/odpowiedz"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="osoba" value="{{ p.id }}"><input type="hidden" name="id" value="{{ q.id }}">
+<button class="ok" name="werdykt" value="tak">Tak, dobrze</button>
+<input type="text" name="poprawka" placeholder="Nie? Napisz, jak jest naprawdę (opcjonalnie)">
+<button class="bad" name="werdykt" value="nie">Nie</button><button name="werdykt" value="pomin">Pomiń</button></form></div>{% endfor %}
+</div>
+
+<div class="card"><h2>Nakarm mnie wiedzą</h2>
+<div class="grid"><div>
+<form method="post" action="{{ prefix }}/wgraj" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="osoba" value="{{ p.id }}">
+<p><input type="file" name="plik" multiple></p><button class="main">Wgraj i ucz się</button></form>
+<p class="small mut">Eksport z <b>ChatGPT</b>: Ustawienia → Kontrola danych → Eksportuj dane (zip z maila).<br>
+<b>Claude</b>: Ustawienia → Prywatność → Eksportuj dane.<br><b>Gemini</b>: takeout.google.com → „Moja aktywność” → Aplikacje Gemini.<br>
+Pliki: PDF, Word, Excel, PowerPoint, tekst, zdjęcia z tekstem, zip. Bardzo duże wrzuć do folderu:<br><code>{{ drop }}</code></p>
+</div><div>
+<form method="post" action="{{ prefix }}/tekst"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="osoba" value="{{ p.id }}">
+<p><input type="text" name="nazwa" placeholder="Tytuł (np. Notatki o mojej pracy)"></p>
+<textarea name="tekst" placeholder="Wklej cokolwiek: opis siebie, notatki, rozmowę, CV, listę ludzi i kim są…"></textarea>
+<p><button class="main">Zapamiętaj</button></p></form></div></div>
+<p class="small mut">Uczę się też z tego, co piszesz i nagrywasz do mnie na WhatsAppie. Napisz tam <b>co o mnie wiesz</b> albo <b>pytaj mnie</b>.</p>
+</div>
+
+<div class="card"><h2>Co o Tobie wiem</h2>
+{% if not prof %}<p class="mut">Profil złożę, gdy przemyślę pierwsze źródła.</p>{% endif %}
+<div class="grid">{% for k, label in cats %}{% if prof.get(k) %}<div><b>{{ label }}</b><div class="sec small">{{ prof[k].tekst }}</div></div>{% endif %}{% endfor %}</div>
+</div>
+
+<div class="card facts"><h2>Fakty</h2>
+<div class="tabs small"><a href="{{ prefix }}?osoba={{ p.id }}" class="{{ 'on' if not cat }}">wszystkie</a>{% for k, label in cats %}<a href="{{ prefix }}?osoba={{ p.id }}&kat={{ k }}" class="{{ 'on' if cat == k }}">{{ label }}</a>{% endfor %}</div>
+<table>{% for f in facts %}<tr><td>{{ f.tresc }}<br><span class="tag {{ f.status }}">{{ f.status }}</span> <span class="small mut">pewność {{ '%.1f' % f.pewnosc }} · {{ f.potwierdzen }}× · {{ f.utworzono[:10] }}</span></td>
+<td style="white-space:nowrap">{% if f.status in ('nowy','potwierdzony') %}
+<form method="post" action="{{ prefix }}/fakt"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="osoba" value="{{ p.id }}"><input type="hidden" name="id" value="{{ f.id }}">{% if f.status == 'nowy' %}<button class="ok" name="werdykt" value="tak" title="Zgadza się">✓</button>{% endif %}<button class="bad" name="werdykt" value="nie" title="Nieprawda">✗</button></form>
+<details><summary class="small">popraw</summary><form method="post" action="{{ prefix }}/fakt" class="row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="osoba" value="{{ p.id }}"><input type="hidden" name="id" value="{{ f.id }}"><input type="text" name="poprawka" placeholder="Jak jest naprawdę"><button name="werdykt" value="nie">Zapisz</button></form></details>{% endif %}</td></tr>{% endfor %}
+{% if not facts %}<tr><td class="mut">Jeszcze nic — wgraj coś albo porozmawiaj ze mną na WhatsAppie.</td></tr>{% endif %}</table></div>
+
+<div class="card"><h2>Źródła wiedzy</h2><table>
+{% for s in sources %}<tr><td>{{ s.nazwa }}<br><span class="small mut">{{ kind_pl.get(s.rodzaj, s.rodzaj) }} · {{ s.dodano[:16]|replace('T',' ') }}{% if s.notatka %} · {{ s.notatka }}{% endif %}</span></td>
+<td>{{ status_pl.get(s.status, s.status) }}{% if s.kawalkow %}<br><span class="small mut">{{ s.zrobione }}/{{ s.kawalkow }} · {{ s.faktow }} faktów</span>{% endif %}</td></tr>{% endfor %}
+{% if not sources %}<tr><td class="mut">Brak źródeł.</td></tr>{% endif %}</table></div>
+
+{% if fixes %}<div class="card"><h2>Księga poprawek</h2><table>{% for x in fixes %}<tr><td class="small"><s>{{ x.bylo }}</s><br>→ {{ x.jest }}</td><td class="small mut">{{ x.kiedy[:10] }}</td></tr>{% endfor %}</table></div>{% endif %}
+</div></body></html>

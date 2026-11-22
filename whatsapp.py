@@ -1340,6 +1340,11 @@ def _handle(con, text, voice_in=False):
             people = WW.people_context(text)
             if people:
                 extra = (extra + "\n\n" if extra else "") + "Akta osób z WhatsAppa:\n" + people
+    with contextlib.suppress(Exception):                # 2.30: pamięć o rozmówcy (dodatek Pamięć) — tylko o tej osobie
+        import dodatki_host
+        mem = dodatki_host.bind(sys.modules[__name__]).answer_context(text, current())
+        if mem:
+            extra = (extra + "\n\n" if extra else "") + "Co Sebastian wie o osobie, z którą rozmawia:\n" + mem
     if extra:
         context += "\n\nPasujące informacje:\n" + extra
     answer = ask(ANSWER_PROMPT.format(who=who_line(), context=context, history=history_text(con),

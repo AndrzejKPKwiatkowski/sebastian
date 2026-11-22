@@ -337,7 +337,7 @@ def make_app():
         if request.host not in panel_hosty(): abort(403)
         if request.endpoint=='login': return
         if not session.get('ok'): return redirect('/login')
-        if request.endpoint=='docs_upload': request.max_content_length=4*1024**3   # duże skany (Dokumenty)
+        if request.endpoint in ('docs_upload','pamiec_wgraj'): request.max_content_length=4*1024**3   # duże skany (Dokumenty), eksporty czatów (Pamięć)
         if request.method=='POST' and not secrets.compare_digest(request.form.get('csrf',''),session.get('csrf','!')): abort(403)
     @app.after_request
     def headers(resp):
@@ -449,6 +449,10 @@ def make_app():
     learner_web.register(app,sys.modules[__name__])
     learner_docs_web.register(app,sys.modules[__name__])
     whatsapp_web.register(app,sys.modules[__name__])
+    try:                                             # 2.30: zakładka „Uczy się o Tobie” (dodatek Pamięć) — wszystkie osoby
+        import dodatki_host
+        dodatki_host.register_web(app,'pamiec',prefix='/pamiec',back=('/','← Panel Sebastiana'))
+    except Exception as e: print(f'Pamięć: zakładka niedostępna ({type(e).__name__}: {e})')
     return app
 
 def schedule(install):

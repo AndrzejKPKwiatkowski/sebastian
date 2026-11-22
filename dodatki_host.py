@@ -15,7 +15,7 @@ from pathlib import Path
 
 W = None                      # moduł whatsapp (związany przez bind)
 log = logging.getLogger("sebastian.dodatki")
-HOST_VERSION = "2.29"
+HOST_VERSION = "2.30"
 PERMISSIONS = {
     "whatsapp.wysylanie": "wysyła Ci wiadomości i głosówki na WhatsAppie",
     "whatsapp.obserwacja": "czyta (tylko odczyt) Twoje rozmowy z obserwowanego WhatsAppa",
@@ -24,6 +24,8 @@ PERMISSIONS = {
     "zadania.zapis": "dodaje zadania do listy zadań",
     "model": "korzysta z lokalnego modelu (Ollama)",
     "telefon": "dzwoni na Twój telefon przez usługę zewnętrzną (Twilio) — tylko gdy ją skonfigurujesz",
+    "pamiec.odczyt": "czyta, co Sebastian wie o Tobie i innych użytkownikach (dodatek Pamięć)",
+    "whatsapp.uzytkownicy": "pisze na WhatsAppie także do innych osób z Twojej listy (rodzina, asystent)",
 }
 _LOADED = {}
 _STATE = {}                   # id → {"errors": n, "paused_until": ts, "last_tick": ts}
@@ -225,6 +227,32 @@ def tick(con):
             ctx._con = None
 
 
+def answer_context(question, user=None):
+    """2.30: dodatki z hakiem context(ctx, pytanie, użytkownik) dokładają wiedzę do odpowiedzi Sebastiana na WhatsAppie."""
+    out = []
+    for mod, ctx in active():
+        if _paused(ctx.id) or not hasattr(mod, "context"):
+            continue
+        try:
+            text = mod.context(ctx, question, user)
+        except Exception as e:
+            _fail(ctx.id, "kontekst", e)
+            continue
+        if isinstance(text, str) and text.strip():
+            out.append(text.strip())
+    return "\n\n".join(out)
+
+
+def register_web(app, aid, **kw):
+    """2.30: zakładka dodatku w panelu (dodatek z modułem web.register). False, gdy dodatku nie ma albo jest wyłączony."""
+    info = discover().get(aid)
+    if not info or info.get("problems") or not is_enabled(info):
+        return False
+    mod, ctx = load(info)
+    importlib.import_module(mod.__name__ + ".web").register(app, ctx, **kw)
+    return True
+
+
 def help_text():
     lines = []
     for mod, ctx in active():
@@ -335,6 +363,28 @@ class Context:
             with contextlib.closing(Wm.db()) as c:
                 Wm.enqueue(c, "voice", text, audio=ogg, purpose=f"{self.id}:{name}", to="")
         return True
+
+    def send_to(self, phone, text, purpose="info"):
+        """2.30: wiadomość do innej osoby z listy WhatsAppa (rodzina, asystent) — tylko numery z listy."""
+        self.need("whatsapp.uzytkownicy")
+        Wm = _w()
+        if not Wm.user_by_phone(phone):
+            raise PermissionDenied(f"Numer {phone} nie jest na liście użytkowników Sebastiana")
+        if self._con is not None:
+            return Wm.enqueue(self._con, "text", text, purpose=f"{self.id}:{purpose}", to=phone)
+        with contextlib.closing(Wm.db()) as c:
+            return Wm.enqueue(c, "text", text, purpose=f"{self.id}:{purpose}", to=phone)
+
+    def memory(self, phone=None, query="", limit=3000):
+        """2.30: co Sebastian wie o osobie (domyślnie o właścicielu) — z dodatku Pamięć. '' gdy go nie ma."""
+        self.need("pamiec.odczyt")
+        info = discover().get("pamiec")
+        if not info or info.get("problems") or not is_enabled(info):
+            return ""
+        mod, ctx = load(info)
+        with contextlib.suppress(Exception):
+            return mod.memory(ctx, phone, query, limit) or ""
+        return ""
 
     # ---------------------------------------------------------------- model
     def ask(self, prompt, as_json=False, max_tokens=900, temperature=0.2):

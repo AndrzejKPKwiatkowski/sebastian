@@ -1,0 +1,35 @@
+{
+  "id": "pamiec",
+  "nazwa": "Pamięć — Sebastian uczy się o Tobie",
+  "wersja": "1.0.0",
+  "rdzen": "2.30",
+  "opis": "Każdy użytkownik ma własną pamięć. Sebastian uczy się z rozmów na WhatsAppie, z eksportów ChatGPT, Claude i Gemini, z Twoich plików i wklejonego tekstu. Lokalny model przerabia to w tle na fakty i profil (kim jesteś, praca, ludzie, sprawy, preferencje, cele, codzienność), a co jakiś czas pyta: „Zrozumiałem, że… — dobrze?”. Poprawki mają pierwszeństwo. Z pamięci korzystają odpowiedzi Sebastiana i inne dodatki.",
+  "domyslnie_wlaczony": true,
+  "tik_co_sekund": 30,
+  "uprawnienia": ["whatsapp.wysylanie", "whatsapp.uzytkownicy", "model", "pamiec.odczyt"],
+  "pomoc": [
+    "*co o mnie wiesz* — czego Sebastian się o Tobie nauczył · *pytaj mnie* — jego pytania „czy dobrze zrozumiałem?”",
+    "na pytania odpisujesz: *1 tak, 2 nie — jak jest naprawdę, 3 tak* albo *wszystko się zgadza*",
+    "eksporty ChatGPT / Claude / Gemini i pliki wrzucasz w panelu: zakładka „Uczy się o Tobie”"
+  ],
+  "polecenia": [
+    {"nazwa": "status", "opis": "Ile faktów, pytań i źródeł ma każda osoba; foldery do wrzucania plików."},
+    {"nazwa": "wgraj", "opis": "Plik albo cały folder do nauki, np. wgraj ~/Downloads/chatgpt.zip \"Aga\" (oryginał zostaje)."},
+    {"nazwa": "pytania", "opis": "Pytania „czy dobrze zrozumiałem?” do osoby, np. pytania Aga."},
+    {"nazwa": "odpowiedz", "opis": "Odpowiedź na pytanie: odpowiedz 12 tak  |  odpowiedz 12 nie \"jak jest naprawdę\"."},
+    {"nazwa": "profil", "opis": "Co Sebastian wie o osobie, np. profil Andrzej."},
+    {"nazwa": "przetworz", "opis": "Przerób kolejkę od razu (np. przetworz 50) — normalnie dzieje się to w tle."},
+    {"nazwa": "ustawienia", "opis": "Pokazuje ustawienia dodatku."},
+    {"nazwa": "ustaw", "opis": "Zmienia ustawienie, np. ustaw pytania_godzina 20:00"}
+  ],
+  "ustawienia": {
+    "nauka_w_tle": true,
+    "uczyc_z_rozmow": true,
+    "pytania_przez_whatsapp": true,
+    "pytania_godzina": "19:00",
+    "pytan_naraz": 3,
+    "profil_co_faktow": 25,
+    "przerwa_po_rozmowie_s": 90,
+    "osoba_panelu_agi": "Aga"
+  }
+}

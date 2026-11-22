@@ -1037,6 +1037,8 @@ def make_app(ctx, hosts=None):
     def protect():
         if allowed is not None and request.host.split(":")[0].lower() not in allowed:
             abort(403)
+        if request.endpoint == "pamiec_wgraj":                                # 2.30: duże eksporty czatów
+            request.max_content_length = 4 * 1024 ** 3
         if request.method == "POST" and request.endpoint not in ("login", "first_run"):
             if not hmac.compare_digest(request.form.get("csrf", ""), session.get("csrf", "-")):
                 abort(400)
@@ -1444,6 +1446,7 @@ def make_app(ctx, hosts=None):
         return [{"id": "rekrutacja", "nazwa": "Rekrutacja", "opis": "Oferty, CV, listy i odpowiedzi od pracodawców", "url": url_for("home"), "znak": "R"},
                 {"id": "sebastian", "nazwa": "Sebastian", "opis": "Panel główny: poczta, sprawy, nauka, WhatsApp", "url": c.get("sebastian", ""), "znak": "S"},
                 {"id": "gwaranci", "nazwa": "Gwaranci Feniks", "opis": "Spotkania gwaranckie zespołu", "url": c.get("gwaranci", ""), "znak": "G"},
+                {"id": "pamiec", "nazwa": "Sebastian uczy się o Tobie", "opis": "Jego pytania do Ciebie, Twój profil, wgrywanie wiedzy", "url": "/pamiec", "znak": "🐑"},
                 {"id": "terminal", "nazwa": "Terminal", "opis": "Dla Andrzeja — pełny dostęp do Maca", "url": c.get("terminal", ""), "znak": ">_"}]
 
     @app.route("/centrum")
@@ -1989,6 +1992,17 @@ def make_app(ctx, hosts=None):
         return render_template("ustawienia.html", prefs=PF.load(g.db), f=f, tab="ust", part=part, error=error, me=me, seb=seb, has_photo=bool(photo_path(ctx, f)), has_signature=bool(signature_path(ctx)), writer=D.writer_model(ctx), cbop_wynik=R.meta_get(g.db, "cbop_wynik"), gemini_status=GM.status(ctx),
                                sources=sources, firms=firms, keys=keys)
 
+    try:                                                                     # 2.30: „Uczy się o Tobie” — tylko pamięć Agi
+        import dodatki_host as DH
+
+        def only_aga(people):
+            info = DH.discover().get("pamiec")
+            want = R.plain((DH.load(info)[1].settings().get("osoba_panelu_agi") if info else "") or "Aga")
+            return [p for p in people if p.get("rola") != "wlasciciel"
+                    and any(R.plain(x).startswith(want) for x in (p["imie"] or "").split())][:1]
+        DH.register_web(app, "pamiec", prefix="/pamiec", people_filter=only_aga, back=("/centrum", "← Centrum dowodzenia"))
+    except Exception as e:
+        ctx.log.warning(f"Pamięć: zakładka niedostępna ({type(e).__name__}: {e})")
     return app
 
 

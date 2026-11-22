@@ -142,6 +142,7 @@ footer.foot i{width:8px;height:8px;border-radius:50%;background:var(--gold);disp
   <a href="{{ url_for('replies') }}" class="{{ 'on' if tab=='odp' }}">Odpowiedzi{% if n and n.odpowiedzi %}<span class="badge">{{ n.odpowiedzi }}</span>{% endif %}</a>
   <a href="{{ url_for('all_apps') }}" class="{{ 'on' if tab=='all' }}">Aplikacje</a>
   <a href="{{ url_for('talk') }}" class="{{ 'on' if tab=='rozmowa' }}">Rozmowa</a>
+  <a href="/pamiec">🐑 Uczy się o Tobie</a>
   <a href="{{ url_for('settings') }}" class="{{ 'on' if tab=='ust' }}">Ustawienia</a>
   <span class="sp"></span>
   <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="btn plain small">Wyloguj</button></form>
