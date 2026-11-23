@@ -568,6 +568,7 @@ def consolidate(con, pid, ask=None):
         if not text:
             text = "\n".join(("• " if r["status"] == "potwierdzony" or r["pewnosc"] >= 0.8 else "• (prawdopodobnie) ") + r["tresc"] for r in rows[:10])
         con.execute("INSERT OR REPLACE INTO profil(osoba, kategoria, tekst, zaktualizowano) VALUES(?,?,?,?)", (pid, cat, text[:4000], now_iso()))
+        con.commit()                                   # 2.32: nie trzymam bazy zablokowanej, gdy model myśli nad kolejną kategorią
         n += 1
     meta(con, f"profil:{pid}", now_iso())
     meta(con, f"zmiana:{pid}", "")

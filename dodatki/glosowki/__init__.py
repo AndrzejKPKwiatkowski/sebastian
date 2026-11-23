@@ -46,10 +46,12 @@ def db(ctx):
     CREATE TABLE IF NOT EXISTS uzyte(id TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS paczki(
         id INTEGER PRIMARY KEY AUTOINCREMENT, chat TEXT, osoba TEXT, od_ts INTEGER, do_ts INTEGER, ile INTEGER,
-        sekundy REAL, szacunek INTEGER DEFAULT 0, wstecz INTEGER DEFAULT 0, ids TEXT, tresc TEXT,
+        sekundy REAL, szacunek INTEGER DEFAULT 0, wstecz INTEGER DEFAULT 0, ids TEXT, tresc TEXT, konto TEXT DEFAULT '',
         podsumowanie TEXT DEFAULT '', status TEXT DEFAULT 'czeka', proby INTEGER DEFAULT 0,
         utworzono TEXT, wyslano TEXT DEFAULT '', odpowiedz TEXT DEFAULT '');
     """)
+    if "konto" not in {r[1] for r in con.execute("PRAGMA table_info(paczki)")}:      # 2.32
+        con.execute("ALTER TABLE paczki ADD COLUMN konto TEXT DEFAULT ''")
     return con
 
 
@@ -70,11 +72,11 @@ def watch_rows(ctx, since, until=None):
     con.row_factory = sqlite3.Row
     try:
         cols = {r[1] for r in con.execute("PRAGMA table_info(wmsg)")}
-        sec = "sekundy" if "sekundy" in cols else "0 AS sekundy"
+        sec = ("sekundy" if "sekundy" in cols else "0 AS sekundy") + (", konto" if "konto" in cols else ", '' AS konto")
         groups = "" if ctx.settings().get("grupy") else "AND is_group=0 "
         return [dict(r) for r in con.execute(
             f"SELECT id, chat, chat_name, sender, sender_name, ts, text, {sec} FROM wmsg WHERE kind='voice' AND from_me=0 "
-            f"{groups}AND ts>=? AND ts<? ORDER BY chat, sender, ts", (int(since), int(until or 4102444800)))]
+            f"{groups}AND ts>=? AND ts<? ORDER BY {'konto, ' if 'konto' in cols else ''}chat, sender, ts", (int(since), int(until or 4102444800)))]
     finally:
         con.close()
 
@@ -103,7 +105,8 @@ def bursts(ctx, rows, gap=None):
     for r in rows:
         if r["text"].strip() == "[głosówka]":        # z historii telefonu — bez nagrania, nie da się przepisać
             continue
-        if cur and (r["chat"], r["sender"]) == (cur[-1]["chat"], cur[-1]["sender"]) and r["ts"] - cur[-1]["ts"] <= gap:
+        if cur and (r["chat"], r["sender"], r.get("konto", "")) == (cur[-1]["chat"], cur[-1]["sender"], cur[-1].get("konto", "")) \
+                and r["ts"] - cur[-1]["ts"] <= gap:
             cur.append(r)
         else:
             if cur:
@@ -135,10 +138,10 @@ def collect(ctx, con, since, until=None, retro=False, now_ts=None, names=None):
             continue
         who = b[0]["sender_name"] or b[0]["chat_name"] or ("+" + b[0]["sender"] if (b[0]["sender"] or "").isdigit() else b[0]["sender"]) or "?"
         tresc = json.dumps([{"ts": r["ts"], "s": s, "text": (r["text"] or "").strip()} for r, (s, _) in zip(b, secs)], ensure_ascii=False)
-        con.execute("INSERT INTO paczki(chat, osoba, od_ts, do_ts, ile, sekundy, szacunek, wstecz, ids, tresc, utworzono) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        con.execute("INSERT INTO paczki(chat, osoba, od_ts, do_ts, ile, sekundy, szacunek, wstecz, ids, tresc, utworzono, konto) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (b[0]["chat"], who, b[0]["ts"], b[-1]["ts"], len(b), total, int(any(e for _, e in secs)), int(retro),
-                     json.dumps([r["id"] for r in b]), tresc, ctx.now().isoformat(timespec="seconds")))
+                     json.dumps([r["id"] for r in b]), tresc, ctx.now().isoformat(timespec="seconds"), b[0].get("konto") or ""))
         new += 1
     con.commit()
     return new
@@ -188,7 +191,9 @@ def summary_text(ctx, p, s):
     n = p["ile"]
     when = f"{start:%d.%m} o {start:%H:%M}" if p["wstecz"] or start.date() != ctx.now().date() else f"o {start:%H:%M}"
     length = ("ok. " if p["szacunek"] else "") + mmss(p["sekundy"]) + " min"
-    lines = [f"Cześć{' ' + owner if owner else ''}! 🎤 *{p['osoba']}* nagrał(a) do Ciebie {n} {plural(n, 'głosówkę', 'głosówki', 'głosówek')} "
+    acc = p["konto"] if "konto" in p.keys() else ""
+    where = f" na numer {acc[2:5]} {acc[5:8]} {acc[8:]}" if acc.startswith("48") and len(acc) == 11 else (f" na numer +{acc}" if acc else "")
+    lines = [f"Cześć{' ' + owner if owner else ''}! 🎤 *{p['osoba']}* nagrał(a) do Ciebie {n} {plural(n, 'głosówkę', 'głosówki', 'głosówek')}{where} "
              f"({when}, razem {length})" + (" — *pilne*" if s and s.get("pilne") else "") + "."]
     if s:
         lines += ["", f"*O czym:* {s['podsumowanie']}"]

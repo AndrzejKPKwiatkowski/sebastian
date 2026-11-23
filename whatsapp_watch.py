@@ -23,7 +23,8 @@ import whatsapp as W
 ACTIONS = ("oddzwoń", "odpisz", "porozmawiaj", "nic")
 DOC_EXT = (".pdf", ".docx", ".doc", ".rtf", ".odt", ".xlsx", ".pptx", ".txt", ".csv", ".md", ".html", ".htm")
 MAX_ATTACH_CHARS = 200_000
-VOICE_MAX_CHARS = 40_000          # 2.29: przepisana głosówka (ok. 90 minut mowy)
+VOICE_MAX_CHARS = 40_000
+HISTORY_VOICE_DAYS = 3            # 2.32: głosówki z historii telefonu młodsze niż 3 dni — pobierane i przepisywane          # 2.29: przepisana głosówka (ok. 90 minut mowy)
 
 
 # ================================================================ baza obserwacji (osobna — łatwo ją wyczyścić)
@@ -53,7 +54,7 @@ def db():
         updated TEXT);
     """)
     cols = {r[1] for r in con.execute("PRAGMA table_info(wmsg)")}
-    for col, definition in (("attach", "TEXT DEFAULT ''"), ("filename", "TEXT DEFAULT ''"), ("sekundy", "INTEGER DEFAULT 0")):
+    for col, definition in (("attach", "TEXT DEFAULT ''"), ("filename", "TEXT DEFAULT ''"), ("sekundy", "INTEGER DEFAULT 0"), ("konto", "TEXT DEFAULT ''")):
         if col not in cols:
             con.execute(f"ALTER TABLE wmsg ADD COLUMN {col} {definition}")
     con.commit()
@@ -66,18 +67,25 @@ def store(con, m):
         return False
     text = m.get("text") or ""
     if m["kind"] == "voice" and m.get("audio_bytes") and W.C.WA_WATCH_TRANSCRIBE and not m.get("from_me"):
-        with contextlib.suppress(Exception):
+        try:
             text = W.transcribe(m["audio_bytes"]) or ""
+            if not text:
+                W.log.warning(f"Obserwacja: głosówka od {m.get('sender_name') or m.get('chat')} — nie wyszło przepisanie (pusty wynik).")
+        except Exception as e:                       # 2.32: błąd przepisania widać w logu
+            W.log.warning(f"Obserwacja: głosówka od {m.get('sender_name') or m.get('chat')} — błąd przepisania: "
+                          f"{type(e).__name__}: {str(e)[:160]}")
+    elif m["kind"] == "voice" and not m.get("from_me") and not m.get("audio_bytes") and not m.get("history"):
+        W.log.warning(f"Obserwacja: głosówka od {m.get('sender_name') or m.get('chat')} — nie udało się pobrać nagrania.")
     sha1 = ""
     if m.get("file_bytes"):
         with contextlib.suppress(Exception):
             sha1 = read_attachment(con, m.get("file_name") or "plik", m.get("file_mime") or "", m["file_bytes"])
     limit = VOICE_MAX_CHARS if m["kind"] == "voice" else 4000      # 2.29: długie głosówki zapisane w całości
-    con.execute("INSERT OR IGNORE INTO wmsg(id, chat, chat_name, sender, sender_name, from_me, is_group, ts, kind, text, attach, filename, sekundy) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    con.execute("INSERT OR IGNORE INTO wmsg(id, chat, chat_name, sender, sender_name, from_me, is_group, ts, kind, text, attach, filename, sekundy, konto) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (m["id"], m["chat"], m.get("chat_name") or "", m.get("sender") or "", m.get("sender_name") or "",
                  int(bool(m.get("from_me"))), int(bool(m.get("is_group"))), int(m.get("ts") or time.time()), m["kind"],
-                 text[:limit], sha1, (m.get("file_name") or "")[:200], int(m.get("audio_seconds") or 0)))
+                 text[:limit], sha1, (m.get("file_name") or "")[:200], int(m.get("audio_seconds") or 0), m.get("konto") or ""))
     if m.get("chat_name"):        # ostatnia znana nazwa rozmowy dla całego czatu
         con.execute("UPDATE wmsg SET chat_name=? WHERE chat=? AND (chat_name='' OR chat_name LIKE '+%')", (m["chat_name"], m["chat"]))
     con.commit()
@@ -137,14 +145,15 @@ def ignored(chat, name):
 
 class Watcher:
     """Drugie „połączone urządzenie” na Twoim numerze — wyłącznie odbiór."""
-    def __init__(self, log, groups=False):
+    def __init__(self, log, groups=False, session=None, account=""):
         import whatsapp_link
         whatsapp_link.ensure_library()
         from neonize.client import NewClient
         from neonize.events import CallOfferEv, ConnectedEv, DisconnectedEv, HistorySyncEv, LoggedOutEv, MessageEv
-        self.log, self.groups = log, groups
+        self.log, self.groups, self.account = log, groups, account       # account: '' = główne konto, inaczej numer
+        self.label = f"Obserwacja +{account}" if account else "Obserwacja"
         self.queue = queue.Queue()
-        self.client = NewClient(str(session_path()))
+        self.client = NewClient(str(session or session_path()))
         self.connected = self.logged_out = self.needs_login = self.stopping = False
         self.me = None
         self.names = {}
@@ -155,7 +164,7 @@ class Watcher:
             self.connected = True
             with contextlib.suppress(Exception):
                 self.me = client.get_me().JID.User
-            self.log.info("Obserwacja WhatsApp: połączono (tylko odczyt).")
+            self.log.info(f"{self.label} WhatsApp: połączono (tylko odczyt).")
 
         @c.event(DisconnectedEv)
         def _disconnected(client, ev):
@@ -164,7 +173,8 @@ class Watcher:
         @c.event(LoggedOutEv)
         def _logged_out(client, ev):
             self.connected, self.logged_out = False, True
-            self.log.warning("Obserwacja WhatsApp: wylogowano. Połącz ponownie: python sebastian.py wa-watch login")
+            self.log.warning(f"{self.label} WhatsApp: wylogowano. Połącz ponownie: python sebastian.py wa-watch login"
+                             + (f" --numer {self.account}" if self.account else ""))
 
         @c.event(MessageEv)
         def _message(client, ev):
@@ -174,6 +184,7 @@ class Watcher:
                 self.log.warning(f"Obserwacja: nie odczytano wiadomości ({type(e).__name__})")
                 return
             if m:
+                m["konto"] = self.account
                 self.queue.put(m)
 
         @c.event(HistorySyncEv)
@@ -181,10 +192,11 @@ class Watcher:
             try:
                 n = 0
                 for m in self.parse_history(ev.Data):
+                    m["konto"] = self.account
                     self.queue.put(m)
                     n += 1
                 if n:
-                    self.log.info(f"Obserwacja: historia z telefonu — {n} wiadomości.")
+                    self.log.info(f"{self.label}: historia z telefonu — {n} wiadomości.")
             except Exception as e:
                 self.log.warning(f"Obserwacja: historia nieodczytana ({type(e).__name__}: {str(e)[:120]})")
 
@@ -196,7 +208,7 @@ class Watcher:
                 who = self.phone_of(caller)
                 if who and who != self.me:
                     self.queue.put({"id": "call-" + meta.callID, "chat": who, "chat_name": self.name_of(caller, ""),
-                                    "sender": who, "from_me": False, "is_group": False,
+                                    "sender": who, "from_me": False, "is_group": False, "konto": self.account,
                                     "ts": self.seconds(meta.timestamp), "kind": "call", "text": "połączenie przychodzące"})
 
         def _qr(client, data):
@@ -230,15 +242,33 @@ class Watcher:
             self.names[key] = name
         return self.names[key] or push or ""
 
-    def content(self, m, from_me, live=True):
-        """Rodzaj, tekst i (opcjonalnie) plik do przeczytania z wiadomości WhatsApp."""
+    @staticmethod
+    def unwrap(m):
+        """2.32: wiadomości znikające / „do jednorazowego odsłuchania” mają treść w środku opakowania."""
+        for _ in range(3):
+            for f in ("ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension", "documentWithCaptionMessage"):
+                with contextlib.suppress(Exception):
+                    if m.HasField(f) and getattr(m, f).HasField("message"):
+                        m = getattr(m, f).message
+                        break
+            else:
+                break
+        return m
+
+    def content(self, m, from_me, live=True, fetch=None):
+        """Rodzaj, tekst i (opcjonalnie) plik do przeczytania z wiadomości WhatsApp.
+        fetch: pobierz nagranie głosówki (domyślnie tylko na żywo; 2.32 — także świeże z historii)."""
+        m = self.unwrap(m)
+        fetch = live if fetch is None else fetch
         kind, text, file = "text", m.conversation or (m.extendedTextMessage.text if m.HasField("extendedTextMessage") else ""), None
         if m.HasField("audioMessage"):
-            kind, text = "voice", ("" if live else "[głosówka]")
+            kind, text = "voice", ("" if fetch else "[głosówka]")
             file = {"audio_seconds": int(getattr(m.audioMessage, "seconds", 0) or 0)}      # 2.29: długość głosówki
-            if live and not from_me:
+            if fetch and not from_me:
                 with contextlib.suppress(Exception):
                     file["audio_bytes"] = self.client.download_any(m)
+                if not file.get("audio_bytes") and not live:
+                    text = "[głosówka]"                  # z historii: nagranie już niedostępne
         elif m.HasField("imageMessage"):
             kind, text = "image", m.imageMessage.caption or "[zdjęcie]"
             if live and W.C.WA_WATCH_ATTACHMENTS and W.C.WA_WATCH_OCR_IMAGES and m.imageMessage.fileLength <= W.C.WA_WATCH_ATTACH_MAX_MB * 2**20:
@@ -300,7 +330,8 @@ class Watcher:
                 wm = hm.message
                 if not wm.HasField("message"):
                     continue
-                kind, text, file = self.content(wm.message, wm.key.fromMe, live=False)
+                fresh = time.time() - self.seconds(wm.messageTimestamp) < HISTORY_VOICE_DAYS * 86400
+                kind, text, file = self.content(wm.message, wm.key.fromMe, live=False, fetch=fresh and not group)
                 if kind == "text" and not text.strip():
                     continue
                 part = wm.participant or wm.key.participant or ""

@@ -63,6 +63,7 @@ DEFAULTS = {
     # 2.4: obserwacja Twojego własnego WhatsAppa (tylko odczyt) — wa-watch login
     "WA_WATCH": False,
     "WA_WATCH_PHONE": "",              # Twój numer obserwowany (ustawia wa-watch login)
+    "WA_WATCH_EXTRA": [],              # 2.32: dodatkowe obserwowane numery (np. numer dla klientów) — wa-watch login --numer
     "WA_WATCH_GROUPS": False,          # także grupy (zwykle dużo szumu)
     "WA_WATCH_TRANSCRIBE": True,       # głosówki od innych → tekst (lokalnie)
     "WA_WATCH_KEEP_DAYS": 0,           # 0 = rozmowy przechowywane na stałe (2.5); np. 365 = usuwaj starsze niż rok
@@ -1528,7 +1529,7 @@ def run():
 
     transport = make_transport(on_message)
     transport.start()
-    watcher = None
+    watcher, extra = None, []
     if C.WA_WATCH and watch_paired():
         try:
             import whatsapp_watch as WW
@@ -1536,15 +1537,26 @@ def run():
             watcher.start()
         except Exception as e:
             log.warning(f"Obserwacja WhatsApp nie wystartowała: {type(e).__name__}: {str(e)[:150]}")
+    for acc in watch_extra():                     # 2.32: dodatkowe numery (np. dla klientów)
+        if not session_path_watch(acc).exists():
+            continue
+        try:
+            import whatsapp_watch as WW
+            w = WW.Watcher(log, groups=C.WA_WATCH_GROUPS, session=session_path_watch(acc), account=acc)
+            w.start()
+            extra.append(w)
+        except Exception as e:
+            log.warning(f"Obserwacja +{acc} nie wystartowała: {type(e).__name__}: {str(e)[:150]}")
     log.info(f"Start WhatsApp ({C.WA_TRANSPORT}). Właściciel: +{C.WA_OWNER_PHONE}. Przegląd: "
              f"{C.WA_BRIEF_TIME if C.WA_BRIEF else 'wyłączony'}.")
-    state = {"beat": 0, "watcher": watcher}
+    state = {"beat": 0, "watcher": watcher, "watchers_extra": extra}
     while not STOP:
         tick(con, transport, incoming, state)
         sleep(5)
     transport.stop()
-    if watcher:
-        watcher.stop()
+    for w in [watcher] + extra:
+        if w:
+            w.stop()
     log.info("Zatrzymano WhatsApp.")
 
 
@@ -1562,6 +1574,8 @@ def tick(con, transport, incoming, state):
                     import learner
                     learner.bind(S).notify("Sebastian — WhatsApp", "Połączenie z WhatsAppem wygasło. Uruchom: python sebastian.py wa-login")
         watch_tick(con, state.get("watcher"))
+        for w in state.get("watchers_extra") or []:
+            watch_tick_extra(con, w)
         if transport.connected and meta_get(con, "welcomed") != (meta_get(con, "linked_as") or "plik"):
             meta_set(con, "welcomed", meta_get(con, "linked_as") or "plik")
             name = owner_name()
@@ -1641,6 +1655,28 @@ def watch_tick(con, watcher):
         meta_set(con, "watch_logged_out", now().isoformat(timespec="seconds"))
         enqueue(con, "text", "🔔 Straciłem wgląd w Twojego WhatsAppa (wylogowanie). Połącz ponownie na Macu: "
                              "python sebastian.py wa-watch login", purpose="notice", to="")
+
+
+def watch_extra():
+    """2.32: dodatkowe obserwowane numery (same cyfry)."""
+    return [re.sub(r"\D", "", str(x.get("phone") if isinstance(x, dict) else x)) for x in (C.WA_WATCH_EXTRA or [])
+            if re.sub(r"\D", "", str(x.get("phone") if isinstance(x, dict) else x))]
+
+
+def watch_tick_extra(con, watcher):
+    """2.32: zapis wiadomości z dodatkowego numeru (nauka, akta i sprzątanie robi tik głównego konta)."""
+    import whatsapp_watch as WW
+    with contextlib.closing(WW.db()) as wc:
+        n = 0
+        while not watcher.queue.empty() and n < 200:
+            WW.store(wc, watcher.queue.get())
+            n += 1
+    key = f"watch:{watcher.account}"
+    meta_set(con, key + ":connected", "1" if watcher.connected else "0")
+    if (watcher.logged_out or watcher.needs_login) and not meta_get(con, key + ":logged_out"):
+        meta_set(con, key + ":logged_out", now().isoformat(timespec="seconds"))
+        enqueue(con, "text", f"🔔 Straciłem wgląd w WhatsAppa na numerze +{watcher.account} (wylogowanie). Połącz ponownie na Macu: "
+                             f"python sebastian.py wa-watch login --numer {watcher.account}", purpose="notice", to="")
 
 
 def addons_message(con, kind, text, user):
@@ -2037,9 +2073,15 @@ def cmd_user(action="lista", phone=None, name=None, call=None, desc=None, brief=
         cmd_start()
 
 
-def cmd_watch(action="status", code=False, hours=24):
-    """Obserwacja Twojego własnego WhatsAppa (tylko odczyt)."""
+def cmd_watch(action="status", code=False, hours=24, number=""):
+    """Obserwacja Twojego własnego WhatsAppa (tylko odczyt). number: dodatkowy numer (2.32), np. numer dla klientów."""
     import whatsapp_watch as WW
+    number = re.sub(r"\D", "", number or "")
+    if len(number) == 9:
+        number = "48" + number
+    main = re.sub(r"\D", "", C.WA_WATCH_PHONE or "")
+    if number and number != main:
+        return cmd_watch_extra(action, code, number)
     if action == "status":
         n, last = WW.status_counts()
         with contextlib.closing(db()) as con:
@@ -2055,6 +2097,11 @@ def cmd_watch(action="status", code=False, hours=24):
         print(f"Zapisane:     {n} wiadomości · ostatnia: {last} · przechowywane {keep}")
         print(f"Wiedza:       akta osób: {people} · odczytane załączniki: {files} · nauka z rozmów: {'tak' if C.WA_WATCH_TO_LEARNING else 'nie'}")
         print(f"Grupy:        {'tak' if C.WA_WATCH_GROUPS else 'nie'} · głosówki → tekst: {'tak' if C.WA_WATCH_TRANSCRIBE else 'nie'}")
+        with contextlib.closing(db()) as con:
+            for acc in watch_extra():
+                ok = meta_get(con, f"watch:{acc}:connected") == "1"
+                out = meta_get(con, f"watch:{acc}:logged_out")
+                print(f"Dodatkowy:    +{acc}" + (" · połączony" if ok else " · niepołączony") + (f" · ⚠ wylogowano {out[:16]}" if out else ""))
         return
     if action == "login":
         print("Sebastian będzie CZYTAŁ Twojego WhatsAppa: niczego z niego nie wyśle, nie oznaczy jako przeczytane,")
@@ -2110,8 +2157,48 @@ def cmd_watch(action="status", code=False, hours=24):
         cmd_start()
 
 
-def session_path_watch():
-    return home() / "obserwacja-sesja.sqlite3"
+def session_path_watch(account=""):
+    return home() / (f"obserwacja-sesja-{account}.sqlite3" if account else "obserwacja-sesja.sqlite3")
+
+
+def cmd_watch_extra(action, code, number):
+    """2.32: obserwacja dodatkowego numeru — login / status / usun."""
+    accounts = watch_extra()
+    if action == "login":
+        print(f"Sebastian będzie CZYTAŁ WhatsAppa na numerze +{number} (tylko odczyt — nic nie wyśle, nie oznaczy jako przeczytane).")
+        print(f"Na telefonie z numerem +{number}: WhatsApp → Ustawienia → Połączone urządzenia → Połącz urządzenie.\n")
+        was = stop_agent()
+        import whatsapp_link
+        me = whatsapp_link.pair(session_path_watch(number), home() / f"qr-obserwacja-{number}.png", phone=number if code else None)
+        if me and re.sub(r"\D", "", me) != number:
+            print(f"⚠ Połączyło się konto +{me}, a nie +{number}. Jeśli to pomyłka: wa-watch usun --numer {number} i połącz jeszcze raz.")
+        if number not in accounts:
+            save_settings({"WA_WATCH_EXTRA": [{"phone": a} for a in accounts + [number]]})
+        with contextlib.closing(db()) as con:
+            meta_set(con, f"watch:{number}:logged_out", "")
+        print(f"\n✓ Połączono numer +{number}. Sebastian czyta go od teraz; świeże głosówki z ostatnich "
+              "3 dni przyjdą z historii telefonu i też zostaną przepisane.")
+        if was or agent_loaded():
+            cmd_start()
+        elif C.WA_ENABLED:
+            print("  Uruchom usługę: python sebastian.py wa-start")
+        return
+    if action == "status":
+        with contextlib.closing(db()) as con:
+            on = meta_get(con, f"watch:{number}:connected") == "1"
+        print(f"Numer +{number}: " + ("obserwowany" if number in accounts else "nieobserwowany") + (" · połączony" if on else ""))
+        return
+    if action in ("off", "usun"):
+        stop_agent()
+        save_settings({"WA_WATCH_EXTRA": [{"phone": a} for a in accounts if a != number]})
+        if action == "usun":
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(session_path_watch(number)) + suffix).unlink(missing_ok=True)
+        print(f"✓ Numer +{number} nie jest już obserwowany." + (" Usuń też „Sebastian” z Połączonych urządzeń na tym telefonie." if action == "usun" else ""))
+        if agent_loaded() or C.WA_ENABLED:
+            cmd_start()
+        return
+    raise RuntimeError("Dla dodatkowego numeru: wa-watch login|status|off|usun --numer 661285780")
 
 
 def cmd_set(key, value):

@@ -464,3 +464,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.31
 
 `test_wysylka_pliku.py`: wyszukanie osoby po imieniu, numerze i „ja”; wiadomość i PDF w kolejce w dobrej kolejności, do właściwego numeru, oryginał zostaje; nieznana osoba i brak pliku; budowa dokumentu WhatsAppa (nazwa bez znacznika czasu, typ application/pdf).
+
+# Weryfikacja 2.32
+
+`test_obserwacja_konta.py`: rozpakowanie głosówek znikających i jednorazowych; pobieranie świeżych głosówek z historii (starsze bez nagrania); zapis numeru konta i długości, log przy błędzie przepisania i braku nagrania; lista dodatkowych numerów i ścieżki sesji; `wa-watch login --numer` zapisuje numer, `status` go pokazuje; tik dodatkowego konta zapisuje wiadomości i raz ostrzega o wylogowaniu; podsumowanie głosówki z numerem, na który przyszła.

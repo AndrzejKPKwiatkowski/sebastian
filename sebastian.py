@@ -492,7 +492,7 @@ def wa_command(args):
     elif cmd=='wa-set': W.cmd_set(args.key,args.value)
     elif cmd=='wa-settings': W.cmd_settings()
     elif cmd=='wa-voice': W.cmd_voice(args.name)
-    elif cmd=='wa-watch': W.cmd_watch(args.action,args.kod,args.godzin)
+    elif cmd=='wa-watch': W.cmd_watch(args.action,args.kod,args.godzin,args.numer)
     elif cmd=='wa-user': W.cmd_user(args.action,args.phone,args.imie,args.wolacz,args.kto,args.przeglad,args.glos,args.dostep)
     elif cmd=='wa-pomysly': W.cmd_ideas()
     elif cmd in ('dodatki','dodatek'):
@@ -575,7 +575,7 @@ def main():
     a=sp.add_parser('wa-send-file'); a.add_argument('osoba'); a.add_argument('plik'); a.add_argument('--tekst',default='')
     a=sp.add_parser('wa-set'); a.add_argument('key'); a.add_argument('value')
     a=sp.add_parser('wa-voice'); a.add_argument('name',nargs='?',default=None)
-    a=sp.add_parser('wa-watch'); a.add_argument('action',nargs='?',default='status',choices=['status','login','podsumowanie','ludzie','off','on','usun']); a.add_argument('--kod',action='store_true'); a.add_argument('--godzin',type=int,default=24)
+    a=sp.add_parser('wa-watch'); a.add_argument('action',nargs='?',default='status',choices=['status','login','podsumowanie','ludzie','off','on','usun']); a.add_argument('--kod',action='store_true'); a.add_argument('--godzin',type=int,default=24); a.add_argument('--numer',default='')
     sp.add_parser('wa-pomysly')
     a=sp.add_parser('dodatki'); a.add_argument('akcja',nargs='?',default='lista',choices=['lista','wlacz','wylacz']); a.add_argument('id',nargs='?')
     a=sp.add_parser('dodatek'); a.add_argument('id'); a.add_argument('polecenie',nargs='?',default=''); a.add_argument('reszta',nargs=argparse.REMAINDER)
