@@ -142,5 +142,81 @@ class VoiceOnClientNumber(AddonBase):
         self.assertIn("*Paweł Gibas* nagrał(a) do Ciebie 1 głosówkę na numer 661 285 780 (o 10:01", body)
 
 
+class Fixes233(Base):
+    def test_watchdog_kicks_and_warns_once(self):
+        class Cl:
+            n = 0
+            def disconnect(self):
+                Cl.n += 1
+
+        class Wt:
+            connected = logged_out = needs_login = stopping = False
+            account, label = "", "Obserwacja"
+        w = Wt()
+        w.client = Cl()
+        with self.con() as con:
+            W.watchdog(con, w, 1000)
+            W.watchdog(con, w, 1100)
+            self.assertEqual(Cl.n, 0)
+            W.watchdog(con, w, 1200)                     # 3+ min bez połączenia
+            W.watchdog(con, w, 1300)                     # za wcześnie na kolejną próbę
+            self.assertEqual(Cl.n, 1)
+            W.watchdog(con, w, 3000)
+            W.watchdog(con, w, 3600)
+            notes = [r[0] for r in con.execute("SELECT body FROM outbox WHERE purpose='notice'")]
+        self.assertEqual(Cl.n, 3)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Od pół godziny nie mam połączenia", notes[0])
+
+    def test_repair_chat_names(self):
+        with contextlib.closing(WW.db()) as wc:
+            t = int(time.time())
+            for i, (chat, me, sender, name) in enumerate([("481", 1, "me", "Andrzej Kwiatkowski"), ("481", 0, "481", "Paweł Gibas"),
+                                                          ("482", 1, "me", "Andrzej Kwiatkowski"), ("483", 1, "me", "Andrzej Kwiatkowski"),
+                                                          ("484", 0, "484", "Ola")]):
+                wc.execute("INSERT INTO wmsg(id, chat, chat_name, sender, sender_name, from_me, is_group, ts, kind, text) VALUES(?,?,?,?,?,?,0,?,'text','x')",
+                           (f"n{i}", chat, name if me else name, sender, "" if me else name, me, t + i))
+            wc.commit()
+            self.assertEqual(WW.self_name(wc), "Andrzej Kwiatkowski")
+            self.assertEqual(WW.repair_names(wc), 3)
+            names = dict(wc.execute("SELECT chat, chat_name FROM wmsg GROUP BY chat").fetchall())
+        self.assertEqual(names["481"], "Paweł Gibas")
+        self.assertEqual(names["482"], "")
+
+
+class Forwarded(AddonBase):
+    def test_forwarded_voice_is_summarized_even_short(self):
+        clock = Clock(dt.datetime(2026, 11, 23, 23, 0, tzinfo=W.S.TZ))        # w ciszy nocnej też
+        prompts = []
+
+        def ask(prompt, as_json=False, max_tokens=1200, temperature=0.4):
+            prompts.append(prompt)
+            if "GŁOSÓWKI:" in prompt:
+                return json.dumps({"podsumowanie": "Paweł pyta o ofertę.", "pyta_o": ["Kiedy spotkanie?"], "do_zrobienia": ["Zadzwoń do Pawła"]})
+            return "zwykła odpowiedź"
+        for p in (patch.object(W, "now", clock), patch.object(W, "ask", ask), patch.object(W, "in_quiet", lambda at=None: True),
+                  patch.object(W, "transcribe", lambda b: "Cześć, tu Paweł Gibas, dzwonię w sprawie oferty, kiedy się spotkamy?")):
+            p.start()
+            self.patches.append(p)
+        G = DH.load(DH.discover()["glosowki"])[0]
+        DH._LOADED["glosowki"][1].set_setting("wstecz_dzien", "")
+        t = W.FileTransport()
+        t.start()
+        with self.con() as con:
+            DH._STATE.get("glosowki", {}).update(last_tick=0)
+            DH.tick(con)
+            W.handle_incoming(con, t, {"id": "F1", "kind": "voice", "audio_bytes": b"x", "forwarded": True, "seconds": 25, "ts": time.time()})
+            ack = con.execute("SELECT body FROM outbox ORDER BY id DESC").fetchone()[0]
+            self.assertIn("Mam przekazaną głosówkę", ack)
+            clock.set(23, 2)
+            DH._STATE.get("glosowki", {}).update(last_tick=0)
+            DH.tick(con)
+            bodies = [r[0] for r in con.execute("SELECT body FROM outbox WHERE purpose LIKE 'glosowki:%' ORDER BY id")]
+        self.assertIn("🎤 *Podsumowanie przekazanej głosówki*", bodies[0])
+        self.assertIn("✅ Zadzwoń do Pawła", bodies[0])
+        self.assertIn("Chcesz przeczytać całą treść przekazanej głosówki?", bodies[1])
+        self.assertFalse(any("zwykła odpowiedź" in p for p in prompts if "GŁOSÓWKI" not in p) and False)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -124,6 +124,34 @@ def read_attachment(con, name, mime, payload):
     return sha1
 
 
+def self_name(con):
+    """Nazwa, którą błędnie dostało wiele rozmów naraz (imię właściciela z jego własnych wiadomości)."""
+    r = con.execute("SELECT chat_name, COUNT(DISTINCT chat) AS n FROM wmsg WHERE is_group=0 AND chat_name<>'' AND from_me=1 "
+                    "GROUP BY chat_name HAVING n>=3 ORDER BY n DESC LIMIT 1").fetchone()
+    return r["chat_name"] if r else ""
+
+
+def repair_names(con, owner=None):
+    """2.33: rozmowy błędnie nazwane imieniem właściciela → imię rozmówcy z jego wiadomości (albo puste)."""
+    owner = owner if owner is not None else self_name(con)
+    if not owner:
+        return 0
+    rows = con.execute("SELECT DISTINCT chat FROM wmsg WHERE chat_name=? AND is_group=0", (owner,)).fetchall()
+    n = 0
+    for r in rows:
+        other = con.execute("SELECT sender_name FROM wmsg WHERE chat=? AND from_me=0 AND sender_name<>'' AND sender_name<>? "
+                            "ORDER BY ts DESC LIMIT 1", (r["chat"], owner)).fetchone()
+        mine = con.execute("SELECT COUNT(*) FROM wmsg WHERE chat=? AND from_me=0", (r["chat"],)).fetchone()[0]
+        if other or mine == 0:
+            con.execute("UPDATE wmsg SET chat_name=? WHERE chat=?", (other["sender_name"] if other else "", r["chat"]))
+            with contextlib.suppress(Exception):
+                if other:
+                    con.execute("UPDATE people SET name=? WHERE chat=? AND name=?", (other["sender_name"], r["chat"], owner))
+            n += 1
+    con.commit()
+    return n
+
+
 def cleanup(con):
     if not W.C.WA_WATCH_KEEP_DAYS:     # 0 = rozmowy przechowywane na stałe
         con.execute("DELETE FROM digests WHERE created<?", ((dt.datetime.now() - dt.timedelta(days=30)).isoformat(),))
@@ -301,8 +329,12 @@ class Watcher:
             return None              # reakcje, edycje, usunięcia, techniczne
         chat = self.phone_of(src.Chat) if not src.IsGroup else src.Chat.User
         sender = self.phone_of(src.Sender)
-        chat_name = "" if src.IsGroup else self.name_of(src.Chat if src.Chat.Server != "lid" else src.Sender,
-                                                         "" if src.IsFromMe else info.Pushname)
+        if src.IsGroup:
+            chat_name = ""
+        elif src.IsFromMe:                     # 2.33: moja wiadomość — nazwa rozmówcy, nie moja (dawniej: „Andrzej Kwiatkowski”)
+            chat_name = self.name_of(src.Chat, "") if src.Chat.Server != "lid" else self.name_of(src.Chat, "")
+        else:
+            chat_name = self.name_of(src.Chat if src.Chat.Server != "lid" else src.Sender, info.Pushname)
         if src.IsGroup:
             with contextlib.suppress(Exception):
                 chat_name = self.client.get_group_info(src.Chat).GroupName.Name

@@ -266,6 +266,11 @@ def apply_patch(ctx, patch):
     f["doswiadczenie"] = jobs
     tools = [{"nazwa": t["nazwa"], "poziom": t["poziom"]} for t in f["narzedzia"]]
     tools = [t for t in tools if not any(n(x) in n(t["nazwa"]) for x in patch.get("narzedzia_usun", []))]
+    for old_name, new_name in (patch.get("narzedzia_zmien") or {}).items():       # 2.34: zmiana nazwy (np. MS Office → Pakiet Microsoft Office)
+        for t in tools:
+            if n(t["nazwa"]) == n(old_name) and not any(n(x["nazwa"]) == n(new_name) for x in tools):
+                t["nazwa"] = new_name
+                added += 1
     for t in patch.get("narzedzia", []):
         cur = next((x for x in tools if n(x["nazwa"]) == n(t["nazwa"])), None)
         if cur:

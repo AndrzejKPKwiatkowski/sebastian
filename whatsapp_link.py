@@ -181,8 +181,16 @@ class LinkedTransport:
         with contextlib.suppress(Exception):
             from neonize.utils.enum import ReceiptType
             self.client.mark_read(info.ID, chat=src.Chat, sender=src.Sender, receipt=ReceiptType.READ)
+        for f in ("ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"):
+            with contextlib.suppress(Exception):
+                if m.HasField(f) and getattr(m, f).HasField("message"):
+                    m = getattr(m, f).message
         if m.HasField("audioMessage"):
-            return {"id": info.ID, "kind": "voice", "text": "", "audio_bytes": self.client.download_any(m), "ts": ts, "from": who}
+            fwd = False
+            with contextlib.suppress(Exception):
+                fwd = bool(m.audioMessage.contextInfo.isForwarded)
+            return {"id": info.ID, "kind": "voice", "text": "", "audio_bytes": self.client.download_any(m), "ts": ts, "from": who,
+                    "forwarded": fwd, "seconds": int(getattr(m.audioMessage, "seconds", 0) or 0)}     # 2.33: przekazana głosówka
         text = m.conversation or (m.extendedTextMessage.text if m.HasField("extendedTextMessage") else "")
         if not text.strip():
             return None

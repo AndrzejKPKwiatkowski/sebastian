@@ -1720,6 +1720,11 @@ def make_app(ctx, hosts=None):
                         chosen = [x for x in request.form.getlist("kursy") if x in pool]
                         if chosen:
                             sel["kursy"] = chosen
+                    if "narzedzia_formularz" in request.form:              # 2.34: narzędzia zaznaczone przez Agę
+                        pool = {t["id"] for t in f["narzedzia"]}
+                        chosen = [x for x in request.form.getlist("narzedzia") if x in pool]
+                        if chosen:
+                            sel["narzedzia"] = chosen
                     if "cechy_formularz" in request.form:                  # 2.22: cechy zaznaczone przez Agę
                         pool = {c["id"] for c in f.get("cechy", [])}
                         chosen = [x for x in request.form.getlist("cechy") if x in pool]
@@ -1747,9 +1752,11 @@ def make_app(ctx, hosts=None):
                          "inne": [t for t in now if t not in pool], "wlasne": j["id"] in sel.get("wlasne_punkty", {})})
         traits = [{"id": c["id"], "t": c["tekst"], "on": c["id"] in sel.get("cechy", [])} for c in f.get("cechy", [])]
         courses = [{"id": k["id"], "t": k["tekst"], "on": k["id"] in sel.get("kursy", [])} for k in D.courses_newest_first(f["kursy"])]
+        tools = [{"id": t["id"], "t": t["nazwa"] + (f" – {t['poziom']}" if t["poziom"] else ""), "on": t["id"] in sel.get("narzedzia", [])}
+                 for t in f["narzedzia"]]
         rodo_default = R.consent_clause(a.get("firma", ""), a.get("rodo") or "", "" if a["zrodlo"] == "spontaniczna" else (a.get("stanowisko") or ""))
         rodo_now = sel.get("rodo_aga") or rodo_default
-        return render_template("edytuj_cv.html", a=a, tab="", profil=profile, rows=rows, locked=locked, n=D.POINTS_PER_JOB, cechy=traits, kursy=courses,
+        return render_template("edytuj_cv.html", a=a, tab="", profil=profile, rows=rows, locked=locked, n=D.POINTS_PER_JOB, cechy=traits, kursy=courses, narzedzia=tools,
                                rodo_now=rodo_now, rodo_own=bool(sel.get("rodo_aga")), rodo_employer=bool(a.get("rodo") and R.is_consent(a["rodo"])),
                                zrodlo=sel.get("profil_zrodlo", ""), edited=bool(sel.get("wlasne_punkty") or sel.get("ukryte") or sel.get("pokazane") or sel.get("rodo_aga")
                                                                                 or sel.get("profil_zrodlo") == "aga"))

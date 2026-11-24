@@ -468,3 +468,11 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.32
 
 `test_obserwacja_konta.py`: rozpakowanie głosówek znikających i jednorazowych; pobieranie świeżych głosówek z historii (starsze bez nagrania); zapis numeru konta i długości, log przy błędzie przepisania i braku nagrania; lista dodatkowych numerów i ścieżki sesji; `wa-watch login --numer` zapisuje numer, `status` go pokazuje; tik dodatkowego konta zapisuje wiadomości i raz ostrzega o wylogowaniu; podsumowanie głosówki z numerem, na który przyszła.
+
+# Weryfikacja 2.33
+
+`test_obserwacja_konta.py` (Fixes233, Forwarded): strażnik połączenia obserwacji (ponowne łączenie po 3 min, co 5 min, jedna wiadomość po 30 min); naprawa nazw rozmów błędnie nazwanych imieniem właściciela; przekazana głosówka → potwierdzenie, podsumowanie (także w ciszy nocnej) i pytanie o całą treść.
+
+# Weryfikacja 2.34
+
+`Tools234`: zmiana nazwy MS Office → Pakiet Microsoft Office bez duplikatu; wybór więcej niż 7 narzędzi; sekcja „Narzędzia” w „Edytuj CV” zapisuje wybór; w CV tylko zaznaczone narzędzia.

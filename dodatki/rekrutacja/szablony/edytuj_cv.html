@@ -38,6 +38,17 @@
   </div>
   {% endif %}
 
+  {% if narzedzia %}
+  <div class="card">
+    <h2>Narzędzia</h2>
+    <p class="small soft">Sebastian zaznaczył narzędzia, które pasują do tej oferty. Zmień, jeśli chcesz. Nowe narzędzie albo poziom dodasz w zakładce Ustawienia → Twoje dane.</p>
+    <input type="hidden" name="narzedzia_formularz" value="1">
+    <div class="traits courses">{% for t in narzedzia %}
+      <label class="check small"><input type="checkbox" name="narzedzia" value="{{ t.id }}" {{ 'checked' if t.on }} {{ 'disabled' if locked }}> {{ t.t }}</label>
+    {% endfor %}</div>
+  </div>
+  {% endif %}
+
   {% if cechy %}
   <div class="card">
     <h2>Cechy</h2>

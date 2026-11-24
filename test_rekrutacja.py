@@ -2576,6 +2576,49 @@ class Courses223(RekrutacjaBase):
         self.assertEqual(json.loads(self.row(aid)["wybor"])["kursy"], [efg])
 
 
+class Tools234(RekrutacjaBase):
+    """2.34: narzędzia do wyboru w „Edytuj CV”; „MS Office” → „Pakiet Microsoft Office”."""
+    def test_tools_rename_and_editable(self):
+        self.mod.apply_patch(self.ctx, {"narzedzia": [{"nazwa": "MS Office", "poziom": ""}] +
+                                        [{"nazwa": f"Narzędzie {i}", "poziom": ""} for i in range(1, 10)]})
+        self.mod.apply_patch(self.ctx, {"czesci": [{"id": "2.34", "narzedzia_zmien": {"MS Office": "Pakiet Microsoft Office"},
+                                                    "narzedzia": [{"nazwa": "Pakiet Microsoft Office", "poziom": ""}]}]})
+        f = self.R.load_facts(self.ctx)
+        names = [t["nazwa"] for t in f["narzedzia"]]
+        self.assertIn("Pakiet Microsoft Office", names)
+        self.assertNotIn("MS Office", names)
+        self.assertEqual(names.count("Pakiet Microsoft Office"), 1)
+        self.assertIn("Pakiet Microsoft Office", self.R.TOOLS)
+        ids = {t["nazwa"]: t["id"] for t in f["narzedzia"]}
+        many = list(ids.values())[:10]
+        self.assertEqual(self.D.clean_selection(f, {"narzedzia": many})["narzedzia"], many)       # więcej niż 7
+        self.ready()
+        aid = self.add()
+        self.P.prepare(self.ctx, aid)
+        from werkzeug.security import generate_password_hash
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "haslo", generate_password_hash("poprawne123"))
+        app = self.P.make_app(self.ctx)
+        app.config.update(TESTING=True)
+        cl = app.test_client()
+        cl.post("/login", data={"haslo": "poprawne123"})
+        with cl.session_transaction() as sess:
+            sess["csrf"] = "t"
+        page = cl.get(f"/aplikacja/{aid}/cv").data.decode()
+        self.assertIn('name="narzedzia"', page)
+        self.assertIn("Pakiet Microsoft Office", page)
+        shown = json.loads(self.row(aid)["wybor"])["kolejnosc"]
+        pick = [ids["Pakiet Microsoft Office"], ids["Narzędzie 3"]]
+        cl.post(f"/aplikacja/{aid}/cv", data={"csrf": "t", "co": "zapisz", "profil": "", "pokaz": shown, "narzedzia_formularz": "1", "narzedzia": pick})
+        self.assertEqual(json.loads(self.row(aid)["wybor"])["narzedzia"], pick)
+        import fitz
+        out = self.ctx.folder() / "cv_narz.pdf"
+        self.D.render_cv(f, self.D.clean_selection(f, {"narzedzia": pick}), out)
+        text = fitz.open(out)[0].get_text()
+        self.assertIn("Pakiet Microsoft Office", text)
+        self.assertNotIn("Narzędzie 4", text)
+
+
 class NoSkills224(RekrutacjaBase):
     """2.24: w CV „Cechy” zamiast „Umiejętności”; nowa cecha „Wysoka kultura osobista”."""
     def test_cv_has_traits_not_skills(self):

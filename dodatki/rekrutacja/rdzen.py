@@ -62,7 +62,7 @@ RODO = ("Wyrażam zgodę na przetwarzanie moich danych osobowych dla potrzeb nie
 
 TOOLS = ["Word", "Excel", "PowerPoint", "Outlook", "Microsoft Teams", "Dokumenty i Arkusze Google", "Canva",
          "ChatGPT i narzędzia AI", "Zoom / Google Meet", "Systemy CRM", "Systemy dokumentacji medycznej",
-         "Trello / Asana", "Media społecznościowe (obsługa profili)", "WordPress"]
+         "Trello / Asana", "Media społecznościowe (obsługa profili)", "WordPress", "Pakiet Microsoft Office"]
 LEVELS = ["", "podstawowy", "dobry", "bardzo dobry"]
 def is_consent(text):
     """Czy tekst to naprawdę klauzula zgody (a nie np. informacja o przetwarzaniu danych przez pracodawcę)."""

@@ -44,6 +44,7 @@ def db(ctx):
     con.executescript("""
     CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
     CREATE TABLE IF NOT EXISTS uzyte(id TEXT PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS przekazane(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, tekst TEXT, paczka INTEGER DEFAULT 0);
     CREATE TABLE IF NOT EXISTS paczki(
         id INTEGER PRIMARY KEY AUTOINCREMENT, chat TEXT, osoba TEXT, od_ts INTEGER, do_ts INTEGER, ile INTEGER,
         sekundy REAL, szacunek INTEGER DEFAULT 0, wstecz INTEGER DEFAULT 0, ids TEXT, tresc TEXT, konto TEXT DEFAULT '',
@@ -163,7 +164,8 @@ def transcript(ctx, p, numbered=True):
 def summarize(ctx, p):
     owner = (ctx.owner_name() or "właściciel").split()[0]
     text = transcript(ctx, p, numbered=False)[:24000]
-    prompt = f"""Jesteś asystentem {owner}a. Poniżej są głosówki, które {p['osoba']} nagrał(a) do {owner}a na WhatsAppie,
+    who = "ktoś (głosówkę przekazał Ci właściciel)" if p["osoba"].startswith("Przekazan") else p["osoba"]
+    prompt = f"""Jesteś asystentem {owner}a. Poniżej są głosówki, które {who} nagrał(a) do {owner}a na WhatsAppie,
 przepisane automatycznie (mogą być błędy rozpoznawania mowy — popraw je w myślach, nie cytuj ich).
 
 Zwróć wyłącznie JSON:
@@ -193,7 +195,11 @@ def summary_text(ctx, p, s):
     length = ("ok. " if p["szacunek"] else "") + mmss(p["sekundy"]) + " min"
     acc = p["konto"] if "konto" in p.keys() else ""
     where = f" na numer {acc[2:5]} {acc[5:8]} {acc[8:]}" if acc.startswith("48") and len(acc) == 11 else (f" na numer +{acc}" if acc else "")
-    lines = [f"Cześć{' ' + owner if owner else ''}! 🎤 *{p['osoba']}* nagrał(a) do Ciebie {n} {plural(n, 'głosówkę', 'głosówki', 'głosówek')}{where} "
+    if p["osoba"].startswith("Przekazan"):
+        head = f"🎤 *Podsumowanie {'przekazanej głosówki' if n == 1 else f'{n} przekazanych głosówek'}* (ok. {mmss(p['sekundy'])} min)"
+    else:
+        head = None
+    lines = [head] if head else [f"Cześć{' ' + owner if owner else ''}! 🎤 *{p['osoba']}* nagrał(a) do Ciebie {n} {plural(n, 'głosówkę', 'głosówki', 'głosówek')}{where} "
              f"({when}, razem {length})" + (" — *pilne*" if s and s.get("pilne") else "") + "."]
     if s:
         lines += ["", f"*O czym:* {s['podsumowanie']}"]
@@ -205,12 +211,33 @@ def summary_text(ctx, p, s):
     return "\n".join(lines) + f"\n\n_(nr {p['id']})_"
 
 
-def deliver(ctx, con, now_ts=None):
-    """Wysyła podsumowania paczek, które czekają (poza ciszą). Zwraca liczbę wysłanych."""
-    if ctx.in_quiet() and not ctx.settings().get("w_ciszy"):
+FORWARDED = "Przekazana głosówka"
+
+
+def collect_forwarded(ctx, con, now_ts):
+    """2.33: głosówki przekazane Sebastianowi przez właściciela (zawsze podsumowywane, bez progu 2 minut).
+    Kilka przekazanych jedna po drugiej (do 40 s przerwy) → jedno podsumowanie."""
+    rows = con.execute("SELECT * FROM przekazane WHERE paczka=0 ORDER BY ts").fetchall()
+    if not rows or now_ts - rows[-1]["ts"] < 40:
         return 0
+    secs = [len(re.findall(r"\w+", r["tekst"] or "")) / float(ctx.settings().get("slow_na_sekunde") or 2.2) for r in rows]
+    tresc = json.dumps([{"ts": r["ts"], "s": s, "text": (r["tekst"] or "").strip()} for r, s in zip(rows, secs)], ensure_ascii=False)
+    cur = con.execute("INSERT INTO paczki(chat, osoba, od_ts, do_ts, ile, sekundy, szacunek, wstecz, ids, tresc, utworzono, konto) "
+                      "VALUES(?,?,?,?,?,?,1,0,?,?,?,'')",
+                      ("", FORWARDED if len(rows) == 1 else "Przekazane głosówki", rows[0]["ts"], rows[-1]["ts"], len(rows), sum(secs),
+                       json.dumps([f"fwd{r['id']}" for r in rows]), tresc, ctx.now().isoformat(timespec="seconds")))
+    con.executemany("UPDATE przekazane SET paczka=? WHERE id=?", [(cur.lastrowid, r["id"]) for r in rows])
+    con.commit()
+    return 1
+
+
+def deliver(ctx, con, now_ts=None):
+    """Wysyła podsumowania paczek, które czekają (poza ciszą; przekazane przez Ciebie — zawsze). Zwraca liczbę wysłanych."""
+    quiet = ctx.in_quiet() and not ctx.settings().get("w_ciszy")
     sent = 0
     for p in con.execute("SELECT * FROM paczki WHERE status='czeka' ORDER BY id").fetchall():
+        if quiet and not p["osoba"].startswith("Przekazan"):
+            continue
         s = None
         with contextlib.suppress(Exception):
             s = summarize(ctx, p)
@@ -219,7 +246,8 @@ def deliver(ctx, con, now_ts=None):
             con.commit()
             continue
         ctx.send_text(summary_text(ctx, p, s), "podsumowanie")
-        ctx.send_text(f"Chcesz przeczytać całą treść głosówek od {p['osoba']}? Odpisz *tak* — albo w dowolnym momencie *treść {p['id']}*.",
+        about = "przekazanej głosówki" if p["osoba"].startswith("Przekazan") else f"głosówek od {p['osoba']}"
+        ctx.send_text(f"Chcesz przeczytać całą treść {about}? Odpisz *tak* — albo w dowolnym momencie *treść {p['id']}*.",
                       "pytanie")
         con.execute("UPDATE paczki SET status='wyslana', podsumowanie=?, wyslano=? WHERE id=?",
                     (json.dumps(s, ensure_ascii=False) if s else "", ctx.now().isoformat(timespec="seconds"), p["id"]))
@@ -256,6 +284,7 @@ def tick(ctx):
                                   "ale obserwacja WhatsAppa ich nie zapisała (albo kontakt nazywa się inaczej). "
                                   "Na Macu: python sebastian.py dodatek glosowki sprawdz — pokaże, czyje głosówki są zapisane.", "wstecz")
         collect(ctx, con, int(start), now_ts=now_ts)
+        collect_forwarded(ctx, con, now_ts)
         deliver(ctx, con, now_ts)
 
 
@@ -322,6 +351,12 @@ def asked_last(ctx):
 
 
 def on_message(ctx, msg):
+    if msg.get("kind") == "przekazana":               # 2.33: przekazałeś Sebastianowi czyjąś głosówkę
+        with contextlib.closing(db(ctx)) as con:
+            first = not con.execute("SELECT 1 FROM przekazane WHERE paczka=0").fetchone()
+            con.execute("INSERT INTO przekazane(ts, tekst) VALUES(?,?)", (ctx.now().timestamp(), msg.get("text") or ""))
+            con.commit()
+        return "🎤 Mam przekazaną głosówkę — za chwilę wyślę podsumowanie." if first else True
     t = norm(msg["text"])
     if not t or len(t.split()) > 5:
         return None

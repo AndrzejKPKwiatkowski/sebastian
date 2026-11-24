@@ -1637,6 +1637,12 @@ def watch_tick(con, watcher):
         if meta_get(con, "watch_cleanup") != now().date().isoformat():
             meta_set(con, "watch_cleanup", now().date().isoformat())
             WW.cleanup(wc)
+        if meta_get(con, "watch_names_233") != now().date().isoformat():       # 2.33: naprawa nazw rozmów (raz dziennie)
+            meta_set(con, "watch_names_233", now().date().isoformat())
+            with contextlib.suppress(Exception):
+                n = WW.repair_names(wc)
+                if n:
+                    log.info(f"Obserwacja: poprawiono nazwy rozmów: {n}.")
     if watcher.queue.empty():                  # nauka i akta — gdy nie ma zaległych wiadomości do zapisu
         if time.time() - float(meta_get(con, "watch_learn_sync", "0") or 0) > 1800:
             meta_set(con, "watch_learn_sync", str(time.time()))
@@ -1651,10 +1657,37 @@ def watch_tick(con, watcher):
                 if n:
                     log.info(f"Obserwacja: zaktualizowano akta osób: {n}.")
     meta_set(con, "watch_connected", "1" if watcher.connected else "0")
+    watchdog(con, watcher)
     if (watcher.logged_out or watcher.needs_login) and not meta_get(con, "watch_logged_out"):
         meta_set(con, "watch_logged_out", now().isoformat(timespec="seconds"))
         enqueue(con, "text", "🔔 Straciłem wgląd w Twojego WhatsAppa (wylogowanie). Połącz ponownie na Macu: "
                              "python sebastian.py wa-watch login", purpose="notice", to="")
+
+
+def watchdog(con, watcher, when=None):
+    """2.33: obserwacja rozłączona dłużej niż 3 minuty → wymuszone ponowne połączenie (co 5 min);
+    po 30 minutach bez połączenia — jedna wiadomość do właściciela."""
+    when = when or time.time()
+    if watcher.connected or watcher.logged_out or watcher.needs_login or getattr(watcher, "stopping", False):
+        watcher.down_since = None
+        if getattr(watcher, "warned", False) and watcher.connected:
+            watcher.warned = False
+            log.info(f"{getattr(watcher, 'label', 'Obserwacja')}: połączenie wróciło.")
+        return
+    since = getattr(watcher, "down_since", None)
+    if since is None:
+        watcher.down_since = when
+        return
+    if when - since >= 180 and when - getattr(watcher, "kicked", 0) >= 300:
+        watcher.kicked = when
+        log.warning(f"{getattr(watcher, 'label', 'Obserwacja')}: brak połączenia od {int((when - since) // 60)} min — łączę ponownie.")
+        with contextlib.suppress(Exception):
+            watcher.client.disconnect()               # pętla w wątku obserwacji połączy się od nowa
+    if when - since >= 1800 and not getattr(watcher, "warned", False):
+        watcher.warned = True
+        acc = getattr(watcher, "account", "")
+        enqueue(con, "text", f"🔔 Od pół godziny nie mam połączenia z WhatsAppem{' +' + acc if acc else ''} (obserwacja) — próbuję sam. "
+                             "Jeśli to potrwa, uruchom ponownie: python sebastian.py wa-start", purpose="notice", to="")
 
 
 def watch_extra():
@@ -1673,6 +1706,7 @@ def watch_tick_extra(con, watcher):
             n += 1
     key = f"watch:{watcher.account}"
     meta_set(con, key + ":connected", "1" if watcher.connected else "0")
+    watchdog(con, watcher)
     if (watcher.logged_out or watcher.needs_login) and not meta_get(con, key + ":logged_out"):
         meta_set(con, key + ":logged_out", now().isoformat(timespec="seconds"))
         enqueue(con, "text", f"🔔 Straciłem wgląd w WhatsAppa na numerze +{watcher.account} (wylogowanie). Połącz ponownie na Macu: "
@@ -1736,7 +1770,8 @@ def handle_incoming(con, transport, msg):
             transport.typing(True, to or None)
         log.info(f"Wiadomość od: {'właściciel' if is_owner(user) else (user['name'] or 'rodzina')} "
                  f"({'głos' if msg['kind'] == 'voice' else 'tekst'}, {len(text)} znaków).")
-        if not addons_message(con, msg["kind"], text, user):           # 2.13: dodatki widzą też wiadomości innych osób z listy
+        kind = "przekazana" if msg["kind"] == "voice" and msg.get("forwarded") else msg["kind"]   # 2.33: przekazana głosówka → podsumowanie
+        if not addons_message(con, kind, text, user):
             reply(con, text, voice_in=msg["kind"] == "voice", user=user)
         with contextlib.suppress(Exception):
             transport.typing(False, to or None)

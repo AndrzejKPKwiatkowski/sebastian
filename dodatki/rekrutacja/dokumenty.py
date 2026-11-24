@@ -175,7 +175,7 @@ def clean_selection(f, sel):
            "umiejetnosci": pick("umiejetnosci", [u["id"] for u in f["umiejetnosci"]], 6, 3),
            "cechy": pick("cechy", [c["id"] for c in f.get("cechy", [])], 40, 1),   # Aga może zaznaczyć dowolnie dużo (2.25)
            "kursy": pick("kursy", [k["id"] for k in f["kursy"]], 30, 1),
-           "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 7, 1)}
+           "narzedzia": pick("narzedzia", [t["id"] for t in f["narzedzia"]], 20, 1)}   # 2.34: Aga wybiera w „Edytuj CV”
     out["uklad"] = CV_LAYOUT
     rodo_own = re.sub(r"\s+", " ", str(sel.get("rodo_aga") or "")).strip()
     if rodo_own:
