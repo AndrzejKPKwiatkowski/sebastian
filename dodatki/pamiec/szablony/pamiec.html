@@ -47,16 +47,42 @@ details summary{cursor:pointer;color:var(--acc)}.facts form{display:inline}
 <div class="card"><h2>Nakarm mnie wiedzą</h2>
 <div class="grid"><div>
 <form method="post" action="{{ prefix }}/wgraj" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="osoba" value="{{ p.id }}">
-<p><input type="file" name="plik" multiple></p><button class="main">Wgraj i ucz się</button></form>
+<p><input type="file" name="plik" multiple></p>
+<p class="small"><label><input type="radio" name="cel" value="osoba" checked> o mnie (eksport czatu, CV, notatki)</label><br>
+<label><input type="radio" name="cel" value="biblioteka"> do biblioteki wiedzy (kursy, książki, materiały)</label>
+<input type="text" name="rok" placeholder="rok wydania (opcjonalnie)" style="min-width:0;width:170px;margin-left:6px"></p>
+<button class="main">Wgraj</button></form>
 <p class="small mut">Eksport z <b>ChatGPT</b>: Ustawienia → Kontrola danych → Eksportuj dane (zip z maila).<br>
 <b>Claude</b>: Ustawienia → Prywatność → Eksportuj dane.<br><b>Gemini</b>: takeout.google.com → „Moja aktywność” → Aplikacje Gemini.<br>
-Pliki: PDF, Word, Excel, PowerPoint, tekst, zdjęcia z tekstem, zip. Bardzo duże wrzuć do folderu:<br><code>{{ drop }}</code></p>
+Pliki: PDF, Word, Excel, PowerPoint, tekst, zdjęcia z tekstem, zip. Bardzo duże wrzuć do folderu:<br><code>{{ drop }}</code>
+(kursy i książki: do podfolderu <code>biblioteka</code>)</p>
 </div><div>
 <form method="post" action="{{ prefix }}/tekst"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="osoba" value="{{ p.id }}">
 <p><input type="text" name="nazwa" placeholder="Tytuł (np. Notatki o mojej pracy)"></p>
+<p class="small"><label><input type="radio" name="cel" value="osoba" checked> o mnie</label> &nbsp;
+<label><input type="radio" name="cel" value="biblioteka"> do biblioteki wiedzy</label></p>
 <textarea name="tekst" placeholder="Wklej cokolwiek: opis siebie, notatki, rozmowę, CV, listę ludzi i kim są…"></textarea>
 <p><button class="main">Zapamiętaj</button></p></form></div></div>
 <p class="small mut">Uczę się też z tego, co piszesz i nagrywasz do mnie na WhatsAppie. Napisz tam <b>co o mnie wiesz</b> albo <b>pytaj mnie</b>.</p>
+</div>
+
+<div class="card"><h2>📚 Biblioteka wiedzy</h2>
+<p class="small mut">Twoje kursy, książki i materiały ({{ library|length }} źródeł, {{ lib_pieces }} fragmentów). Korzystam z nich, gdy rozmawiamy,
+a na prośbę piszę poradnik (PDF) albo wyjaśnienie — tylko na ich podstawie. Gdy materiały się różnią, wygrywa nowszy.
+Na WhatsAppie: <b>poradnik: temat</b> · <b>wyjaśnij: temat</b> · <b>biblioteka</b>.</p>
+<form class="row" method="post" action="{{ prefix }}/zlecenie"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="osoba" value="{{ p.id }}">
+<input type="text" name="temat" placeholder="Temat, np. jak prowadzić pierwszą rozmowę z klientem">
+<button class="main" name="rodzaj" value="poradnik">Napisz poradnik</button><button name="rodzaj" value="wyjasnienie">Wyjaśnij</button></form>
+{% if orders %}<table style="margin-top:10px">{% for j in orders %}<tr><td><b>{{ 'Poradnik' if j.rodzaj == 'poradnik' else 'Wyjaśnienie' }}:</b> {{ j.temat }}
+<span class="small mut">· {{ j.utworzono[:16]|replace('T',' ') }}</span>
+{% if j.status in ('czeka','w_toku') %}<br><span class="small mut">⏳ piszę… odśwież za chwilę</span>
+{% else %}{% if j.plik %} · <a href="{{ prefix }}/plik/{{ j.id }}">pobierz PDF</a>{% endif %}
+<details><summary class="small">pokaż treść</summary><div class="sec small">{{ j.wynik }}</div></details>{% endif %}</td></tr>{% endfor %}</table>{% endif %}
+<table style="margin-top:10px">{% for x in library %}<tr><td>{{ x.nazwa }}{% if x.rok %} <span class="tag">{{ x.rok }}</span>{% endif %}<br>
+<span class="small mut">{{ x.dodano[:10] }}{% if x.notatka %} · {{ x.notatka }}{% endif %}</span></td>
+<td style="white-space:nowrap">{{ 'nieaktualne' if x.status == 'nieaktualne' else status_pl.get(x.status, x.status) }}
+{% if x.status in ('gotowe','nieaktualne') %}<form method="post" action="{{ prefix }}/nieaktualne" style="display:inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="osoba" value="{{ p.id }}"><input type="hidden" name="id" value="{{ x.id }}"><button class="small" title="Nieaktualne materiały pomijam">{{ 'przywróć' if x.status == 'nieaktualne' else 'nieaktualne' }}</button></form>{% endif %}</td></tr>{% endfor %}
+{% if not library %}<tr><td class="mut">Pusto — wgraj kursy i książki wyżej, zaznaczając „do biblioteki wiedzy”.</td></tr>{% endif %}</table>
 </div>
 
 <div class="card"><h2>Co o Tobie wiem</h2>

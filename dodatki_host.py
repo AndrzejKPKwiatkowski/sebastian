@@ -15,7 +15,7 @@ from pathlib import Path
 
 W = None                      # moduł whatsapp (związany przez bind)
 log = logging.getLogger("sebastian.dodatki")
-HOST_VERSION = "2.34"
+HOST_VERSION = "2.35"
 PERMISSIONS = {
     "whatsapp.wysylanie": "wysyła Ci wiadomości i głosówki na WhatsAppie",
     "whatsapp.obserwacja": "czyta (tylko odczyt) Twoje rozmowy z obserwowanego WhatsAppa",
@@ -374,6 +374,21 @@ class Context:
             return Wm.enqueue(self._con, "text", text, purpose=f"{self.id}:{purpose}", to=phone)
         with contextlib.closing(Wm.db()) as c:
             return Wm.enqueue(c, "text", text, purpose=f"{self.id}:{purpose}", to=phone)
+
+    def send_file(self, path, text="", phone=None):
+        """2.35: plik (np. PDF) na WhatsAppie — do właściciela albo (z uprawnieniem whatsapp.uzytkownicy) do osoby z listy."""
+        self.need("whatsapp.wysylanie")
+        Wm = _w()
+        user = Wm.owner_user()
+        if phone and re.sub(r"\D", "", phone) != re.sub(r"\D", "", Wm.C.WA_OWNER_PHONE or ""):
+            self.need("whatsapp.uzytkownicy")
+            user = Wm.user_by_phone(phone)
+            if not user:
+                raise PermissionDenied(f"Numer {phone} nie jest na liście użytkowników Sebastiana")
+        if self._con is not None:
+            return Wm.send_file(self._con, user, path, text)
+        with contextlib.closing(Wm.db()) as c:
+            return Wm.send_file(c, user, path, text)
 
     def memory(self, phone=None, query="", limit=3000):
         """2.30: co Sebastian wie o osobie (domyślnie o właścicielu) — z dodatku Pamięć. '' gdy go nie ma."""

@@ -1,26 +1,60 @@
 {
   "id": "pamiec",
   "nazwa": "Pamięć — Sebastian uczy się o Tobie",
-  "wersja": "1.0.0",
-  "rdzen": "2.30",
-  "opis": "Każdy użytkownik ma własną pamięć. Sebastian uczy się z rozmów na WhatsAppie, z eksportów ChatGPT, Claude i Gemini, z Twoich plików i wklejonego tekstu. Lokalny model przerabia to w tle na fakty i profil (kim jesteś, praca, ludzie, sprawy, preferencje, cele, codzienność), a co jakiś czas pyta: „Zrozumiałem, że… — dobrze?”. Poprawki mają pierwszeństwo. Z pamięci korzystają odpowiedzi Sebastiana i inne dodatki.",
+  "wersja": "1.1.0",
+  "rdzen": "2.35",
+  "opis": "Każdy użytkownik ma własną pamięć. Sebastian uczy się z rozmów na WhatsAppie, z eksportów ChatGPT, Claude i Gemini, z Twoich plików i wklejonego tekstu. Lokalny model przerabia to w tle na fakty i profil (kim jesteś, praca, ludzie, sprawy, preferencje, cele, codzienność), a co jakiś czas pyta: „Zrozumiałem, że… — dobrze?”. Poprawki mają pierwszeństwo. Z pamięci korzystają odpowiedzi Sebastiana i inne dodatki. Biblioteka wiedzy (2.35): kursy i książki — Sebastian korzysta z nich w rozmowie i na prośbę pisze poradnik (PDF) albo wyjaśnienie wyłącznie na ich podstawie; nowsze materiały mają pierwszeństwo.",
   "domyslnie_wlaczony": true,
   "tik_co_sekund": 30,
-  "uprawnienia": ["whatsapp.wysylanie", "whatsapp.uzytkownicy", "model", "pamiec.odczyt"],
+  "uprawnienia": [
+    "whatsapp.wysylanie",
+    "whatsapp.uzytkownicy",
+    "model",
+    "pamiec.odczyt"
+  ],
   "pomoc": [
     "*co o mnie wiesz* — czego Sebastian się o Tobie nauczył · *pytaj mnie* — jego pytania „czy dobrze zrozumiałem?”",
     "na pytania odpisujesz: *1 tak, 2 nie — jak jest naprawdę, 3 tak* albo *wszystko się zgadza*",
-    "eksporty ChatGPT / Claude / Gemini i pliki wrzucasz w panelu: zakładka „Uczy się o Tobie”"
+    "eksporty ChatGPT / Claude / Gemini i pliki wrzucasz w panelu: zakładka „Uczy się o Tobie”",
+    "📚 *poradnik: temat* — poradnik w PDF z Twoich kursów i książek · *wyjaśnij: temat* · *biblioteka* — lista materiałów"
   ],
   "polecenia": [
-    {"nazwa": "status", "opis": "Ile faktów, pytań i źródeł ma każda osoba; foldery do wrzucania plików."},
-    {"nazwa": "wgraj", "opis": "Plik albo cały folder do nauki, np. wgraj ~/Downloads/chatgpt.zip \"Aga\" (oryginał zostaje)."},
-    {"nazwa": "pytania", "opis": "Pytania „czy dobrze zrozumiałem?” do osoby, np. pytania Aga."},
-    {"nazwa": "odpowiedz", "opis": "Odpowiedź na pytanie: odpowiedz 12 tak  |  odpowiedz 12 nie \"jak jest naprawdę\"."},
-    {"nazwa": "profil", "opis": "Co Sebastian wie o osobie, np. profil Andrzej."},
-    {"nazwa": "przetworz", "opis": "Przerób kolejkę od razu (np. przetworz 50) — normalnie dzieje się to w tle."},
-    {"nazwa": "ustawienia", "opis": "Pokazuje ustawienia dodatku."},
-    {"nazwa": "ustaw", "opis": "Zmienia ustawienie, np. ustaw pytania_godzina 20:00"}
+    {
+      "nazwa": "status",
+      "opis": "Ile faktów, pytań i źródeł ma każda osoba; foldery do wrzucania plików."
+    },
+    {
+      "nazwa": "poradnik",
+      "opis": "Poradnik z biblioteki wiedzy od razu w Terminalu, np. poradnik \"rozmowa z klientem\" Aga (PDF w data/dodatki/pamiec/poradniki)."
+    },
+    {
+      "nazwa": "wgraj",
+      "opis": "Plik albo cały folder do nauki, np. wgraj ~/Downloads/chatgpt.zip \"Aga\" (oryginał zostaje). Kursy i książki: dopisz --biblioteka."
+    },
+    {
+      "nazwa": "pytania",
+      "opis": "Pytania „czy dobrze zrozumiałem?” do osoby, np. pytania Aga."
+    },
+    {
+      "nazwa": "odpowiedz",
+      "opis": "Odpowiedź na pytanie: odpowiedz 12 tak  |  odpowiedz 12 nie \"jak jest naprawdę\"."
+    },
+    {
+      "nazwa": "profil",
+      "opis": "Co Sebastian wie o osobie, np. profil Andrzej."
+    },
+    {
+      "nazwa": "przetworz",
+      "opis": "Przerób kolejkę od razu (np. przetworz 50) — normalnie dzieje się to w tle."
+    },
+    {
+      "nazwa": "ustawienia",
+      "opis": "Pokazuje ustawienia dodatku."
+    },
+    {
+      "nazwa": "ustaw",
+      "opis": "Zmienia ustawienie, np. ustaw pytania_godzina 20:00"
+    }
   ],
   "ustawienia": {
     "nauka_w_tle": true,

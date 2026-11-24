@@ -476,3 +476,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.34
 
 `Tools234`: zmiana nazwy MS Office → Pakiet Microsoft Office bez duplikatu; wybór więcej niż 7 narzędzi; sekcja „Narzędzia” w „Edytuj CV” zapisuje wybór; w CV tylko zaznaczone narzędzia.
+
+# Weryfikacja 2.35
+
+`test_biblioteka.py`: wyszukiwanie bez polskich końcówek i znaków, tylko we własnej bibliotece, bez faktów o osobie; nowszy materiał wyżej, „nieaktualne” pomijane; „poradnik:” na WhatsAppie → PDF wysłany jako dokument; „wyjaśnij:” od Agi → odpowiedź do Agi; pusta biblioteka i brak trafień; fragmenty w zwykłych odpowiedziach; panel: wgranie do biblioteki z rokiem, zlecenie, pobranie PDF (cudzego nie); folder `biblioteka` i polecenie `poradnik`.

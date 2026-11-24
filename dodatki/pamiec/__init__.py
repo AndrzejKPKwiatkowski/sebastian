@@ -19,6 +19,7 @@ Z pamięci korzysta Sebastian przy odpowiedziach na WhatsAppie (każdy widzi tyl
 import contextlib, datetime as dt, mimetypes, os, re, shutil, threading, time
 from pathlib import Path
 
+from . import biblioteka as B
 from . import rdzen as R
 
 START_WORKER = os.environ.get("SEBASTIAN_TESTY") != "1"      # testy: bez wątku, work_once wołane ręcznie
@@ -26,6 +27,9 @@ _W = {"thread": None, "last_chat": 0.0, "state": "", "ctx": None}
 COMMANDISH = re.compile(r"^(pomoc|menu|zadania|lista|przeglad|pilne|poczta|kalendarz|jutro|dokumenty|status|cisza|wznow|"
                         r"zrobione|szczegoly|odpowiedz|pytania|pomysly|tresc|glosowki|przypomnij|przypomnienia|gwaranci|tak|nie|ok)\b")
 WHAT_YOU_KNOW = re.compile(r"^(co o mnie wiesz|czego sie o mnie nauczyles|czego sie o mnie dowiedziales|moj profil|co wiesz o mnie)\W*$")
+GUIDE_RE = re.compile(r"(?i)^\s*(?:zrób |zrob |stwórz |stworz |napisz |przygotuj )?(?:mi )?poradnik\s*(?:o|na temat|dla mnie o)?\s*[:\-–]?\s*(?P<temat>.+)$", re.S)
+EXPLAIN_RE = re.compile(r"(?i)^\s*(?:wyjaśnij|wyjasnij|wytłumacz|wytlumacz|z biblioteki|z moich materiałów|z moich materialow)\s*(?:mi)?\s*[:\-–]?\s*(?P<temat>.+)$", re.S)
+LIBRARY_RE = re.compile(r"^(biblioteka|moja biblioteka|biblioteka wiedzy)\W*$")
 ASK_ME = re.compile(r"^(pytaj mnie|zadaj (mi )?pytania|masz (do mnie )?pytania|pytania o mnie)\W*$")
 
 
@@ -73,16 +77,20 @@ def drop_folders(ctx, con):
     base = ctx.folder() / "wrzuc-tutaj"
     for p in R.people(con):
         box = base / p["folder"]
-        box.mkdir(parents=True, exist_ok=True)
+        (box / "biblioteka").mkdir(parents=True, exist_ok=True)      # 2.35: kursy i książki → biblioteka wiedzy
         for f in sorted(box.rglob("*")):
             if not f.is_file() or f.name.startswith(".") or time.time() - f.stat().st_mtime < 15:
                 continue                                       # jeszcze się kopiuje
+            lib = "biblioteka" in f.relative_to(box).parts[:-1]
             target = ctx.folder() / "wgrane" / p["id"] / f"{dt.datetime.now():%Y%m%d-%H%M%S}-{f.name}"
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(f), target)
-            R.add_source(con, p["id"], "plik", f.name, target)
+            if lib:
+                B.add(con, p["id"], f.name, target)
+            else:
+                R.add_source(con, p["id"], "plik", f.name, target)
             n += 1
-        for d in sorted((x for x in box.rglob("*") if x.is_dir()), reverse=True):
+        for d in sorted((x for x in box.rglob("*") if x.is_dir() and x.name != "biblioteka"), reverse=True):
             with contextlib.suppress(OSError):
                 d.rmdir()
     return n
@@ -132,9 +140,16 @@ def work_once(ctx, extract=None, chat_pause=None):
     """Jeden krok pracy w tle. True = coś zrobiono (pracuj dalej od razu)."""
     with contextlib.closing(con_of(ctx)) as con:
         did = drop_folders(ctx, con) + flush_chats(con) + seed_from_learner(ctx, con)
+        for job in con.execute("SELECT * FROM zlecenia WHERE status='czeka' ORDER BY id LIMIT 1").fetchall():
+            _W["state"] = f"piszę: {job['rodzaj']} „{job['temat']}”"
+            B.run_job(con, job, lambda prompt, tokens: ctx.ask(prompt, max_tokens=tokens, temperature=0.3), ctx.folder())
+            return True
         for src in con.execute("SELECT * FROM zrodla WHERE status='nowe' AND sciezka<>'' ORDER BY id LIMIT 1").fetchall():
             _W["state"] = f"czytam: {src['nazwa']}"
-            R.parse_source(con, src, extract)
+            if (src["cel"] if "cel" in src.keys() else "osoba") == "biblioteka":
+                B.index_source(con, src, extract)
+            else:
+                R.parse_source(con, src, extract)
             return True
         pause = float(ctx.settings().get("przerwa_po_rozmowie_s") if chat_pause is None else chat_pause)
         if time.time() - _W["last_chat"] < pause:              # ktoś właśnie rozmawia z Sebastianem — model dla niego
@@ -235,6 +250,29 @@ def daily_questions(ctx, con):
     return sent
 
 
+def deliver_jobs(ctx, con):
+    """2.35: gotowe poradniki i wyjaśnienia zamówione na WhatsAppie → do osoby, która prosiła."""
+    for j in con.execute("SELECT * FROM zlecenia WHERE kanal='whatsapp' AND status IN ('gotowe','blad') ORDER BY id").fetchall():
+        p = R.person(con, j["osoba"])
+        con.execute("UPDATE zlecenia SET status=? WHERE id=?", ("wyslane" if j["status"] == "gotowe" else "blad_wyslany", j["id"]))
+        con.commit()
+        if not p:
+            continue
+        owner = p["id"] == owner_id(ctx) or p.get("rola") == "wlasciciel"
+        phone = None if owner else p["telefon"]
+        if j["plik"] and Path(j["plik"]).exists():
+            with contextlib.suppress(Exception):
+                ctx.send_file(j["plik"], f"📚 Gotowe! Poradnik „{j['temat']}” z Twojej biblioteki wiedzy — w PDF poniżej.", phone)
+                continue
+        text = (f"📚 *{'Poradnik' if j['rodzaj'] == 'poradnik' else 'Wyjaśnienie'}: {j['temat']}*\n\n" if j["status"] == "gotowe" else "") + (j["wynik"] or "")
+        for i in range(0, len(text), 3300):
+            part = text[i:i + 3300]
+            if owner:
+                ctx.send_text(part, "biblioteka")
+            else:
+                ctx.send_to(p["telefon"], part, "biblioteka")
+
+
 def tick(ctx):
     with contextlib.closing(con_of(ctx)) as con:
         if time.time() - float(R.meta(con, "osoby_sync") or 0) > 3600:
@@ -242,6 +280,7 @@ def tick(ctx):
             R.meta(con, "osoby_sync", str(time.time()))
             con.commit()
         daily_questions(ctx, con)
+        deliver_jobs(ctx, con)
     ensure_worker(ctx)
 
 
@@ -275,6 +314,28 @@ def handle(ctx, msg):
                 left = [q for q in R.open_questions(con, pid, ("zadane",)) if q["kanal"] == "whatsapp"]
                 return (f"Dzięki, {R.first_name(p)}! 🐑 {' · '.join(bits)}. Zapamiętane." +
                         (f" Zostało jeszcze {len(left)} — odpisz, kiedy zechcesz." if left else ""))
+        m = GUIDE_RE.match(text) or EXPLAIN_RE.match(text)
+        if m:
+            kind = "poradnik" if GUIDE_RE.match(text) else "wyjasnienie"
+            topic = m.group("temat").strip(" .?!„”\"")
+            if len(topic) < 3:
+                return "O czym? Napisz np. *poradnik: jak prowadzić rozmowę z klientem* albo *wyjaśnij: IKZE*."
+            if not B.sources(con, pid):
+                return ("📚 Twoja biblioteka wiedzy jest jeszcze pusta. Wgraj kursy i książki w panelu: zakładka „Uczy się o Tobie” → "
+                        "„Nakarm mnie wiedzą” → zaznacz „do biblioteki wiedzy”.")
+            n = len(B.search(con, pid, topic, 14))
+            if not n:
+                return f"📚 W Twojej bibliotece nie znalazłem nic o „{topic}”. Spróbuj innymi słowami albo wgraj materiały na ten temat."
+            B.queue(con, pid, kind, topic, "whatsapp")
+            return (f"📚 Piszę {'poradnik' if kind == 'poradnik' else 'wyjaśnienie'} „{topic}” na podstawie Twoich materiałów "
+                    f"({n} pasujących fragmentów). Przyślę {'PDF' if kind == 'poradnik' else 'odpowiedź'} za kilka minut.")
+        if LIBRARY_RE.match(t):
+            srcs = B.sources(con, pid)
+            if not srcs:
+                return "📚 Biblioteka wiedzy jest pusta — wgraj kursy i książki w panelu (Uczy się o Tobie → Nakarm mnie wiedzą)."
+            return ("📚 *Twoja biblioteka wiedzy:*\n" + "\n".join(f"• {x['nazwa']}" + (f" ({x['rok']})" if x["rok"] else "") +
+                                                               f" — {R.STATUS_PL.get(x['status'], x['status'])}" for x in srcs[:25]) +
+                    "\n\nNapisz *poradnik: temat* albo *wyjaśnij: temat*.")
         if WHAT_YOU_KNOW.match(t):
             prof = R.profile_text(con, pid, limit=3200)
             s = R.stats(con, pid)
@@ -302,7 +363,10 @@ def on_user_message(ctx, msg):
 def context(ctx, question, user):
     """Dla odpowiedzi Sebastiana na WhatsAppie: co wie o osobie, która pyta (tylko o niej)."""
     with contextlib.closing(con_of(ctx)) as con:
-        return R.profile_text(con, pid_of(ctx, user), question, 2500)
+        pid = pid_of(ctx, user)
+        out = R.profile_text(con, pid, question, 2500)
+        lib = B.context(con, pid, question)              # 2.35: fragmenty jej kursów i książek
+        return (out + "\n\n" + lib).strip() if lib else out
 
 
 def memory(ctx, phone=None, query="", limit=3000):
@@ -338,6 +402,8 @@ def _cmd_upload(ctx, args):
     if not args:
         print('Użycie: python sebastian.py dodatek pamiec wgraj ~/Downloads/chatgpt-eksport.zip "Aga"')
         return 1
+    lib = "--biblioteka" in args
+    args = [a for a in args if a != "--biblioteka"]
     src = Path(args[0]).expanduser()
     if not src.exists():
         print(f"Nie ma: {src}")
@@ -349,8 +415,12 @@ def _cmd_upload(ctx, args):
             target = ctx.folder() / "wgrane" / p["id"] / f"{dt.datetime.now():%Y%m%d-%H%M%S}-{f.name}"
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(f, target)                            # oryginał zostaje na miejscu
-            R.add_source(con, p["id"], "plik", f.name, target)
-    print(f"Dodane źródła: {len(files)} — dla: {p['imie']}. Sebastian przerobi je w tle (postęp: status albo panel).")
+            if lib:
+                B.add(con, p["id"], f.name, target)
+            else:
+                R.add_source(con, p["id"], "plik", f.name, target)
+    print(f"Dodane źródła: {len(files)} — dla: {p['imie']}" + (" (biblioteka wiedzy)" if lib else "") +
+          ". Sebastian przerobi je w tle (postęp: status albo panel).")
     return 0
 
 
@@ -409,5 +479,22 @@ def _cmd_set(ctx, args):
     return 0
 
 
-COMMANDS = {"status": _cmd_status, "wgraj": _cmd_upload, "pytania": _cmd_questions, "odpowiedz": _cmd_answer,
+def _cmd_guide(ctx, args):
+    """poradnik "temat" [osoba] — od razu, w Terminalu (PDF w data/dodatki/pamiec/poradniki)."""
+    if not args:
+        print('Użycie: python sebastian.py dodatek pamiec poradnik "jak prowadzić rozmowę z klientem" Aga')
+        return 1
+    with contextlib.closing(con_of(ctx)) as con:
+        p = _person_arg(ctx, con, args[1:])
+        jid = B.queue(con, p["id"], "poradnik", args[0], "terminal")
+        B.run_job(con, con.execute("SELECT * FROM zlecenia WHERE id=?", (jid,)).fetchone(),
+                  lambda prompt, tokens: ctx.ask(prompt, max_tokens=tokens, temperature=0.3), ctx.folder())
+        j = con.execute("SELECT * FROM zlecenia WHERE id=?", (jid,)).fetchone()
+    print(j["wynik"])
+    if j["plik"]:
+        print(f"\nPDF: {j['plik']}")
+    return 0
+
+
+COMMANDS = {"poradnik": _cmd_guide, "status": _cmd_status, "wgraj": _cmd_upload, "pytania": _cmd_questions, "odpowiedz": _cmd_answer,
             "profil": _cmd_profile, "przetworz": _cmd_run, "ustawienia": _cmd_settings, "ustaw": _cmd_set}

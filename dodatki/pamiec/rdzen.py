@@ -21,7 +21,7 @@ CAT = dict(CATEGORIES)
 CAT_ORDER = {k: i for i, (k, _) in enumerate(CATEGORIES)}
 KIND_PL = {"whatsapp": "rozmowy z Sebastianem", "chatgpt": "eksport ChatGPT", "claude": "eksport Claude",
            "gemini": "eksport Gemini", "plik": "plik", "tekst": "wklejony tekst", "nauka": "dotychczasowa nauka Sebastiana",
-           "folder": "folder"}
+           "folder": "folder", "biblioteka": "biblioteka wiedzy"}
 STATUS_PL = {"nowe": "czeka", "w_toku": "przetwarzam", "gotowe": "gotowe", "blad": "błąd", "pusty": "brak treści"}
 TEXT_EXT = (".txt", ".md", ".csv", ".log", ".json", ".html", ".htm")
 DOC_EXT = (".pdf", ".docx", ".pptx", ".xlsx", ".rtf", ".doc", ".odt", ".jpg", ".jpeg", ".png")
@@ -75,6 +75,8 @@ def db(folder):
     CREATE TABLE IF NOT EXISTS rozmowy(id INTEGER PRIMARY KEY AUTOINCREMENT, osoba TEXT, ts REAL, tekst TEXT, zrodlo INTEGER DEFAULT 0);
     """)
     con.commit()
+    from . import biblioteka as B                      # 2.35: biblioteka wiedzy (kursy, książki)
+    B.schema(con)
     return con
 
 
