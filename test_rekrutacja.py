@@ -2794,6 +2794,29 @@ class Fixes236(RekrutacjaBase):
         own = {"wlasne_punkty": {j["id"]: ["a", "b", "c", "d"]}}
         self.assertEqual(len(self.D.cv_content(f, dict(self.D.default_selection(f), **own))[1][j["id"]]), 4)   # Aga ręcznie może więcej
 
+    def test_links_pasted_with_brackets_are_cleaned_and_repaired(self):
+        cu = self.R.clean_url
+        good = "https://www.pracuj.pl/praca/asystent-ka-zarzadu-krakow,oferta,1005204933"
+        for dirty in (good + ">", "<" + good + ">", good + "&gt;", good + ".", f'"{good}"', good + ")", " " + good + ">\n"):
+            self.assertEqual(cu(dirty), good, dirty)
+        self.assertEqual(cu("https://pl.wikipedia.org/wiki/Kraków_(miasto)"), "https://pl.wikipedia.org/wiki/Kraków_(miasto)")
+        self.assertEqual(cu("https://www.bip.krakow.pl/?ACT=info&MODE=nab&nab_id=16786>"), "https://www.bip.krakow.pl/?ACT=info&MODE=nab&nab_id=16786")
+        self.assertEqual(self.R.norm_url(good + ">"), self.R.norm_url(good))
+        broken = self.add(url=good + ">", tresc="Praca asystent śmieciowa strona " * 50, status="odrzucona", firma="")
+        sent = self.add(url="https://x.pl/oferta/1>", status="wyslana", firma="Firma")
+        with self.R.db(self.ctx) as c:
+            a = c.execute("SELECT url,tresc,notatka FROM aplikacje WHERE id=?", (broken,)).fetchone()
+            b = c.execute("SELECT url,status FROM aplikacje WHERE id=?", (sent,)).fetchone()
+        self.assertEqual((a["url"], a["tresc"]), (good, ""))
+        self.assertIn("Poprawiony adres", a["notatka"])
+        self.assertEqual((b["url"], b["status"]), ("https://x.pl/oferta/1", "wyslana"))
+        import re as _re
+        src = (Path(self.P.__file__)).read_text(encoding="utf-8")
+        pat = _re.search(r're\.findall\(r"(https\?://\[\^[^"]*)"', src)
+        self.assertTrue(pat)
+        found = [cu(x) for x in _re.findall(r"https?://[^\s<>\"']+", f"{good}>\n<https://www.pracuj.pl/praca/inna,oferta,77>")]
+        self.assertEqual(found, [good, "https://www.pracuj.pl/praca/inna,oferta,77"])
+
     def test_save_button_also_at_top(self):
         page = (Path(self.P.__file__).parent / "szablony" / "edytuj_cv.html").read_text(encoding="utf-8")
         self.assertEqual(page.count('name="co" value="zapisz"'), 2)

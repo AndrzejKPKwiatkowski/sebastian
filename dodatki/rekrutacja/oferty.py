@@ -127,6 +127,7 @@ def structured_text(st):
 def fetch(url, deny=None):
     """(tekst, tytuł, [maile], [linki]) albo wyjątek RuntimeError z komunikatem po polsku."""
     import requests
+    url = R.clean_url(url)
     if not safe_url(url):
         raise RuntimeError("Ten adres nie wygląda na publiczną stronę z ogłoszeniem.")
     if deny and deny(url):

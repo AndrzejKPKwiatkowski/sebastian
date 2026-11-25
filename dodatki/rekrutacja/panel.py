@@ -1108,7 +1108,7 @@ def make_app(ctx, hosts=None):
     @app.route("/szybko")
     def quick_add():
         """Zakładka „Wyślij do Sebastiana”: adres i tekst oglądanego ogłoszenia → formularz do potwierdzenia (bez automatów na portalu)."""
-        url = request.args.get("u", "").strip()[:2000]
+        url = R.clean_url(request.args.get("u", "")[:2000])
         text = request.args.get("t", "").strip()[:15000]
         if url and not re.match(r"^https?://", url):
             url = ""
@@ -1375,7 +1375,7 @@ def make_app(ctx, hosts=None):
 
     @app.route("/dodaj", methods=["POST"])
     def add():
-        url, firma = request.form.get("url", "").strip(), request.form.get("firma", "").strip()
+        url, firma = R.clean_url(request.form.get("url", "")), request.form.get("firma", "").strip()
         tresc, email = request.form.get("tresc", "").strip(), request.form.get("email", "").strip().lower()
         stanowisko = request.form.get("stanowisko", "").strip()
         spont = request.form.get("rodzaj") == "spontaniczna"
@@ -1772,9 +1772,9 @@ def make_app(ctx, hosts=None):
 
     @app.route("/dodaj-wiele", methods=["POST"])
     def add_many():
-        links = re.findall(r"https?://\S+", request.form.get("linki", ""))
+        links = re.findall(r"https?://[^\s<>\"']+", request.form.get("linki", "").replace("&gt;", ">"))
         added = dup = 0
-        for url in dict.fromkeys(l.rstrip(").,;") for l in links):
+        for url in dict.fromkeys(u for u in (R.clean_url(l) for l in links) if u):
             if R.find_duplicate(g.db, "", "", url):
                 dup += 1
                 continue
@@ -1936,7 +1936,7 @@ def make_app(ctx, hosts=None):
                     with contextlib.suppress(ValueError):
                         ctx.set_setting(key, max(lo, min(hi, int(request.form.get(key, ctx.settings()[key])))))
             elif what == "zrodlo_dodaj":
-                url = request.form.get("url", "").strip()
+                url = R.clean_url(request.form.get("url", ""))
                 url = url if re.match(r"^https?://", url) else ("https://" + url if url else "")
                 if not url or not O.safe_url(url):
                     error = "Ten adres nie wygląda na publiczną stronę."

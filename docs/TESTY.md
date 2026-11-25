@@ -484,3 +484,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.36
 
 `Fixes236`: JSON-LD JobPosting → firma/stanowisko/miasto/wynagrodzenie na stronie bez treści HTML; nagłówki przeglądarki; firma z tytułu strony bez modelu; ukryte stanowisko zostaje ukryte po drugiej edycji; przycisk zapisu także pod profilem; różne oferty → różne punkty; gastronomia 2 punkty, ręcznie Aga może więcej.
+
+# Weryfikacja 2.36.1
+
+`Fixes236.test_links_pasted_with_brackets_are_cleaned_and_repaired`: `clean_url` usuwa „>”, „<…>”, `&gt;`, cudzysłów, kropkę i nawias bez pary; adres z nawiasem w parze zostaje; naprawa bazy czyści adres i śmieciową treść (bez ruszania wysłanych).

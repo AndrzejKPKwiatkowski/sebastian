@@ -180,6 +180,9 @@ def migrate(c):
 def db(ctx):
     c = ctx.db()
     migrate(c)
+    with contextlib.suppress(Exception):
+        if repair_urls(c):
+            c.commit()
     return contextlib.closing(c)
 
 
@@ -229,8 +232,42 @@ def dedupe_key(firma, stanowisko, miasto=""):
     return f"{f}|{s}" if f and s else (f"{f}|*" if f else "")
 
 
+def clean_url(url):
+    """2.36.1: link wklejony z maila lub komunikatora bywa w nawiasach <…> albo z kropką na końcu — bez tego portal pokazuje
+    ogólną stronę zamiast ogłoszenia (stąd „firma nieznana”)."""
+    u = str(url or "").strip().replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
+    u = re.sub(r"\s+", "", u)
+    m = re.search(r"https?://", u, re.I)
+    if m:
+        u = u[m.start():]
+    u = re.split(r"[<>\"'\u201d\u201c\u00bb\u00ab]", u)[0]
+    while u and u[-1] in ").,;:!?]}":
+        if u[-1] == ")" and u.count("(") >= u.count(")"):
+            break
+        u = u[:-1]
+    return u
+
+
+DIRTY_URL = ("%>%", "%<%", "%&gt;%", "%&lt;%", '%"%', "% %", "%.", "%,", "%;", "%)")
+
+
+def repair_urls(c):
+    """Raz po aktualizacji: czyści zepsute adresy i czyści śmieciową treść, żeby ogłoszenie dało się pobrać jeszcze raz."""
+    rows = c.execute("SELECT id,url,status,firma FROM aplikacje WHERE " + " OR ".join("url LIKE ?" for _ in DIRTY_URL), DIRTY_URL).fetchall()
+    for r in rows:
+        new = clean_url(r[1])
+        if new == r[1]:
+            continue
+        if not (r[3] or "").strip() and r[2] not in SENT + ("wysylanie",):
+            c.execute("UPDATE aplikacje SET url=?, tresc='', status=CASE WHEN status IN ('do_uzupelnienia','blad') THEN 'nowa' ELSE status END, "
+                      "notatka=TRIM(COALESCE(notatka,'') || ' Poprawiony adres (był z „>” na końcu) — ogłoszenie pobiorę jeszcze raz.') WHERE id=?", (new, r[0]))
+        else:
+            c.execute("UPDATE aplikacje SET url=? WHERE id=?", (new, r[0]))
+    return len(rows)
+
+
 def norm_url(url):
-    u = re.sub(r"[#?].*$", "", str(url or "").strip().lower())
+    u = re.sub(r"[#?].*$", "", clean_url(url).lower())
     return re.sub(r"^https?://(www\.)?", "", u).rstrip("/")
 
 
