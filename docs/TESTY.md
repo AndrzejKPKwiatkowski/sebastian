@@ -492,3 +492,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.36.2
 
 `Fixes236.test_rate_limit_block_is_recognised_paced_and_retried`: 429 Cloudflare → komunikat i 45 min przerwy bez zapytań; pusta strona pracuj.pl bez JobPosting → błąd zamiast śmieciowej treści; odstęp 30 s tylko dla pracuj.pl; `junk_text`; jednorazowe czyszczenie starych śmieci (bez ruszania dobrych i pominiętych); ponowienie zablokowanych po 15 min.
+
+# Weryfikacja 2.36.3
+
+`Fixes236.test_queue_waits_while_portal_pauses_and_429_items_return`: oferty z 429 wracają do kolejki; w czasie przerwy pracuj.pl kolejka bierze inne oferty, po przerwie wraca do pracuj.pl; `pauses()` dla strony „Dziś”.

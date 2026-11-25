@@ -411,7 +411,7 @@ RETRY_MARK = "%Wyślij do Sebastiana%"
 
 
 def retry_blocked(ctx, now=None):
-    """2.36.2: oferty, których portal chwilowo nie pokazał — po przerwie próbuję jeszcze raz (najwyżej 4 razy, po 2 naraz)."""
+    """2.36.2: oferty, których portal chwilowo nie pokazał — po przerwie próbuję jeszcze raz (najwyżej 4 razy; odstępy pilnuje O.pace)."""
     now = now or time.time()
     with R.db(ctx) as c:
         if R.meta_get(c, "migracja_2362") == "":
@@ -425,14 +425,21 @@ def retry_blocked(ctx, now=None):
                 R.note(c, ctx, a["id"], "pracuj.pl pokazał wcześniej stronę blokady zamiast ogłoszenia — pobiorę je jeszcze raz (2.36.2)")
             R.meta_set(c, "migracja_2362", R.stamp(ctx))
             c.commit()
+        if R.meta_get(c, "migracja_2363") == "":                    # 2.36.3: oferty zatrzymane na błędzie 429 w 2.36.1 — z powrotem do kolejki
+            for a in [dict(r) for r in c.execute("SELECT id FROM aplikacje WHERE status='do_uzupelnienia' AND COALESCE(tresc,'')='' AND url<>'' "
+                                                 "AND COALESCE(firma,'')='' AND (uwagi LIKE '%429%' OR uwagi LIKE ? OR uwagi LIKE '%pustą stronę%')", (RETRY_MARK,))]:
+                c.execute("UPDATE aplikacje SET status='nowa', uwagi='[]' WHERE id=?", (a["id"],))
+                R.note(c, ctx, a["id"], "portal chwilowo blokował Sebastiana — oferta wraca do kolejki (2.36.3)")
+            R.meta_set(c, "migracja_2363", R.stamp(ctx))
+            c.commit()
         if now - float(R.meta_get(c, "ponow_blokady", "0") or 0) < 15 * 60:
             return 0
         R.meta_set(c, "ponow_blokady", str(now))
         done = 0
         for a in [dict(r) for r in c.execute("SELECT id,url FROM aplikacje WHERE status='do_uzupelnienia' AND COALESCE(tresc,'')='' AND url<>'' "
-                                             "AND uwagi LIKE ? ORDER BY id", (RETRY_MARK,))]:
+                                             "AND (uwagi LIKE ? OR uwagi LIKE '%błędem 429%') ORDER BY id", (RETRY_MARK,))]:
             n = int(R.meta_get(c, f"ponow_blokady_{a['id']}", "0") or 0)
-            if n >= 4 or O.cooling(a["url"]) or done >= 2:
+            if n >= 4 or O.cooling(a["url"]):
                 continue
             R.meta_set(c, f"ponow_blokady_{a['id']}", str(n + 1))
             c.execute("UPDATE aplikacje SET status='nowa', uwagi='[]' WHERE id=? AND status='do_uzupelnienia'", (a["id"],))
@@ -721,6 +728,7 @@ def next_to_prepare(ctx, manual_only=False):
     """Następna oferta do przygotowania: najpierw dodane przez Agę, w każdej grupie od najlepiej płatnej."""
     with R.db(ctx) as c:
         rows = [dict(r) for r in c.execute("SELECT * FROM aplikacje WHERE status='nowa'")]
+    rows = [a for a in rows if not (a["url"] and not (a["tresc"] or "").strip() and O.cooling(a["url"]))]   # 2.36.3: portal ma przerwę — czekają
     manual = [a for a in rows if a["zrodlo"] not in ("auto", "spontaniczna")]
     pool = manual or ([] if manual_only else rows)
     if not pool:
@@ -1415,7 +1423,7 @@ def make_app(ctx, hosts=None):
         prog = OW.progress(g.db, day)
         sheep = {"cel": goal_n, "wlasny": own, "zrobione": prog["zrobione"], "seria": OW.streak(g.db, ctx, day), "czeka": prog["czeka"],
                  "procent": min(100, round(100 * prog["zrobione"] / goal_n)) if goal_n else 0, "dzien_roboczy": OW.working_day(ctx, day)}
-        return render_template("dzis.html", rows=rows, tab="dzis", me=R.mailboxes(g.db)[0], sheep=sheep, GOALS=OW.GOALS)
+        return render_template("dzis.html", przerwy=O.pauses(), rows=rows, tab="dzis", me=R.mailboxes(g.db)[0], sheep=sheep, GOALS=OW.GOALS)
 
     @app.route("/dodaj", methods=["POST"])
     def add():

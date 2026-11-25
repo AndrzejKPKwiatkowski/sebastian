@@ -2876,6 +2876,28 @@ class Fixes236(RekrutacjaBase):
             self.assertEqual(c.execute("SELECT status FROM aplikacje WHERE id=?", (blocked,)).fetchone()[0], "nowa")
 
 
+    def test_queue_waits_while_portal_pauses_and_429_items_return(self):
+        O = self.O
+        O._COOL.clear()
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "migracja_2362", "x"); c.commit()
+        stuck = [self.add(url=f"https://www.pracuj.pl/praca/x{i},oferta,{i}", firma="", tresc="", status="do_uzupelnienia",
+                          uwagi=json.dumps(["Strona odpowiedziała błędem 429 (za dużo zapytań — spróbuję później). Wklej treść ogłoszenia ręcznie."],
+                                           ensure_ascii=False)) for i in range(3)]
+        other = self.add(url="https://firma.pl/praca", tresc="", status="nowa")
+        self.P.retry_blocked(self.ctx, now=5000.0)
+        with self.R.db(self.ctx) as c:
+            self.assertEqual({c.execute("SELECT status FROM aplikacje WHERE id=?", (i,)).fetchone()[0] for i in stuck}, {"nowa"})
+        O._COOL["pracuj.pl"] = __import__("time").time() + 600
+        self.assertIn("pracuj.pl", O.pauses())
+        self.assertEqual(self.P.next_to_prepare(self.ctx)["id"], other)      # pracuj.pl czeka, reszta idzie
+        with self.R.db(self.ctx) as c:
+            c.execute("UPDATE aplikacje SET status='odrzucona' WHERE id=?", (other,)); c.commit()
+        self.assertIsNone(self.P.next_to_prepare(self.ctx))
+        O._COOL.clear()
+        self.assertIn(self.P.next_to_prepare(self.ctx)["id"], stuck)
+
+
     def test_save_button_also_at_top(self):
         page = (Path(self.P.__file__).parent / "szablony" / "edytuj_cv.html").read_text(encoding="utf-8")
         self.assertEqual(page.count('name="co" value="zapisz"'), 2)

@@ -103,6 +103,12 @@ def cooling(url):
     return max(0, int(_COOL.get(host(url), 0) - time.time()))
 
 
+def pauses():
+    """{portal: godzina końca przerwy} — do pokazania Adze."""
+    now = time.time()
+    return {h: time.strftime("%H:%M", time.localtime(t)) for h, t in _COOL.items() if t > now}
+
+
 def pace(url):
     h = host(url)
     if cooling(url):
