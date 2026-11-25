@@ -17,6 +17,8 @@
     <h2>Profil zawodowy</h2>
     {% if zrodlo == 'model' %}<p class="small soft">Opis napisany pod tę ofertę z Twoich faktów i wzorów.</p>{% elif zrodlo == 'aga' %}<p class="small soft">Twoja wersja opisu.</p>{% endif %}
     <textarea name="profil" rows="6" {{ 'readonly' if locked }}>{{ profil }}</textarea>
+    {% if not locked %}<p style="margin-top:10px"><button class="btn" name="co" value="zapisz">Zapisz i ułóż CV</button>
+      <span class="small soft">— zapisuje wszystko z tej strony, także zmiany niżej</span></p>{% endif %}
   </div>
 
   <div class="card">

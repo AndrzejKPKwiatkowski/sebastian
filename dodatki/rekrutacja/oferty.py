@@ -1,5 +1,5 @@
 """Rekrutacja — oferta: pobranie strony ogłoszenia, wyciągnięcie danych, ocena dopasowania."""
-import contextlib, html, html.parser, ipaddress, re, socket
+import contextlib, html, html.parser, ipaddress, json, re, socket
 from urllib.parse import urlparse
 
 from . import rdzen as R
@@ -69,6 +69,61 @@ def safe_url(url):
     return True
 
 
+BROWSER = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36",
+           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.6"}
+
+
+def _strip(t):
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", str(t or "")))).strip()
+
+
+def structured(page):
+    """2.36: dane ogłoszenia zapisane w stronie dla wyszukiwarek (JSON-LD JobPosting, meta og:) — działa też na stronach,
+    które treść pokazują dopiero skryptem. Zwraca {stanowisko, firma, miasto, wynagrodzenie, opis}."""
+    out = {"stanowisko": "", "firma": "", "miasto": "", "wynagrodzenie": "", "opis": ""}
+    for blob in re.findall(r'(?is)<script[^>]+application/ld\+json[^>]*>(.*?)</script>', page)[:20]:
+        with contextlib.suppress(Exception):
+            data = json.loads(html.unescape(blob.strip()))
+            items = data if isinstance(data, list) else data.get("@graph", [data]) if isinstance(data, dict) else []
+            for it in items:
+                if not isinstance(it, dict) or "JobPosting" not in str(it.get("@type")):
+                    continue
+                out["stanowisko"] = out["stanowisko"] or _strip(it.get("title"))
+                org = it.get("hiringOrganization") or {}
+                out["firma"] = out["firma"] or _strip(org.get("name") if isinstance(org, dict) else org)
+                locs = it.get("jobLocation") or []
+                locs = locs if isinstance(locs, list) else [locs]
+                for loc in locs:
+                    addr = (loc or {}).get("address") or {} if isinstance(loc, dict) else {}
+                    if isinstance(addr, dict) and addr.get("addressLocality"):
+                        out["miasto"] = out["miasto"] or _strip(addr.get("addressLocality"))
+                pay = it.get("baseSalary") or {}
+                if isinstance(pay, dict):
+                    v = pay.get("value") or {}
+                    if isinstance(v, dict) and (v.get("minValue") or v.get("value")):
+                        lo, hi = v.get("minValue") or v.get("value"), v.get("maxValue")
+                        out["wynagrodzenie"] = f"{lo}{'–' + str(hi) if hi and hi != lo else ''} {pay.get('currency') or 'PLN'}" + \
+                                               (f" / {str(v.get('unitText')).lower()}" if v.get("unitText") else "")
+                desc = _strip(it.get("description"))
+                for k in ("qualifications", "responsibilities", "jobBenefits"):
+                    if it.get(k):
+                        desc += "\n" + _strip(it.get(k) if isinstance(it.get(k), str) else " ".join(map(str, it.get(k))))
+                out["opis"] = out["opis"] or desc
+    def meta(name):
+        m = re.search(r'(?is)<meta[^>]+(?:property|name)=["\']' + re.escape(name) + r'["\'][^>]*content=["\']([^"\']*)', page)
+        return _strip(m.group(1)) if m else ""
+    out["stanowisko"] = out["stanowisko"] or meta("og:title")
+    if not out["opis"]:
+        out["opis"] = meta("og:description") or meta("description")
+    return out
+
+
+def structured_text(st):
+    lines = [f"{k}: {st[v]}" for k, v in (("Stanowisko", "stanowisko"), ("Pracodawca", "firma"), ("Miejsce pracy", "miasto"),
+                                          ("Wynagrodzenie", "wynagrodzenie")) if st.get(v)]
+    return ("\n".join(lines) + ("\n\n" + st["opis"] if st.get("opis") else "")).strip()
+
+
 def fetch(url, deny=None):
     """(tekst, tytuł, [maile], [linki]) albo wyjątek RuntimeError z komunikatem po polsku."""
     import requests
@@ -77,8 +132,7 @@ def fetch(url, deny=None):
     if deny and deny(url):
         raise RuntimeError("Ten portal nie zgadza się na automaty.")
     try:
-        with requests.get(url, timeout=25, stream=True, allow_redirects=False,
-                          headers={"User-Agent": "Mozilla/5.0 (Macintosh) Sebastian-Rekrutacja", "Accept-Language": "pl,en;q=0.7"}) as r:
+        with requests.get(url, timeout=25, stream=True, allow_redirects=False, headers=BROWSER) as r:   # 2.36: jak zwykła przeglądarka
             hops = 0
             while r.is_redirect and hops < 5:
                 nxt = requests.compat.urljoin(r.url, r.headers.get("Location", ""))
@@ -87,7 +141,9 @@ def fetch(url, deny=None):
                 r = requests.get(nxt, timeout=25, stream=True, allow_redirects=False, headers=r.request.headers)
                 hops += 1
             if r.status_code >= 400:
-                raise RuntimeError(f"Strona odpowiedziała błędem {r.status_code}. Wklej treść ogłoszenia ręcznie.")
+                hint = {403: " (portal blokuje otwieranie spoza przeglądarki)", 404: " (ogłoszenie zniknęło albo link jest niepełny)",
+                        410: " (ogłoszenie wygasło)", 429: " (za dużo zapytań — spróbuję później)"}.get(r.status_code, "")
+                raise RuntimeError(f"Strona odpowiedziała błędem {r.status_code}{hint}. Wklej treść ogłoszenia ręcznie.")
             raw = r.raw.read(2_500_000, decode_content=True)
             enc = r.encoding or "utf-8"
     except RuntimeError:
@@ -96,6 +152,10 @@ def fetch(url, deny=None):
         raise RuntimeError(f"Nie udało się otworzyć strony ({type(e).__name__}). Wklej treść ogłoszenia ręcznie.")
     page = raw.decode(enc, "replace")
     text, title = to_text(page)
+    st = structured(page)                                                # 2.36: dane dla wyszukiwarek — firma, stanowisko, opis
+    head = structured_text(st)
+    if head and (st["firma"] or st["opis"]):
+        text = head + ("\n\n" + text if len(text) >= 200 and st["opis"][:80] not in text else "")
     if len(text) < 200:
         raise RuntimeError("Strona nie pokazała treści ogłoszenia (pewnie wymaga przeglądarki). Wklej treść ręcznie.")
     links = [html.unescape(h) for h in re.findall(r'href=["\'](https?://[^"\'#]+)["\']', page, re.I)][:300]
@@ -386,6 +446,17 @@ JSON:
     for k in ("wymagania", "obowiazki", "oferujemy"):
         if not out[k] and cut[k]:
             out[k] = cut[k]
+    for k, label in (("firma", "Pracodawca"), ("stanowisko", "Stanowisko"), ("miasto", "Miejsce pracy")):   # 2.36: z danych strony
+        m = re.search(rf"(?m)^{label}: (.+)$", text[:3000])
+        if m and not out[k]:
+            out[k] = m.group(1).strip()[:200]
     if not out["stanowisko"] and title:
         out["stanowisko"] = re.split(r"\s[|\-–—]\s", title)[0][:120]
+    if not out["firma"] and title:                                       # „Stanowisko – Firma – Miasto – Portal”
+        parts = [x.strip() for x in re.split(r"\s[|\-–—]\s", title) if x.strip()]
+        portal = ("pracuj", "olx", "indeed", "linkedin", "praca", "gowork", "nofluff", "justjoin", "theprotocol", "aplikuj", "infopraca", "jooble")
+        cities = set(R.AREA_KM) | {"warszawa", "wroclaw", "poznan", "gdansk", "lodz", "katowice", "lublin", "szczecin", "zdalnie", "hybryd", "oferta pracy", "praca"}
+        rest = [x for x in parts[1:] if not any(p_ in R.plain(x) for p_ in portal) and not any(c in R.plain(x) for c in cities) and len(x) > 2]
+        if rest:
+            out["firma"] = rest[0][:200]
     return out

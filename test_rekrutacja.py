@@ -2725,6 +2725,81 @@ class Rodo226(RekrutacjaBase):
         self.assertNotIn("rodo_aga", json.loads(self.row(aid)["wybor"]))      # puste pole — z powrotem klauzula Sebastiana
 
 
+class Fixes236(RekrutacjaBase):
+    """2.36: dane ze strony (JSON-LD), ukryte stanowisko nie wraca, przycisk u góry, dobór pod ofertę, 2 punkty w gastronomii."""
+    PAGE = """<html><head><title>Asystentka biura - Kraków - Pracuj.pl</title>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"JobPosting","title":"Asystentka biura",
+"hiringOrganization":{"@type":"Organization","name":"Kancelaria Nowak sp. k."},
+"jobLocation":{"@type":"Place","address":{"addressLocality":"Kraków"}},
+"baseSalary":{"@type":"MonetaryAmount","currency":"PLN","value":{"minValue":6000,"maxValue":7000,"unitText":"MONTH"}},
+"description":"<p>Obowiązki: prowadzenie kalendarza, obieg dokumentów, obsługa korespondencji.</p><p>Wymagania: znajomość pakietu MS Office.</p>"}</script>
+</head><body><div id="app"></div><script>window.app()</script></body></html>"""
+
+    def test_structured_data_gives_firm_even_on_script_pages(self):
+        st = self.O.structured(self.PAGE)
+        self.assertEqual((st["firma"], st["stanowisko"], st["miasto"]), ("Kancelaria Nowak sp. k.", "Asystentka biura", "Kraków"))
+        self.assertIn("6000–7000 PLN", st["wynagrodzenie"])
+        from unittest.mock import patch, MagicMock
+        resp = MagicMock()
+        resp.__enter__.return_value = resp
+        resp.is_redirect, resp.status_code, resp.encoding = False, 200, "utf-8"
+        resp.raw.read.return_value = self.PAGE.encode()
+        with patch("requests.get", return_value=resp), patch.object(self.O, "safe_url", lambda u: True):
+            text, title, mails, links = self.O.fetch("https://www.pracuj.pl/praca/x")
+            self.assertTrue(text.startswith("Stanowisko: Asystentka biura\nPracodawca: Kancelaria Nowak sp. k."))
+            self.assertEqual(self.O.BROWSER["User-Agent"][:11], "Mozilla/5.0")
+            with patch.object(self.ctx, "ask", lambda *a, **k: None):
+                info = self.O.analyze(self.ctx, self.R.load_facts(self.ctx), text, title, "https://www.pracuj.pl/praca/x")
+        self.assertEqual(info["firma"], "Kancelaria Nowak sp. k.")
+        with patch.object(self.ctx, "ask", lambda *a, **k: None):
+            info = self.O.analyze(self.ctx, self.R.load_facts(self.ctx), "x" * 300, "Recepcjonistka – Hotel Pod Wawelem – Kraków – Pracuj.pl")
+        self.assertEqual(info["firma"], "Hotel Pod Wawelem")
+
+    def test_hidden_job_stays_hidden_after_second_edit(self):
+        f = self.R.load_facts(self.ctx)
+        jobs = [j["id"] for j in f["doswiadczenie"]]
+        sel = self.D.clean_selection(f, {"kolejnosc": jobs, "ranking": jobs})
+        shown = [x for x in sel["kolejnosc"] if x != jobs[-1]]
+        _, pts = self.D.cv_content(f, sel)
+        sel = self.D.apply_cv_edit(f, sel, "", pts, shown)
+        self.assertNotIn(jobs[-1], sel["kolejnosc"])
+        _, pts = self.D.cv_content(f, sel)
+        sel = self.D.apply_cv_edit(f, sel, "Nowy opis profilu z drugiej edycji.", pts, sel["kolejnosc"])   # druga edycja
+        self.assertNotIn(jobs[-1], sel["kolejnosc"])
+        self.assertEqual(sel.get("profil_tekst"), "Nowy opis profilu z drugiej edycji.")
+
+    def test_short_jobs_get_two_points_and_selection_follows_offer(self):
+        f = self.R.load_facts(self.ctx)
+        j = f["doswiadczenie"][0]
+        j["stanowisko"], j["firma"] = "Zastępca szefa kuchni", "Santorini Salsa"
+        j["punkty"] = [{"id": f"{j['id']}.{i}", "tekst": t} for i, t in enumerate(
+            ["Przygotowywanie dań według receptur.", "Zamawianie towaru i kontrola dostaw.", "Prowadzenie dokumentacji HACCP.",
+             "Szkolenie nowych pracowników kuchni.", "Rozliczanie kasy na koniec zmiany."], 1)]
+        self.assertEqual(len(self.D.default_selection(f)["punkty"][j["id"]]), 2)
+        self.assertEqual(self.D.job_cap(j), 2)
+        k = f["doswiadczenie"][1]
+        k["stanowisko"], k["firma"] = "Specjalistka ds. administracji", "Biuro"
+        k["punkty"] = [{"id": f"{k['id']}.{i}", "tekst": t} for i, t in enumerate(
+            ["Obsługa sekretariatu i korespondencji.", "Prowadzenie kalendarza zarządu.", "Archiwizacja dokumentów kadrowych.",
+             "Przygotowywanie raportów sprzedaży w Excelu.", "Organizacja wydarzeń firmowych.", "Rozliczanie delegacji."], 1)]
+        office = {"stanowisko": "Asystentka zarządu", "tresc": "Obowiązki: prowadzenie kalendarza zarządu, obsługa korespondencji i sekretariatu."}
+        events = {"stanowisko": "Koordynatorka wydarzeń", "tresc": "Obowiązki: organizacja wydarzeń, raporty w Excelu, rozliczanie delegacji."}
+        a = self.D.tailor(f, self.D.default_selection(f), {}, office)["punkty"][k["id"]]
+        b = self.D.tailor(f, self.D.default_selection(f), {}, events)["punkty"][k["id"]]
+        self.assertNotEqual(a, b)
+        self.assertIn(f"{k['id']}.2", a)
+        self.assertIn(f"{k['id']}.5", b)
+        kitchen = {"stanowisko": "Kucharz", "tresc": "Wymagania: znajomość HACCP, szkolenie pracowników kuchni."}
+        self.assertEqual(len(self.D.tailor(f, self.D.default_selection(f), {}, kitchen)["punkty"][j["id"]]), 2)
+        own = {"wlasne_punkty": {j["id"]: ["a", "b", "c", "d"]}}
+        self.assertEqual(len(self.D.cv_content(f, dict(self.D.default_selection(f), **own))[1][j["id"]]), 4)   # Aga ręcznie może więcej
+
+    def test_save_button_also_at_top(self):
+        page = (Path(self.P.__file__).parent / "szablony" / "edytuj_cv.html").read_text(encoding="utf-8")
+        self.assertEqual(page.count('name="co" value="zapisz"'), 2)
+        self.assertLess(page.index('value="zapisz"'), page.index("Klauzula RODO"))
+
+
 class Crash227(RekrutacjaBase):
     """2.27: strona oferty nie pada, gdy brakuje części danych (np. czasu rowerem), a błąd pokazuje czytelną stronę."""
     def test_offer_page_with_partial_data(self):

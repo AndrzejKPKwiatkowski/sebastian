@@ -367,5 +367,32 @@ def on_user_message(ctx, msg):
     return RZ.on_whatsapp(ctx, msg)
 
 
-COMMANDS = {"przepisz": cmd_przepisz, "uzupelnij": cmd_uzupelnij, "szukaj": cmd_szukaj, "skrzynka": cmd_skrzynka, "raport": cmd_raport, "start": cmd_start, "usluga": cmd_usluga, "adres": cmd_adres, "haslo": cmd_haslo, "status": cmd_status,
+def cmd_sprawdz_linki(ctx, args):
+    """2.36: ostatnie oferty dodane z linku — co z nich odczytałem, i próba otwarcia jeszcze raz (nic nie zmienia)."""
+    from collections import Counter
+    from urllib.parse import urlparse
+    from . import oferty as O
+    n = int(args[0]) if args and args[0].isdigit() else 15
+    with R.db(ctx) as c:
+        rows = c.execute("SELECT id, url, firma, stanowisko, status, length(tresc) AS dl, blad FROM aplikacje "
+                         "WHERE url<>'' AND zrodlo IN ('oferta','spontaniczna') ORDER BY id DESC LIMIT ?", (n,)).fetchall()
+    bad = Counter()
+    for r in rows:
+        dom = urlparse(r["url"]).netloc.replace("www.", "")
+        print(f"\n#{r['id']} {dom} · status: {R.STATUS.get(r['status'], r['status'])} · firma: {r['firma'] or '— NIEZNANA'} · treść: {r['dl']} zn.")
+        print(f"   {r['url'][:110]}")
+        try:
+            text, title, mails, _ = O.fetch(r["url"])
+            firm = next((l[12:] for l in text.splitlines()[:5] if l.startswith("Pracodawca: ")), "")
+            print(f"   teraz: otwiera się ✓ ({len(text)} zn., tytuł: {title[:70]!r}" + (f", pracodawca w danych strony: {firm}" if firm else ", bez danych strukturalnych") + ")")
+        except Exception as e:
+            bad[dom] += 1
+            print(f"   teraz: ✗ {e}")
+    if bad:
+        print("\nPortale, które się nie otwierają: " + ", ".join(f"{d} ({k})" for d, k in bad.most_common()))
+        print("Dla nich wklejaj treść ogłoszenia (pole „Treść” przy dodawaniu albo w aplikacji „do uzupełnienia”).")
+    return 0
+
+
+COMMANDS = {"sprawdz-linki": cmd_sprawdz_linki, "przepisz": cmd_przepisz, "uzupelnij": cmd_uzupelnij, "szukaj": cmd_szukaj, "skrzynka": cmd_skrzynka, "raport": cmd_raport, "start": cmd_start, "usluga": cmd_usluga, "adres": cmd_adres, "haslo": cmd_haslo, "status": cmd_status,
             "ustawienia": cmd_ustawienia, "ustaw": cmd_ustaw}

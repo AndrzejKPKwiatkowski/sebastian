@@ -480,3 +480,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.35
 
 `test_biblioteka.py`: wyszukiwanie bez polskich końcówek i znaków, tylko we własnej bibliotece, bez faktów o osobie; nowszy materiał wyżej, „nieaktualne” pomijane; „poradnik:” na WhatsAppie → PDF wysłany jako dokument; „wyjaśnij:” od Agi → odpowiedź do Agi; pusta biblioteka i brak trafień; fragmenty w zwykłych odpowiedziach; panel: wgranie do biblioteki z rokiem, zlecenie, pobranie PDF (cudzego nie); folder `biblioteka` i polecenie `poradnik`.
+
+# Weryfikacja 2.36
+
+`Fixes236`: JSON-LD JobPosting → firma/stanowisko/miasto/wynagrodzenie na stronie bez treści HTML; nagłówki przeglądarki; firma z tytułu strony bez modelu; ukryte stanowisko zostaje ukryte po drugiej edycji; przycisk zapisu także pod profilem; różne oferty → różne punkty; gastronomia 2 punkty, ręcznie Aga może więcej.

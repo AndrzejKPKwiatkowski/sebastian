@@ -76,10 +76,24 @@ def courses_newest_first(kursy):
     return sorted(kursy, key=lambda k: _ym(k["tekst"]), reverse=True)
 
 
+# 2.36: przy gastronomii, kasie i żłobku Sebastian wybiera najwyżej 2 punkty (Aga może ręcznie dodać więcej)
+SHORT_JOBS = ("kuch", "kucharz", "kasjer", "kasa", "gastronom", "restaurac", "kelner", "barist", "zlob", "santorini", "salsa", "hala maki")
+SHORT_CAP = 2
+
+
+def job_cap(j):
+    """Ile punktów Sebastian może dać przy stanowisku: pole „max_punktow” w faktach albo 2 dla gastronomii/kasy/żłobka."""
+    with contextlib.suppress(Exception):
+        if int(j.get("max_punktow") or 0) > 0:
+            return int(j["max_punktow"])
+    name = R.plain(" ".join(str(j.get(k) or "") for k in ("stanowisko", "firma")))
+    return SHORT_CAP if any(k in name for k in SHORT_JOBS) else POINTS_MAX
+
+
 def default_selection(f):
     return {"kolejnosc": chronological(f, [j["id"] for j in f["doswiadczenie"] if not j.get("opcjonalne")]),
             "z_modelu": False,
-            "punkty": {j["id"]: [p["id"] for p in j["punkty"]][:POINTS_PER_JOB] for j in f["doswiadczenie"]},
+            "punkty": {j["id"]: [p["id"] for p in j["punkty"]][:min(POINTS_PER_JOB, job_cap(j))] for j in f["doswiadczenie"]},
             "profil": [p["id"] for p in f["profil"]][:4],
             "umiejetnosci": [u["id"] for u in f["umiejetnosci"]][:6],
             "cechy": [c["id"] for c in f.get("cechy", [])][:5],
@@ -163,6 +177,7 @@ def clean_selection(f, sel):
         ids = [p["id"] for p in j["punkty"]]
         got = [x for x in dict.fromkeys((sel.get("punkty") or {}).get(j["id"]) or []) if x in ids]
         want = max(POINTS_MIN, min(POINTS_MAX, len(got))) if got else POINTS_PER_JOB
+        want = min(want, job_cap(j))                                           # 2.36: gastronomia, kasa, żłobek — 2 punkty
         points[j["id"]] = (got + [x for x in ids if x not in got])[:want]   # 3–5 najważniejszych dla oferty
     hidden = [x for x in dict.fromkeys(sel.get("ukryte") or []) if x in jobs]
     if hidden and len(hidden) < len(order):
@@ -218,7 +233,8 @@ def cv_content(f, sel):
 def apply_cv_edit(f, sel, form_profile, form_points, shown):
     """Poprawki Agi z ekranu „Edytuj CV”. form_points: {stanowisko: [teksty]}, shown: stanowiska zaznaczone do CV."""
     sel = clean_selection(f, sel)
-    base = {k: v for k, v in sel.items() if k not in ("wlasne_punkty", "ukryte", "pokazane")}
+    # 2.36: podstawa liczona od nowa BEZ wcześniejszych ukryć — inaczej przy drugiej edycji ukryte stanowisko wracało do CV
+    base = clean_selection(f, {k: v for k, v in sel.items() if k not in ("wlasne_punkty", "ukryte", "pokazane", "kolejnosc")})
     base_prof, base_points = cv_content(f, dict(base, profil_tekst=sel.get("profil_model") or "", profil_zrodlo="model"))
     jobs = [j["id"] for j in f["doswiadczenie"]]
     shown = [x for x in shown if x in jobs]
@@ -253,6 +269,89 @@ def reset_cv_edit(f, sel):
     return clean_selection(f, new)
 
 
+# ================================================================ 2.36: dobór pod treść oferty (nie zawsze te same punkty)
+
+STOP = set("""oraz ktory ktora ktore ktorych ktorym jest beda bedzie bedziesz osoba osoby oferujemy wymagania obowiazki twoje twoj
+twoja naszego nasza nasze naszej naszym firmy firma pracy praca prace pracownik pracownika kandydat kandydata kandydatke
+mile widziane widziana umowa umowy etat pelny pelen czasu godzin dzien tygodniu miesiecznie wynagrodzenie zatrudnienie
+aplikuj aplikacji rekrutacji rekrutacja ogloszenie stanowisko stanowiska zakres obowiazkow przyjdz dolacz zespol""".split())
+
+
+def _stems(text):
+    return [w[:6] for w in re.findall(r"\w+", R.plain(text)) if len(w) >= 4 and w not in GENERIC and w not in STOP and not w.isdigit()]
+
+
+def offer_focus(app):
+    """Słowa (rdzenie) z oferty z wagami: wymagania i obowiązki liczą się podwójnie."""
+    from collections import Counter
+    c = Counter(_stems(app.get("tresc") or ""))
+    c.update(_stems(app.get("stanowisko") or "") * 3)
+    with contextlib.suppress(Exception):
+        info = json.loads(app.get("analiza") or "{}")
+        for k in ("wymagania", "obowiazki"):
+            c.update(_stems(" ".join(info.get(k) or [])) * 2)
+    return c
+
+
+def relevance(text, focus):
+    seen = set(_stems(text))
+    return sum(min(focus.get(w, 0), 4) for w in seen)
+
+
+def tailor(f, sel, raw, app):
+    """Łączy wybór modelu z dopasowaniem słów oferty: punkty, cechy i narzędzia różnią się między ofertami."""
+    focus = offer_focus(app)
+    if not focus:
+        return sel
+    raw = raw if isinstance(raw, dict) else {}
+    model_pts = raw.get("punkty") if isinstance(raw.get("punkty"), dict) else {}
+    job_score = {}
+    for j in f["doswiadczenie"]:
+        ids = [p["id"] for p in j["punkty"]]
+        picked = [x for x in (model_pts.get(j["id"]) or []) if x in ids]
+        scored = []
+        for i, p in enumerate(j["punkty"]):
+            sc = relevance(p["tekst"], focus) + (3 if p["id"] in picked else 0) - i * 0.01
+            scored.append((sc, p["id"]))
+        scored.sort(reverse=True)
+        job_score[j["id"]] = sum(max(0, s) for s, _ in scored[:3]) + relevance(j.get("stanowisko", ""), focus) * 2
+        n = POINTS_PER_JOB
+        if len([s for s, _ in scored if s >= 3]) >= 5:
+            n = POINTS_MAX
+        elif job_score[j["id"]] < 2:
+            n = POINTS_MIN
+        sel["punkty"][j["id"]] = [x for _, x in scored][:min(n, job_cap(j))]
+    if not raw.get("kolejnosc"):                                            # bez modelu: najlepiej pasujące stanowiska najpierw
+        ranked = sorted(sel["kolejnosc"], key=lambda x: -job_score.get(x, 0))
+        sel["ranking"] = ranked
+    cid = {c["id"] for c in f.get("cechy", [])}
+    model_c = [x for x in (raw.get("cechy") or []) if x in cid]
+    hinted = match_traits(f, (app.get("tresc") or "") + " " + (app.get("stanowisko") or ""), 10)
+    tscore = {}
+    for i, c in enumerate(f.get("cechy", [])):
+        tscore[c["id"]] = relevance(c["tekst"], focus) + (3 if c["id"] in model_c else 0) + (4 - hinted.index(c["id"]) * 0.3 if c["id"] in hinted else 0)
+    best = [x for x, sc in sorted(tscore.items(), key=lambda kv: -kv[1]) if sc > 0][:6]
+    if len(best) >= 3:
+        sel["cechy"] = best
+    tools = f.get("narzedzia", [])
+    text = R.plain((app.get("tresc") or "") + " " + (app.get("stanowisko") or ""))
+    office = any(k in text for k in ("ms office", "pakiet office", "microsoft office", "excel", "word", "outlook", "powerpoint"))
+    tsc = []
+    for i, t in enumerate(tools):
+        name = R.plain(t["nazwa"])
+        sc = relevance(t["nazwa"], focus) * 2 + (5 if name and name.split()[0] in text else 0) - i * 0.01
+        if office and ("office" in name or name in ("word", "excel", "outlook", "powerpoint")):
+            sc += 4
+        tsc.append((sc, t["id"]))
+    tsc.sort(reverse=True)
+    chosen = [x for sc, x in tsc if sc > 0][:7]
+    if len(chosen) < 3:
+        chosen += [x for _, x in tsc if x not in chosen][:3 - len(chosen)]
+    if chosen:
+        sel["narzedzia"] = chosen
+    return sel
+
+
 def select_for_offer(ctx, f, app):
     prompt = f"""Dobierasz, co wyeksponować w CV pod konkretną ofertę pracy. NIE piszesz żadnego tekstu.
 Zwracasz wyłącznie numery faktów z listy poniżej (w nawiasach kwadratowych). Nie wymyślaj numerów.
@@ -268,7 +367,8 @@ Zwróć JSON:
      przy gastronomii najpierw gastronomia, przy biurze najpierw administracja); stanowiska oznaczone (opcjonalne) dodaj tylko, gdy pasują],
   "punkty": {{"d1": [3 albo 4 numery punktów tego stanowiska (5 tylko, gdy stanowisko bardzo pasuje do oferty), które najlepiej
      odpowiadają WYMAGANIOM i OBOWIĄZKOM z ogłoszenia; najważniejszy pierwszy; punkty z liczbami i efektami
-     (np. ponad 100 planów, 80 historii chorób, 10 transmisji, 4 awanse) mają pierwszeństwo, gdy pasują do oferty]}},
+     (np. ponad 100 planów, 80 historii chorób, 10 transmisji, 4 awanse) mają pierwszeństwo, gdy pasują do oferty;
+     przy stanowiskach w gastronomii, na kasie i w żłobku — najwyżej 2 punkty; NIE wybieraj zawsze pierwszych z listy]}},
   "profil": [3 albo 4 numery zdań p…, w kolejności czytania],
   "umiejetnosci": [do 6 numerów u…],
   "cechy": [4–6 numerów c… — cechy z listy CECHY, których ogłoszenie wymaga wprost albo pośrednio; wybierz TAKIE SAME albo NAJBLIŻSZE
@@ -286,6 +386,8 @@ Zwróć JSON:
     sel = clean_selection(f, raw) if raw else default_selection(f)
     if not (isinstance(raw, dict) and [x for x in raw.get("cechy") or [] if x in {c["id"] for c in f.get("cechy", [])}]):
         sel["cechy"] = match_traits(f, text) or sel.get("cechy", [])       # cechy z ogłoszenia, nawet bez modelu
+    with contextlib.suppress(Exception):                                   # 2.36: dopasowanie do słów z ogłoszenia
+        sel = clean_selection(f, tailor(f, sel, raw, app))
     return sel
 
 
