@@ -74,6 +74,10 @@ def prepare(ctx, aid):
         R.set_status(c, ctx, aid, "przygotowywanie", blad="")
     notes, warn, found_mails, title, page_links = [], [], [], "", []
     try:
+        if a["url"] and O.junk_text(a):                                  # 2.36.2: strona blokady zapisana wcześniej — pobieram jeszcze raz
+            a["tresc"] = ""
+            if re.fullmatch(r"[a-z0-9-]+", a["stanowisko"] or ""):
+                a["stanowisko"] = ""
         if a["url"] and not a["tresc"].strip():
             try:
                 a["tresc"], title, found_mails, page_links = O.fetch(a["url"], deny=Z.blocked if a["zrodlo"] == "auto" else None)
@@ -403,6 +407,40 @@ def _due(c, key, every_s):
     return True
 
 
+RETRY_MARK = "%Wyślij do Sebastiana%"
+
+
+def retry_blocked(ctx, now=None):
+    """2.36.2: oferty, których portal chwilowo nie pokazał — po przerwie próbuję jeszcze raz (najwyżej 4 razy, po 2 naraz)."""
+    now = now or time.time()
+    with R.db(ctx) as c:
+        if R.meta_get(c, "migracja_2362") == "":
+            for a in [dict(r) for r in c.execute("SELECT id,url,firma,tresc,stanowisko,status FROM aplikacje WHERE url LIKE '%pracuj.pl/%' AND COALESCE(firma,'')='' "
+                                                 "AND status NOT IN ('wysylanie','duplikat'," + ",".join(repr(x) for x in R.SENT) + ")")]:
+                if not (O.junk_text(a) or (a["status"] == "do_uzupelnienia" and not a["tresc"].strip())):
+                    continue
+                stan = "" if re.fullmatch(r"[a-z0-9-]+", a["stanowisko"] or "") else a["stanowisko"]
+                new = a["status"] if a["status"] == "odrzucona" else "nowa"
+                c.execute("UPDATE aplikacje SET tresc='', stanowisko=?, status=?, uwagi='[]' WHERE id=?", (stan, new, a["id"]))
+                R.note(c, ctx, a["id"], "pracuj.pl pokazał wcześniej stronę blokady zamiast ogłoszenia — pobiorę je jeszcze raz (2.36.2)")
+            R.meta_set(c, "migracja_2362", R.stamp(ctx))
+            c.commit()
+        if now - float(R.meta_get(c, "ponow_blokady", "0") or 0) < 15 * 60:
+            return 0
+        R.meta_set(c, "ponow_blokady", str(now))
+        done = 0
+        for a in [dict(r) for r in c.execute("SELECT id,url FROM aplikacje WHERE status='do_uzupelnienia' AND COALESCE(tresc,'')='' AND url<>'' "
+                                             "AND uwagi LIKE ? ORDER BY id", (RETRY_MARK,))]:
+            n = int(R.meta_get(c, f"ponow_blokady_{a['id']}", "0") or 0)
+            if n >= 4 or O.cooling(a["url"]) or done >= 2:
+                continue
+            R.meta_set(c, f"ponow_blokady_{a['id']}", str(n + 1))
+            c.execute("UPDATE aplikacje SET status='nowa', uwagi='[]' WHERE id=? AND status='do_uzupelnienia'", (a["id"],))
+            done += 1
+        c.commit()
+        return done
+
+
 def work_once(ctx):
     """Jeden obrót pracy w tle: źródła, przygotowanie jednej aplikacji, wysyłka, skrzynka, przypomnienia, raport."""
     st = ctx.settings()
@@ -427,6 +465,8 @@ def work_once(ctx):
         busy = Wd.work(ctx)                                           # import wiedzy ma pierwszeństwo — Aga czeka na wynik
     row = None
     if not busy:
+        with contextlib.suppress(Exception):
+            retry_blocked(ctx)
         with contextlib.suppress(Exception):
             estimate_pay(ctx)                                         # 2.19.2: najpierw oferty, na których Aga zarobi więcej
         row = next_to_prepare(ctx, manual_only=prepared_today >= int(target * 1.3))
@@ -660,9 +700,13 @@ def estimate_pay(ctx, budget=90.0, limit=40):
         if time.time() - start > budget:
             break
         text = a.get("tresc") or ""
-        if len(text) < 300 and a.get("url") and PAY_FETCH:
+        if len(text) < 300 and a.get("url") and PAY_FETCH and not O.cooling(a["url"]):
             with contextlib.suppress(Exception):
                 text = O.fetch(a["url"], deny=Z.blocked if a["zrodlo"] == "auto" else None)[0]
+                if not (a.get("tresc") or "").strip():                  # 2.36.2: zapisuję, żeby przygotowanie nie otwierało strony drugi raz
+                    with R.db(ctx) as c:
+                        c.execute("UPDATE aplikacje SET tresc=? WHERE id=? AND COALESCE(tresc,'')=''", (text[:20000], a["id"]))
+                        c.commit()
         pay = O.salary(text)
         est = O.pay_info(pay, text) or {}
         est = {"netto_do": est.get("netto_do"), "umowa": est.get("umowa", O.contract(text)), "kwota": pay}
@@ -1784,7 +1828,9 @@ def make_app(ctx, hosts=None):
             g.db.execute("INSERT OR IGNORE INTO widziane(url,kiedy,zrodlo_id) VALUES(?,?,0)", (R.norm_url(url), now))
             added += 1
         g.db.commit()
-        flash(f"Dodane: {added}." + (f" Pominięte jako powtórki: {dup}." if dup else "") + (" Przygotuję je po kolei." if added else ""))
+        slow = sum("pracuj.pl" in O.host(u) for u in dict.fromkeys(R.clean_url(l) for l in links))
+        flash(f"Dodane: {added}." + (f" Pominięte jako powtórki: {dup}." if dup else "") + (" Przygotuję je po kolei." if added else "")
+              + (" Ogłoszenia z pracuj.pl otwieram co pół minuty, żeby portal nie zablokował Maca." if slow and added else ""))
         return redirect(url_for("home"))
 
     @app.route("/odpowiedzi")

@@ -2817,6 +2817,65 @@ class Fixes236(RekrutacjaBase):
         found = [cu(x) for x in _re.findall(r"https?://[^\s<>\"']+", f"{good}>\n<https://www.pracuj.pl/praca/inna,oferta,77>")]
         self.assertEqual(found, [good, "https://www.pracuj.pl/praca/inna,oferta,77"])
 
+    def test_rate_limit_block_is_recognised_paced_and_retried(self):
+        from unittest.mock import patch, MagicMock
+        O = self.O
+        O._COOL.clear(); O._LAST.clear()
+        cf = "<html><head><title>Access denied | www.pracuj.pl used Cloudflare to restrict access</title></head><body>You are being rate limited. Error 1015</body></html>"
+        def resp(code, body, server="cloudflare"):
+            r = MagicMock(); r.__enter__.return_value = r
+            r.is_redirect, r.status_code, r.encoding, r.headers = False, code, "utf-8", {"Server": server}
+            r.raw.read.return_value = body.encode()
+            return r
+        url = "https://www.pracuj.pl/praca/asystentka,oferta,1"
+        with patch("requests.get", return_value=resp(429, cf)), patch.object(O, "safe_url", lambda u: True):
+            with self.assertRaises(RuntimeError) as e:
+                O.fetch(url)
+        self.assertIn("Wyślij do Sebastiana", str(e.exception))
+        self.assertGreater(O.cooling(url), 40 * 60)
+        with patch("requests.get") as g, patch.object(O, "safe_url", lambda u: True):   # w czasie przerwy nie pukam do portalu
+            with self.assertRaises(RuntimeError):
+                O.fetch("https://www.pracuj.pl/praca/inna,oferta,2")
+            g.assert_not_called()
+        O._COOL.clear()
+        shell = "<html><head><title>Praca asystentka, oferta, 1</title></head><body>" + "Oferty pracy Kraków " * 100 + "</body></html>"
+        with patch("requests.get", return_value=resp(200, shell, "nginx")), patch.object(O, "safe_url", lambda u: True):
+            with self.assertRaises(RuntimeError) as e:
+                O.fetch(url)
+        self.assertIn("pustą stronę", str(e.exception))
+        self.assertEqual(O.cooling(url), 0)
+        self.assertEqual(O.block_page(cf, "https://example.com/x"), "blokada")
+        self.assertEqual(O.block_page("<html>Ogłoszenie Pracodawca XYZ</html>", "https://example.com/x"), "")
+        with patch.object(O, "PACE", True), patch("time.sleep") as sl:      # pracuj.pl — odstęp 30 s między stronami
+            O._LAST.clear()
+            O.pace(url); O.pace("https://www.pracuj.pl/praca/b,oferta,3")
+            self.assertTrue(sl.called and 25 < sl.call_args[0][0] <= 30)
+            sl.reset_mock(); O.pace("https://example.com/a")
+            sl.assert_not_called()
+        O._LAST.clear()
+        self.assertTrue(O.junk_text({"url": url, "firma": "", "tresc": "Praca asystentka oferta " * 40}))
+        self.assertFalse(O.junk_text({"url": url, "firma": "", "tresc": "Stanowisko: Asystentka\nPracodawca: X"}))
+        self.assertFalse(O.junk_text({"url": "https://firma.pl/praca", "firma": "", "tresc": "Treść wklejona przez Agę " * 40}))
+        # stare śmieci z pracuj.pl → do pobrania jeszcze raz; blokada → ponowienie po przerwie
+        with self.R.db(self.ctx) as c:
+            self.R.meta_set(c, "onboarding", "gotowe"); c.commit()
+        old = self.add(url=url, firma="", stanowisko="specjalista-ds-administracyjnych", tresc="Praca specjalista oferta " * 40, status="formularz")
+        skipped = self.add(url="https://www.pracuj.pl/praca/c,oferta,4", firma="", tresc="Praca c oferta " * 40, status="odrzucona")
+        good = self.add(url="https://www.pracuj.pl/praca/d,oferta,5", firma="Firma D", tresc=OFFER, status="do_zatwierdzenia")
+        self.P.retry_blocked(self.ctx, now=1000.0)
+        with self.R.db(self.ctx) as c:
+            rows = {r["id"]: dict(r) for r in c.execute("SELECT id,status,tresc,stanowisko FROM aplikacje")}
+        self.assertEqual((rows[old]["status"], rows[old]["tresc"], rows[old]["stanowisko"]), ("nowa", "", ""))
+        self.assertEqual((rows[skipped]["status"], rows[skipped]["tresc"]), ("odrzucona", ""))
+        self.assertEqual(rows[good]["tresc"], OFFER)
+        blocked = self.add(url="https://www.pracuj.pl/praca/e,oferta,6", firma="", tresc="", status="do_uzupelnienia",
+                           uwagi=json.dumps([O.blocked_msg("pracuj.pl")], ensure_ascii=False))
+        self.assertEqual(self.P.retry_blocked(self.ctx, now=1000.0 + 60), 0)          # za wcześnie
+        self.assertEqual(self.P.retry_blocked(self.ctx, now=1000.0 + 16 * 60), 1)
+        with self.R.db(self.ctx) as c:
+            self.assertEqual(c.execute("SELECT status FROM aplikacje WHERE id=?", (blocked,)).fetchone()[0], "nowa")
+
+
     def test_save_button_also_at_top(self):
         page = (Path(self.P.__file__).parent / "szablony" / "edytuj_cv.html").read_text(encoding="utf-8")
         self.assertEqual(page.count('name="co" value="zapisz"'), 2)

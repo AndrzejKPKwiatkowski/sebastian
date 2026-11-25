@@ -1,5 +1,5 @@
 """Rekrutacja — oferta: pobranie strony ogłoszenia, wyciągnięcie danych, ocena dopasowania."""
-import contextlib, html, html.parser, ipaddress, json, re, socket
+import contextlib, html, html.parser, ipaddress, json, os, re, socket, threading, time
 from urllib.parse import urlparse
 
 from . import rdzen as R
@@ -73,6 +73,69 @@ BROWSER = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleW
            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.6"}
 
 
+# 2.36.2: portale (pracuj.pl przez Cloudflare) blokują adres Maca, gdy linki otwierane są jeden za drugim.
+# Otwieram je w odstępach jak człowiek, a po blokadzie robię przerwę — nie obchodzę blokad.
+GAP = {"pracuj.pl": 30}
+DEFAULT_GAP = 3
+COOLDOWN = 45 * 60
+_LAST, _COOL, _LOCK = {}, {}, threading.Lock()
+PACE = not os.environ.get("SEBASTIAN_TESTY")
+BLOCK_MARKS = ("you are being rate limited", "used cloudflare to restrict access", "attention required! | cloudflare", "just a moment...",
+               "cf-chl-", "enable javascript and cookies to continue", "checking your browser before accessing")
+
+
+def host(url):
+    h = (urlparse(url).hostname or "").lower()
+    return h[4:] if h.startswith("www.") else h
+
+
+def _gap(h):
+    return next((v for k, v in GAP.items() if h == k or h.endswith("." + k)), DEFAULT_GAP)
+
+
+def blocked_msg(h):
+    return (f"{h} chwilowo nie pokazuje Sebastianowi ogłoszeń (za dużo otwarć z tego komputera). Spróbuję później sam — "
+            f"albo otwórz ogłoszenie u siebie i kliknij zakładkę „Wyślij do Sebastiana”, albo wklej treść.")
+
+
+def cooling(url):
+    """Sekundy do końca przerwy po blokadzie (0 = można otwierać)."""
+    return max(0, int(_COOL.get(host(url), 0) - time.time()))
+
+
+def pace(url):
+    h = host(url)
+    if cooling(url):
+        raise RuntimeError(blocked_msg(h))
+    if not PACE:
+        return
+    with _LOCK:
+        wait = _LAST.get(h, 0) + _gap(h) - time.time()
+        if wait > 0:
+            time.sleep(min(wait, _gap(h)))
+        _LAST[h] = time.time()
+
+
+def block_page(page, url, st=None):
+    """Strona blokady albo pusta „skorupa” portalu zamiast ogłoszenia."""
+    low = page[:30000].lower()
+    if any(k in low for k in BLOCK_MARKS):
+        return "blokada"
+    if host(url).endswith("pracuj.pl") and ",oferta," in url and "jobposting" not in low and not (st or {}).get("firma"):
+        return "pusta"
+    return ""
+
+
+def junk_text(a):
+    """Treść zapisana wcześniej ze strony blokady (pracuj.pl bez danych ogłoszenia) — do pobrania jeszcze raz."""
+    t, u = str(a.get("tresc") or ""), str(a.get("url") or "")
+    if not t.strip():
+        return False
+    if any(k in t[:3000].lower() for k in BLOCK_MARKS):
+        return True
+    return host(u).endswith("pracuj.pl") and ",oferta," in u and not (a.get("firma") or "").strip() and not t.startswith("Stanowisko:") and len(t) < 6000
+
+
 def _strip(t):
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", str(t or "")))).strip()
 
@@ -132,6 +195,7 @@ def fetch(url, deny=None):
         raise RuntimeError("Ten adres nie wygląda na publiczną stronę z ogłoszeniem.")
     if deny and deny(url):
         raise RuntimeError("Ten portal nie zgadza się na automaty.")
+    pace(url)
     try:
         with requests.get(url, timeout=25, stream=True, allow_redirects=False, headers=BROWSER) as r:   # 2.36: jak zwykła przeglądarka
             hops = 0
@@ -141,6 +205,9 @@ def fetch(url, deny=None):
                     raise RuntimeError("Strona przekierowuje pod adres, którego nie otwieram.")
                 r = requests.get(nxt, timeout=25, stream=True, allow_redirects=False, headers=r.request.headers)
                 hops += 1
+            if r.status_code == 429 or (r.status_code == 403 and "cloudflare" in str(r.headers.get("Server", "")).lower()):
+                _COOL[host(url)] = time.time() + COOLDOWN
+                raise RuntimeError(blocked_msg(host(url)))
             if r.status_code >= 400:
                 hint = {403: " (portal blokuje otwieranie spoza przeglądarki)", 404: " (ogłoszenie zniknęło albo link jest niepełny)",
                         410: " (ogłoszenie wygasło)", 429: " (za dużo zapytań — spróbuję później)"}.get(r.status_code, "")
@@ -154,6 +221,13 @@ def fetch(url, deny=None):
     page = raw.decode(enc, "replace")
     text, title = to_text(page)
     st = structured(page)                                                # 2.36: dane dla wyszukiwarek — firma, stanowisko, opis
+    kind = block_page(page, url, st)
+    if kind == "blokada":
+        _COOL[host(url)] = time.time() + COOLDOWN
+        raise RuntimeError(blocked_msg(host(url)))
+    if kind == "pusta":
+        raise RuntimeError(f"{host(url)} pokazał Sebastianowi pustą stronę zamiast ogłoszenia. Otwórz je u siebie i kliknij „Wyślij do Sebastiana” "
+                           f"albo wklej treść — spróbuję też jeszcze raz później.")
     head = structured_text(st)
     if head and (st["firma"] or st["opis"]):
         text = head + ("\n\n" + text if len(text) >= 200 and st["opis"][:80] not in text else "")

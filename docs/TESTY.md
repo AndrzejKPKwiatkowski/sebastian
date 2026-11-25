@@ -488,3 +488,7 @@ staż z dat; ponowne wgranie danych 2.18 nie nadpisuje poprawek Agi.
 # Weryfikacja 2.36.1
 
 `Fixes236.test_links_pasted_with_brackets_are_cleaned_and_repaired`: `clean_url` usuwa „>”, „<…>”, `&gt;`, cudzysłów, kropkę i nawias bez pary; adres z nawiasem w parze zostaje; naprawa bazy czyści adres i śmieciową treść (bez ruszania wysłanych).
+
+# Weryfikacja 2.36.2
+
+`Fixes236.test_rate_limit_block_is_recognised_paced_and_retried`: 429 Cloudflare → komunikat i 45 min przerwy bez zapytań; pusta strona pracuj.pl bez JobPosting → błąd zamiast śmieciowej treści; odstęp 30 s tylko dla pracuj.pl; `junk_text`; jednorazowe czyszczenie starych śmieci (bez ruszania dobrych i pominiętych); ponowienie zablokowanych po 15 min.

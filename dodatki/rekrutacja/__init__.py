@@ -373,6 +373,7 @@ def cmd_sprawdz_linki(ctx, args):
     from urllib.parse import urlparse
     from . import oferty as O
     n = int(args[0]) if args and args[0].isdigit() else 15
+    fetch = "--pobierz" in args                                       # 2.36.2: domyślnie bez otwierania stron — portale blokują serie
     with R.db(ctx) as c:
         rows = c.execute("SELECT id, url, firma, stanowisko, status, length(tresc) AS dl, blad FROM aplikacje "
                          "WHERE url<>'' AND zrodlo IN ('oferta','spontaniczna') ORDER BY id DESC LIMIT ?", (n,)).fetchall()
@@ -381,6 +382,8 @@ def cmd_sprawdz_linki(ctx, args):
         dom = urlparse(r["url"]).netloc.replace("www.", "")
         print(f"\n#{r['id']} {dom} · status: {R.STATUS.get(r['status'], r['status'])} · firma: {r['firma'] or '— NIEZNANA'} · treść: {r['dl']} zn.")
         print(f"   {r['url'][:110]}")
+        if not fetch:
+            continue
         try:
             text, title, mails, _ = O.fetch(r["url"])
             firm = next((l[12:] for l in text.splitlines()[:5] if l.startswith("Pracodawca: ")), "")
@@ -388,6 +391,8 @@ def cmd_sprawdz_linki(ctx, args):
         except Exception as e:
             bad[dom] += 1
             print(f"   teraz: ✗ {e}")
+    if not fetch:
+        print("\n(Bez otwierania stron. Z „--pobierz” otwieram je po kolei w odstępach — pracuj.pl co 30 s.)")
     if bad:
         print("\nPortale, które się nie otwierają: " + ", ".join(f"{d} ({k})" for d, k in bad.most_common()))
         print("Dla nich wklejaj treść ogłoszenia (pole „Treść” przy dodawaniu albo w aplikacji „do uzupełnienia”).")
